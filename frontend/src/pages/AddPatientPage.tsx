@@ -4,6 +4,7 @@ import type { Notice, Patient, PatientForm } from "../types";
 import { apiFetch, reportError } from "../lib/api";
 import { printViaIframe } from "../lib/printViaIframe";
 import { calculateAgeFromDob } from "../lib/format";
+import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
 import { Modal } from "../components/ui";
 
 type Props = {
@@ -32,13 +33,6 @@ type RecentReg = {
   department?: string;
 };
 
-type DoctorOption = {
-  doctor_name: string;
-  department: string;
-  consultation_fee: number;
-  review_fee?: number;
-};
-
 // Digit-count limiting (e.g. slice(0, 2)) still lets "99" through -- the
 // pain scale is clinically defined as 0-10, so clamp the parsed number too.
 const clampPainScore = (v: string): string => {
@@ -46,33 +40,6 @@ const clampPainScore = (v: string): string => {
   if (digits === "") return "";
   return String(Math.min(10, parseInt(digits, 10)));
 };
-
-const DEFAULT_DEPARTMENTS = [
-  "General Medicine",
-  "Cardiology",
-  "Orthopedics",
-  "General Surgery",
-  "Pulmonology",
-  "Obstetrics & Gynaecology",
-  "Pediatrics",
-  "ENT",
-  "Nephrology",
-  "Urology",
-  "Dermatology",
-];
-
-const DEFAULT_DOCTORS: DoctorOption[] = [
-  { doctor_name: "Dr. Arjun Mehta", department: "General Medicine", consultation_fee: 500, review_fee: 300 },
-  { doctor_name: "Dr. Priya Sharma", department: "General Medicine", consultation_fee: 500, review_fee: 300 },
-  { doctor_name: "Dr. Sameer Khan", department: "Cardiology", consultation_fee: 700, review_fee: 400 },
-  { doctor_name: "Dr. Karan Bhatia", department: "Orthopedics", consultation_fee: 600, review_fee: 350 },
-  { doctor_name: "Dr. Neha Gupta", department: "General Surgery", consultation_fee: 650, review_fee: 400 },
-  { doctor_name: "Dr. Vikram Singh", department: "ENT", consultation_fee: 450, review_fee: 250 },
-  { doctor_name: "Dr. Ananya Rao", department: "Nephrology", consultation_fee: 600, review_fee: 350 },
-  { doctor_name: "Dr. Pooja Iyer", department: "Urology", consultation_fee: 650, review_fee: 400 },
-  { doctor_name: "Dr. Rohit Verma", department: "Pulmonology", consultation_fee: 550, review_fee: 300 },
-  { doctor_name: "Dr. Priya Nair", department: "Obstetrics & Gynaecology", consultation_fee: 600, review_fee: 350 },
-];
 
 export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Props) {
   const [patientId, setPatientId] = useState<string | null>(null);
@@ -217,8 +184,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const [visitType, setVisitType] = useState<"OP" | "IP" | "Emergency">("OP");
 
   // OP Appointment & Doctor Consultation fields
-  const [departments, setDepartments] = useState<string[]>(DEFAULT_DEPARTMENTS);
-  const [doctorList, setDoctorList] = useState<DoctorOption[]>(DEFAULT_DOCTORS);
+  // Departments and doctors come only from the Doctor Scheduling module.
+  const { departments, doctors: doctorList, loading: directoryLoading } = useDoctorDirectory();
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("");
   const [consultationFee, setConsultationFee] = useState<string | number>(0);
@@ -258,31 +225,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     }
   });
 
-  // Load departments and doctor schedules from backend
   useEffect(() => {
-    apiFetch<{ departments?: { id: number; department_name: string }[] }>("/api/registration/departments")
-      .then((data) => {
-        if (data.departments && data.departments.length > 0) {
-          const names = data.departments.map((d) => d.department_name).filter(Boolean);
-          if (names.length > 0) setDepartments(names);
-        }
-      })
-      .catch(() => {});
-
-    apiFetch<{ schedules?: { id: number; doctor_name: string; department: string; consultation_fee?: number; review_fee?: number }[] }>("/api/op/doctor-schedules")
-      .then((data) => {
-        if (data.schedules && data.schedules.length > 0) {
-          const mapped: DoctorOption[] = data.schedules.map((s) => ({
-            doctor_name: s.doctor_name,
-            department: s.department || "General Medicine",
-            consultation_fee: s.consultation_fee || 500,
-            review_fee: s.review_fee || 300,
-          }));
-          setDoctorList(mapped);
-        }
-      })
-      .catch(() => {});
-
     fetchNextUhid();
     void loadInsuranceProviders();
   }, []);
@@ -327,12 +270,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   };
 
   // Filter available doctors strictly by selected department
-  const filteredDoctors = useMemo(() => {
-    if (!selectedDepartment) return [];
-    return doctorList.filter(
-      (d) => d.department && d.department.trim().toLowerCase() === selectedDepartment.trim().toLowerCase()
-    );
-  }, [doctorList, selectedDepartment]);
+  const filteredDoctors = useMemo(() => doctorsInDepartment(doctorList, selectedDepartment), [doctorList, selectedDepartment]);
 
   // When department changes, reset doctor selection so user explicitly chooses
   const handleDepartmentChange = (dept: string) => {
@@ -350,7 +288,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     }
     const doc = doctorList.find((d) => d.doctor_name === docName);
     if (doc) {
-      setConsultationFee(appointmentType === "Review" ? doc.review_fee || 300 : doc.consultation_fee || 500);
+      setConsultationFee(appointmentType === "Review" ? doc.review_fee : doc.consultation_fee);
     }
   };
 
@@ -359,7 +297,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     setAppointmentType(type);
     const doc = doctorList.find((d) => d.doctor_name === selectedDoctor);
     if (doc) {
-      setConsultationFee(type === "Review" ? doc.review_fee || 300 : doc.consultation_fee || 500);
+      setConsultationFee(type === "Review" ? doc.review_fee : doc.consultation_fee);
     }
   };
 
@@ -2174,7 +2112,9 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                       background: "#ffffff",
                     }}
                   >
-                    <option value="">Select department</option>
+                    <option value="">
+                      {directoryLoading ? "Loading departments..." : departments.length === 0 ? "No departments -- add them in Doctor Scheduling" : "Select department"}
+                    </option>
                     {departments.map((dept) => (
                       <option key={dept} value={dept}>
                         {dept}

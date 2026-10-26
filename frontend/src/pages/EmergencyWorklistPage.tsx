@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Textarea } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
@@ -23,7 +23,18 @@ type Encounter = {
   disposition?: string | null;
 };
 
+const TRIAGE_LEVELS = [
+  { value: "Red (Critical)", label: "Critical" },
+  { value: "Yellow (Urgent)", label: "Urgent" },
+  { value: "Green (Non-urgent)", label: "Non-urgent" },
+];
+
+// Filter keys for the KPI cards: a triage level, or every patient past their triage wait limit.
+const OVERDUE_FILTER = "__overdue__";
+
+// Patients still awaiting triage sort first so they get classified immediately.
 const TRIAGE_RANK: Record<string, number> = {
+  "": -1,
   "Red (Critical)": 0,
   "Yellow (Urgent)": 1,
   "Green (Non-urgent)": 2,
@@ -65,6 +76,10 @@ function isWaitOverdue(triage: string | undefined, mins: number | null) {
   return mins > threshold;
 }
 
+function triageLabel(triage?: string) {
+  return TRIAGE_LEVELS.find((t) => t.value === triage)?.label || "Triage pending";
+}
+
 export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) {
   const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,12 +88,18 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [triageFilter, setTriageFilter] = useState<string | null>(null);
+  const [triageSaving, setTriageSaving] = useState(false);
+  // Re-renders every minute so wait times and overdue flags stay current between reloads.
+  const [, setTick] = useState(0);
 
   const load = async () => {
     setLoading(true);
     try {
       const res = await apiFetch<{ encounters: Encounter[] }>("/api/encounters?encounter_type=EMERGENCY&active_only=true");
-      setEncounters(res.encounters || []);
+      const next = res.encounters || [];
+      setEncounters(next);
+      // Keep the open patient in sync with fresh data; drop it once it leaves the active list.
+      setSelected((prev) => (prev ? next.find((e) => e.id === prev.id) || null : prev));
     } catch (err: any) {
       reportError(setNotice, err, "Could not load the Emergency worklist.");
     } finally {
@@ -89,33 +110,48 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
   useEffect(() => { void load(); }, []);
   useEffect(() => {
     const t = window.setInterval(() => void load(), 30000);
-    return () => window.clearInterval(t);
+    const clock = window.setInterval(() => setTick((n) => n + 1), 60000);
+    return () => { window.clearInterval(t); window.clearInterval(clock); };
   }, []);
 
-  const sorted = useMemo(
-    () => [...encounters].sort((a, b) => (TRIAGE_RANK[a.triage_priority || ""] ?? 9) - (TRIAGE_RANK[b.triage_priority || ""] ?? 9)),
-    [encounters]
-  );
+  // Highest priority first; within the same priority, whoever has waited longest first.
+  const sorted = [...encounters].sort((a, b) => {
+    const rank = (TRIAGE_RANK[a.triage_priority || ""] ?? 9) - (TRIAGE_RANK[b.triage_priority || ""] ?? 9);
+    return rank || new Date(a.arrival_at).getTime() - new Date(b.arrival_at).getTime();
+  });
 
-  const filtered = useMemo(
-    () => (triageFilter ? sorted.filter((e) => (e.triage_priority || "Unclassified") === triageFilter) : sorted),
-    [sorted, triageFilter]
-  );
+  const filtered = !triageFilter
+    ? sorted
+    : triageFilter === OVERDUE_FILTER
+      ? sorted.filter((e) => isWaitOverdue(e.triage_priority, minutesInEr(e.arrival_at)))
+      : sorted.filter((e) => e.triage_priority === triageFilter);
 
-  const counts = useMemo(() => {
-    const c = { red: 0, yellow: 0, green: 0, unclassified: 0, overdue: 0 };
-    let longest = 0;
-    for (const e of encounters) {
-      if (e.triage_priority === "Red (Critical)") c.red += 1;
-      else if (e.triage_priority === "Yellow (Urgent)") c.yellow += 1;
-      else if (e.triage_priority === "Green (Non-urgent)") c.green += 1;
-      else c.unclassified += 1;
-      const mins = minutesInEr(e.arrival_at);
-      if (mins != null && mins > longest) longest = mins;
-      if (isWaitOverdue(e.triage_priority, mins)) c.overdue += 1;
+  const counts = { red: 0, yellow: 0, green: 0, pending: 0, overdue: 0, longest: 0, total: encounters.length };
+  for (const e of encounters) {
+    if (e.triage_priority === "Red (Critical)") counts.red += 1;
+    else if (e.triage_priority === "Yellow (Urgent)") counts.yellow += 1;
+    else if (e.triage_priority === "Green (Non-urgent)") counts.green += 1;
+    else counts.pending += 1;
+    const mins = minutesInEr(e.arrival_at);
+    if (mins != null && mins > counts.longest) counts.longest = mins;
+    if (isWaitOverdue(e.triage_priority, mins)) counts.overdue += 1;
+  }
+
+  const toggleFilter = (key: string) => setTriageFilter((prev) => (prev === key ? null : key));
+
+  const updateTriage = async (triage: string) => {
+    if (!selected || selected.triage_priority === triage) return;
+    setTriageSaving(true);
+    try {
+      await apiFetch(`/api/encounters/${selected.id}/triage`, { method: "POST", body: JSON.stringify({ triage_priority: triage }) });
+      setNotice({ type: "success", message: `Triage set to ${triageLabel(triage)}.` });
+      await load();
+    } catch (err: any) {
+      reportError(setNotice, err, "Could not update triage.");
+    } finally {
+      setTriageSaving(false);
     }
-    return { ...c, total: encounters.length, longest };
-  }, [encounters]);
+  };
 
   const confirmDisposition = async () => {
     if (!selected || !dispositionAction) return;
@@ -147,21 +183,25 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
       <div className="diag-kpi-row">
         <div className={`diag-kpi-tile ${triageFilter === null ? "active" : ""}`} onClick={() => setTriageFilter(null)}>
           <span>Total active</span><strong>{counts.total}</strong>
+          {counts.pending > 0 && <small className="diag-flag-critical_high">{counts.pending} awaiting triage</small>}
         </div>
-        <div className={`diag-kpi-tile ${triageFilter === "Red (Critical)" ? "active" : ""}`} onClick={() => setTriageFilter(triageFilter === "Red (Critical)" ? null : "Red (Critical)")}>
+        <div className={`diag-kpi-tile ${triageFilter === "Red (Critical)" ? "active" : ""}`} onClick={() => toggleFilter("Red (Critical)")}>
           <span>Critical</span><strong style={{ color: "hsl(var(--destructive))" }}>{counts.red}</strong>
         </div>
-        <div className={`diag-kpi-tile ${triageFilter === "Yellow (Urgent)" ? "active" : ""}`} onClick={() => setTriageFilter(triageFilter === "Yellow (Urgent)" ? null : "Yellow (Urgent)")}>
+        <div className={`diag-kpi-tile ${triageFilter === "Yellow (Urgent)" ? "active" : ""}`} onClick={() => toggleFilter("Yellow (Urgent)")}>
           <span>Urgent</span><strong style={{ color: "hsl(30 80% 40%)" }}>{counts.yellow}</strong>
         </div>
-        <div className={`diag-kpi-tile ${triageFilter === "Green (Non-urgent)" ? "active" : ""}`} onClick={() => setTriageFilter(triageFilter === "Green (Non-urgent)" ? null : "Green (Non-urgent)")}>
-          <span>Non-urgent</span><strong>{counts.green}</strong>
+        <div className={`diag-kpi-tile ${triageFilter === "Green (Non-urgent)" ? "active" : ""}`} onClick={() => toggleFilter("Green (Non-urgent)")}>
+          <span>Non-urgent</span><strong style={{ color: "hsl(164 55% 30%)" }}>{counts.green}</strong>
         </div>
-        <div className={`diag-kpi-tile ${triageFilter === "Unclassified" ? "active" : ""}`} onClick={() => setTriageFilter(triageFilter === "Unclassified" ? null : "Unclassified")}>
-          <span>Unclassified</span><strong>{counts.unclassified}</strong>
-        </div>
-        <div className="diag-kpi-tile" style={{ cursor: "default" }}>
-          <span>Longest wait</span><strong className={counts.overdue > 0 ? "diag-flag-critical_high" : undefined}>{counts.total ? formatDuration(counts.longest) : "-"}</strong>
+        <div
+          className={`diag-kpi-tile ${triageFilter === OVERDUE_FILTER ? "active" : ""}`}
+          onClick={() => toggleFilter(OVERDUE_FILTER)}
+          title="Show patients waiting longer than their triage limit (Critical 30 min, Urgent 2 h, Non-urgent 4 h)"
+        >
+          <span>Longest wait</span>
+          <strong className={counts.overdue > 0 ? "diag-flag-critical_high" : undefined}>{counts.total ? formatDuration(counts.longest) : "-"}</strong>
+          <small className={counts.overdue > 0 ? "diag-flag-critical_high" : "muted"}>{counts.overdue} overdue</small>
         </div>
       </div>
 
@@ -169,7 +209,11 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
         <div className="diag-card">
           <div className="diag-card-header"><h3>Active Emergency patients ({filtered.length})</h3></div>
           {loading && <p className="muted">Loading...</p>}
-          {!loading && filtered.length === 0 && <p className="muted">{encounters.length === 0 ? "No active Emergency patients." : "No patients match this filter."}</p>}
+          {!loading && filtered.length === 0 && (
+            <p className="muted">
+              {encounters.length === 0 ? "No active Emergency patients." : triageFilter === OVERDUE_FILTER ? "No patients are past their triage wait limit." : "No patients match this filter."}
+            </p>
+          )}
           {filtered.map((e) => {
             const mins = minutesInEr(e.arrival_at);
             const overdue = isWaitOverdue(e.triage_priority, mins);
@@ -182,7 +226,7 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
               >
                 <div className="diag-worklist-row-top">
                   <span>{[e.patient_first_name, e.patient_last_name].filter(Boolean).join(" ") || e.patient_id}</span>
-                  <span className={`diag-badge ${triageBadgeClass(e.triage_priority)}`}>{e.triage_priority || "Unclassified"}</span>
+                  <span className={`diag-badge ${triageBadgeClass(e.triage_priority)}`}>{triageLabel(e.triage_priority)}</span>
                 </div>
                 <div className="diag-worklist-row-meta">
                   <span>{e.chief_complaint || "No chief complaint recorded"}</span>
@@ -211,7 +255,23 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
                     <span>Doctor: {selected.attending_doctor || "-"}</span>
                   </div>
                 </div>
-                <span className={`diag-badge ${triageBadgeClass(selected.triage_priority)}`}>{selected.triage_priority || "Unclassified"}</span>
+                <span className={`diag-badge ${triageBadgeClass(selected.triage_priority)}`}>{triageLabel(selected.triage_priority)}</span>
+              </div>
+
+              <div className="diag-section-title">Triage priority</div>
+              {!selected.triage_priority && <div className="diag-note-box diag-note-critical">This patient has not been triaged yet. Set a priority now.</div>}
+              <div className="diag-form-actions">
+                {TRIAGE_LEVELS.map((t) => (
+                  <Button
+                    key={t.value}
+                    size="sm"
+                    variant={selected.triage_priority === t.value ? "primary" : "secondary"}
+                    disabled={triageSaving}
+                    onClick={() => void updateTriage(t.value)}
+                  >
+                    {t.label}
+                  </Button>
+                ))}
               </div>
 
               <div className="diag-section-title">Chief complaint</div>

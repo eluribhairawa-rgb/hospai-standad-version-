@@ -6,43 +6,12 @@ import { printViaIframe } from "../lib/printViaIframe";
 import { Button, Input, Label, Modal } from "../components/ui";
 import PatientSearchPicker from "../components/PatientSearchPicker";
 import type { HospitalBed } from "./BedManagementPage";
+import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
   onNavigate?: (pageId: string) => void;
 };
-
-const DEPARTMENTS = [
-  "General Medicine",
-  "Cardiology",
-  "Orthopedics",
-  "General Surgery",
-  "ICU / Critical Care",
-  "Pediatrics",
-  "Obstetrics & Gynaecology",
-  "Nephrology",
-  "Pulmonology",
-  "Neurology",
-  "ENT",
-  "Urology",
-  "Dermatology",
-];
-
-const DOCTORS = [
-  { doctor_name: "Dr. Arjun Mehta", department: "General Medicine" },
-  { doctor_name: "Dr. Priya Sharma", department: "General Medicine" },
-  { doctor_name: "Dr. Sameer Khan", department: "Cardiology" },
-  { doctor_name: "Dr. Karan Bhatia", department: "Orthopedics" },
-  { doctor_name: "Dr. Neha Gupta", department: "General Surgery" },
-  { doctor_name: "Dr. Suresh Reddy", department: "ICU / Critical Care" },
-  { doctor_name: "Dr. Sunita Rao", department: "Pediatrics" },
-  { doctor_name: "Dr. Priya Nair", department: "Obstetrics & Gynaecology" },
-  { doctor_name: "Dr. Ananya Rao", department: "Nephrology" },
-  { doctor_name: "Dr. Rohit Verma", department: "Pulmonology" },
-  { doctor_name: "Dr. Rajesh Kumar", department: "Neurology" },
-  { doctor_name: "Dr. Vikram Singh", department: "ENT" },
-  { doctor_name: "Dr. Pooja Iyer", department: "Urology" },
-];
 
 type SelectedPatient = {
   uhid: string;
@@ -67,8 +36,10 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   const [loadingOrder, setLoadingOrder] = useState(false);
 
   // Clinical Admission Details (the doctor's order, recorded by staff)
-  const [department, setDepartment] = useState("General Medicine");
-  const [consultingDoctor, setConsultingDoctor] = useState("Dr. Priya Sharma");
+  // Departments and doctors come only from the Doctor Scheduling module.
+  const { departments: scheduledDepartments, doctors: scheduledDoctors, loading: directoryLoading } = useDoctorDirectory();
+  const [department, setDepartment] = useState("");
+  const [consultingDoctor, setConsultingDoctor] = useState("");
   const [admissionType, setAdmissionType] = useState("Planned");
   const [triagePriority, setTriagePriority] = useState<"Critical" | "Urgent" | "Stable">("Stable");
   const [reasonForAdmission, setReasonForAdmission] = useState("");
@@ -118,17 +89,35 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     }
   }, []);
 
-  // Filter doctors by department
-  const filteredDoctors = useMemo(() => {
-    const list = DOCTORS.filter((d) => d.department.toLowerCase() === department.toLowerCase());
-    return list.length > 0 ? list : DOCTORS;
-  }, [department]);
+  // The department/doctor from the patient's appointment stay selectable even if
+  // that doctor has since gone on leave or the department was renamed.
+  const departmentOptions = useMemo(() => {
+    const list = [...scheduledDepartments];
+    if (doctorOrder?.department && !list.some((d) => d.toLowerCase() === doctorOrder.department.toLowerCase())) list.push(doctorOrder.department);
+    return list;
+  }, [scheduledDepartments, doctorOrder]);
 
+  const filteredDoctors = useMemo(() => {
+    const list = doctorsInDepartment(scheduledDoctors, department).map((d) => ({ doctor_name: d.doctor_name, department: d.department }));
+    if (
+      doctorOrder?.doctor && doctorOrder.department.toLowerCase() === department.toLowerCase() &&
+      !list.some((d) => d.doctor_name === doctorOrder.doctor)
+    ) {
+      list.push({ doctor_name: doctorOrder.doctor, department: doctorOrder.department });
+    }
+    return list;
+  }, [scheduledDoctors, department, doctorOrder]);
+
+  // Keep the doctor consistent with the department: clear a doctor from another
+  // department, and pick the only doctor automatically when there is just one.
   useEffect(() => {
-    if (filteredDoctors.length > 0 && !filteredDoctors.some((d) => d.doctor_name === consultingDoctor)) {
+    if (directoryLoading) return;
+    if (consultingDoctor && !filteredDoctors.some((d) => d.doctor_name === consultingDoctor)) {
+      setConsultingDoctor(filteredDoctors.length === 1 ? filteredDoctors[0].doctor_name : "");
+    } else if (!consultingDoctor && filteredDoctors.length === 1) {
       setConsultingDoctor(filteredDoctors[0].doctor_name);
     }
-  }, [department, filteredDoctors, consultingDoctor]);
+  }, [directoryLoading, filteredDoctors, consultingDoctor]);
 
   // Filtered available beds
   const displayBeds = useMemo(() => {
@@ -178,8 +167,8 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   const resetWorkingFields = () => {
     setSelectedPatient(null);
     setDoctorOrder(null);
-    setDepartment("General Medicine");
-    setConsultingDoctor("Dr. Priya Sharma");
+    setDepartment("");
+    setConsultingDoctor("");
     setAdmissionType("Planned");
     setTriagePriority("Stable");
     setReasonForAdmission("");
@@ -474,7 +463,10 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             >
-              {DEPARTMENTS.map((dept) => (
+              <option value="">
+                {directoryLoading ? "Loading departments..." : departmentOptions.length === 0 ? "No departments -- add them in Doctor Scheduling" : "Select department"}
+              </option>
+              {departmentOptions.map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}
                 </option>
@@ -487,9 +479,13 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
             <select
               value={consultingDoctor}
               onChange={(e) => setConsultingDoctor(e.target.value)}
+              disabled={!department}
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             >
+              <option value="">
+                {!department ? "Select department first" : filteredDoctors.length === 0 ? `No doctors scheduled in ${department}` : "Select doctor"}
+              </option>
               {filteredDoctors.map((doc) => (
                 <option key={doc.doctor_name} value={doc.doctor_name}>
                   {doc.doctor_name} ({doc.department})

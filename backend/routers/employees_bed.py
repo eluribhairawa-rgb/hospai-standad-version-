@@ -143,6 +143,15 @@ def encounters_list(encounter_type: str | None = None, active_only: bool = False
     return {"encounters": rows_to_dicts(lq.list_encounters(db, encounter_type=encounter_type, active_only=active_only))}
 
 
+@router.post("/encounters/{encounter_id}/triage")
+def encounter_set_triage(encounter_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                          user: dict = Depends(require_permissions("patients.write"))):
+    validate_required_fields(payload, ["triage_priority"])
+    lq.set_encounter_triage(db, encounter_id, payload["triage_priority"], user.get("username"))
+    log_audit_event(db, user, client_ip(request), "triage", "encounters", str(encounter_id), {"triage_priority": payload["triage_priority"]})
+    return {"status": "ok"}
+
+
 @router.post("/encounters/{encounter_id}/disposition")
 def encounter_set_disposition(encounter_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                                user: dict = Depends(require_permissions("patients.write")), hospital_id: int = Depends(current_hospital_id)):

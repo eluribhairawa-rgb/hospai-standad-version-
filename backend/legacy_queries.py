@@ -3887,6 +3887,27 @@ def get_accounts_summary(db):
 # ==================== HospAI module operations ====================
 
 
+EMERGENCY_TRIAGE_LEVELS = ("Red (Critical)", "Yellow (Urgent)", "Green (Non-urgent)")
+
+
+def set_encounter_triage(db, encounter_id, triage_priority, username=None):
+    if triage_priority not in EMERGENCY_TRIAGE_LEVELS:
+        raise ValueError(f"Triage must be one of: {', '.join(EMERGENCY_TRIAGE_LEVELS)}.")
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT encounter_type, disposition FROM encounters WHERE id = ?", (encounter_id,))
+        encounter = cursor.fetchone()
+        if not encounter:
+            raise ValueError("Encounter not found.")
+        if encounter["encounter_type"] != "EMERGENCY":
+            raise ValueError("Triage applies only to Emergency encounters.")
+        if encounter["disposition"]:
+            raise ValueError(f"This encounter is already closed ({encounter['disposition']}).")
+        cursor.execute("UPDATE encounters SET triage_priority = ? WHERE id = ?", (triage_priority, encounter_id))
+        conn.commit()
+        return True
+
+
 def create_encounter(db, data):
     encounter_type = data.get("encounter_type", "OP")
     encounter_no = None
@@ -3898,8 +3919,9 @@ def create_encounter(db, data):
             """
             INSERT INTO encounters (
                 patient_id, encounter_type, insurance_provider, insurance_policy_no,
-                is_accident, referral_source, referral_name, status, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                is_accident, referral_source, referral_name, status, created_by,
+                encounter_no, appointment_id, chief_complaint, triage_priority, attendant_name, attending_doctor
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 data["patient_id"],
@@ -3911,6 +3933,12 @@ def create_encounter(db, data):
                 data.get("referral_name"),
                 data.get("status", "active"),
                 data.get("created_by"),
+                encounter_no,
+                data.get("appointment_id"),
+                data.get("chief_complaint"),
+                data.get("triage_priority") if data.get("triage_priority") in EMERGENCY_TRIAGE_LEVELS else None,
+                data.get("attendant_name"),
+                data.get("attending_doctor"),
             ),
         )
         encounter_id = cursor.lastrowid
