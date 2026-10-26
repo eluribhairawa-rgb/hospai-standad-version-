@@ -1,0 +1,8 @@
+hosp_deploy/volumes
+hosp_deploy/.env
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.env
+frontend/dist
+backend/uploads/*

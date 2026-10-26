@@ -1,0 +1,68 @@
+name: standardversion
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: standardversion-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [standardversion-net]
+
+  backend:
+    build:
+      context: ..
+      dockerfile: hosp_deploy/Dockerfile
+      target: backend
+    image: standardversion/backend:1.0.0
+    container_name: standardversion-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_URL_PASSWORD}@db:5432/${POSTGRES_DB}
+      SESSION_PEPPER: ${SESSION_PEPPER}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      BUCKET_URL: ${BUCKET_URL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      QWEN_OCR_URL: ${QWEN_OCR_URL:-http://host.docker.internal:8700/v1}
+      QWEN_OCR_MODEL: ${QWEN_OCR_MODEL:-qwen3-vl-8b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./volumes/uploads:/app/backend/uploads
+    networks: [standardversion-net]
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: hosp_deploy/Dockerfile
+      target: frontend
+    image: standardversion/frontend:1.0.0
+    container_name: standardversion-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8091}:8080"
+    networks: [standardversion-net]
+
+networks:
+  standardversion-net:
+    name: standardversion-net

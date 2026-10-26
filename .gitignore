@@ -1,0 +1,33 @@
+# secrets and runtime data
+**/.env
+hosp_deploy/volumes/postgres/
+hosp_deploy/volumes/backups/
+hosp_deploy/volumes/uploads/*
+!hosp_deploy/volumes/uploads/.gitkeep
+
+# dependencies and build output
+node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+backend/uploads/*
+venv/
+
+# editor / OS
+.DS_Store
+*.swp
+
+# local-only overrides and junk
+docker-compose.override.yml
+**/.env.*
+!**/.env.example
+*.exe
+*.zip
+*.tar.gz
+*.dump
+*.sql.gz
+*.log
+*.db
+*.sqlite3
+*.bak
+*.orig
