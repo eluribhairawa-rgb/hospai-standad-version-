@@ -44,7 +44,7 @@ type Records = {
   diagnostic_reports: { test: string; type: string; released_at: string; result: string }[];
   pharmacy_issued: string[];
   timeline: Record<string, string>[];
-  billing: { total_charges: number; payments_received: number; outstanding: number; status: string } | null;
+  billing: { categories?: { label: string; amount: number }[]; total_charges: number; payments_received: number; outstanding: number; status: string } | null;
   encounters?: { label: string; start: string | null; status: string }[];
 };
 
@@ -1060,6 +1060,30 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                         </div>
                       </div>
                     )}
+
+                    {/* Bills for this visit */}
+                    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 16px", marginBottom: "16px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>Bills for this Visit</span>
+                        {records?.billing && <span style={{ fontSize: "11.5px", fontWeight: 700, color: records.billing.status === "Settled" ? "#15803d" : "#b45309" }}>{records.billing.status}</span>}
+                      </div>
+                      {records?.billing && records.billing.total_charges > 0 ? (
+                        <>
+                          {(records.billing.categories || []).filter((c) => c.amount).map((c) => (
+                            <div key={c.label} style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", padding: "2px 0" }}>
+                              <span>{c.label}</span><span>₹{Number(c.amount).toLocaleString("en-IN")}</span>
+                            </div>
+                          ))}
+                          <div style={{ display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "12.5px", marginTop: "6px", paddingTop: "6px", borderTop: "1px solid #e2e8f0" }}>
+                            <span><strong>Total:</strong> ₹{records.billing.total_charges.toLocaleString("en-IN")}</span>
+                            <span><strong>Paid:</strong> ₹{records.billing.payments_received.toLocaleString("en-IN")}</span>
+                            <span><strong>Outstanding:</strong> ₹{records.billing.outstanding.toLocaleString("en-IN")}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: "12.5px", color: "#94a3b8" }}>No bills recorded for this visit.</div>
+                      )}
+                    </div>
 
                     {/* Existing Saved Certificates (if any) */}
                     {certificates.length > 0 && (
