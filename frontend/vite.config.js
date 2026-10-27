@@ -15,7 +15,7 @@ export default defineConfig(({ command }) => {
       allowedHosts: true,
       hmr: process.env.HMR_CLIENT_PORT ? { clientPort: parseInt(process.env.HMR_CLIENT_PORT, 10) } : undefined,
       proxy: {
-        "/api": "http://127.0.0.1:8000",
+        "/api": process.env.API_TARGET || "http://127.0.0.1:8000",
       },
     },
     preview: {
@@ -24,7 +24,7 @@ export default defineConfig(({ command }) => {
       cors: true,
       allowedHosts: true,
       proxy: {
-        "/api": "http://127.0.0.1:8000",
+        "/api": process.env.API_TARGET || "http://127.0.0.1:8000",
       },
     },
   };

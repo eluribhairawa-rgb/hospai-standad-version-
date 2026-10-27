@@ -152,7 +152,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         setNextUhid(data.patient_id);
       }
     } catch (err) {
-      console.warn("Could not fetch next UHID:", err);
+      // A 401 means the session ended; App already routes to login, so don't log noise.
+      if ((err as { status?: number })?.status !== 401) console.warn("Could not fetch next UHID:", err);
     }
   };
 

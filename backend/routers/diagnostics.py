@@ -128,18 +128,22 @@ def diag_report_templates_deactivate(template_id: int, request: Request, db: Ses
 @router.post("/diag/orders")
 def diag_orders_create(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                         user: dict = Depends(require_permissions("diag.order"))):
-    validate_required_fields(payload, ["patient_id", "encounter_type", "items"])
+    is_external_sale = str(payload.get("sale_type") or "").upper() == "EXTERNAL"
+    validate_required_fields(payload, ["walkin_name", "walkin_mobile", "items"] if is_external_sale else ["patient_id", "encounter_type", "items"])
     order_id = lq.create_diag_order(db, payload, user.get("username"))
-    log_audit_event(db, user, client_ip(request), "create", "diag_orders", str(order_id), {"patient_id": payload["patient_id"]})
+    log_audit_event(db, user, client_ip(request), "create", "diag_orders", str(order_id),
+                    {"sale_type": "EXTERNAL"} if is_external_sale else {"patient_id": payload["patient_id"]})
     return {"order_id": order_id}
 
 
 @router.get("/diag/orders")
 def diag_orders_list(patient_id: Optional[str] = None, status: Optional[str] = None, department_type: Optional[str] = None,
                       priority: Optional[str] = None, encounter_type: Optional[str] = None, admission_id: Optional[int] = None,
+                      sale_type: Optional[str] = None, q: Optional[str] = None,
                       db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
     return {"orders": lq.list_diag_orders(db, patient_id=patient_id, status=status, department_type=department_type,
-                                           priority=priority, encounter_type=encounter_type, admission_id=admission_id)}
+                                           priority=priority, encounter_type=encounter_type, admission_id=admission_id,
+                                           sale_type=sale_type, search=q)}
 
 
 @router.get("/diag/orders/check-duplicates")
@@ -200,8 +204,11 @@ def diag_running_charges(admission_id: int, db: Session = Depends(get_db), user:
 
 
 @router.get("/diag/invoices")
-def diag_invoices_list(patient_id: Optional[str] = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"invoices": rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module="LAB"))}
+def diag_invoices_list(patient_id: Optional[str] = None, sale_type: Optional[str] = None,
+                       db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
+    # Internal Sale (default) lists UHID-linked invoices only; walk-in invoices belong to External Sale.
+    external = (sale_type or "").upper() == "EXTERNAL"
+    return {"invoices": rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module="LAB", external_sale=external))}
 
 
 @router.get("/diag/invoices/{invoice_id}")

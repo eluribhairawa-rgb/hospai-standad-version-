@@ -79,6 +79,14 @@ function formatPatientName(first?: string, last?: string, fallback?: string): st
   return [first, last].filter(Boolean).join(" ").trim() || fallback || "";
 }
 
+// Next whole hour in local time, formatted for <input type="datetime-local">.
+const defaultSlot = () => {
+  const d = new Date();
+  d.setHours(d.getHours() + 1, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+};
+
 export default function LabDiagnosticsImagingPage({ setNotice, onNavigate }: Props) {
   const [rows, setRows] = useState<ImagingWorklistRow[]>([]);
   const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
@@ -130,7 +138,7 @@ export default function LabDiagnosticsImagingPage({ setNotice, onNavigate }: Pro
       setDetail(d);
       setScheduleForm({
         room: d.exam.room || "",
-        scheduled_at: d.exam.scheduled_at ? d.exam.scheduled_at.slice(0, 16) : "",
+        scheduled_at: d.exam.scheduled_at ? d.exam.scheduled_at.slice(0, 16) : defaultSlot(),
         expected_duration_min: d.exam.expected_duration_min || 30,
         assigned_staff: d.exam.assigned_staff || "",
         modality: d.exam.modality || "",
@@ -154,8 +162,12 @@ export default function LabDiagnosticsImagingPage({ setNotice, onNavigate }: Pro
 
   const doSchedule = async () => {
     if (!detail) return;
-    if (!scheduleForm.room.trim() || !scheduleForm.scheduled_at) {
-      setNotice({ type: "warning", message: "Room and date/time are required to schedule." });
+    if (!scheduleForm.room.trim()) {
+      setNotice({ type: "warning", message: "Enter a room / equipment to schedule." });
+      return;
+    }
+    if (!scheduleForm.scheduled_at) {
+      setNotice({ type: "warning", message: "Pick both a date and a time (the time field is still empty)." });
       return;
     }
     setSaving(true);

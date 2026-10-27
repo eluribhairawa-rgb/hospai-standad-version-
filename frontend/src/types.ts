@@ -1,4 +1,4 @@
-export type UserType = "admin" | "normal";
+export type UserType = "admin" | "normal" | "super_admin";
 export type ModuleId =
   | "dashboard"
   | "patient-registration"
@@ -27,7 +27,8 @@ export type ModuleId =
   | "doctors-history"
   | "lab-diagnostics"
   | "analytics"
-  | "emergency";
+  | "emergency"
+  | "patient-reach-ai";
 
 export interface UserTypeOption {
   value: UserType;
@@ -562,7 +563,7 @@ export interface NavItem {
   permission?: string;
   module?: ModuleId;
   deniedHint?: string;
-  group?: "overview" | "registration" | "operations" | "finance" | "admin" | "op-management" | "billing" | "pharmacy" | "inpatient" | "lab-diagnostics" | "emergency";
+  group?: "overview" | "registration" | "operations" | "finance" | "admin" | "op-management" | "billing" | "pharmacy" | "inpatient" | "lab-diagnostics" | "emergency" | "patient-reach-ai";
   hidden?: boolean;
 }
 

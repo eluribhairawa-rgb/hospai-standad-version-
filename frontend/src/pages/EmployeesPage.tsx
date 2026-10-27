@@ -29,6 +29,7 @@ type EditForm = {
 
 const GROUP_LABEL_MAP: Record<string, string> = {
   overview: "Overview Module",
+  "patient-reach-ai": "Patient Reach AI",
   "op-management": "OP Management Module",
   emergency: "Emergency / Casualty",
   inpatient: "Inpatient (IPD) Module",

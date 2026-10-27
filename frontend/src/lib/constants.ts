@@ -33,6 +33,9 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Overview Dashboard", group: "overview", module: "dashboard", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "analytics", label: "Analysis", group: "overview", module: "analytics", permission: "reports.read", deniedHint: "You do not have permission to access this module." },
 
+  // Patient Reach AI
+  { id: "patient-reach-ai", label: "Patient Reach AI", group: "patient-reach-ai", module: "patient-reach-ai", permission: "patients.read", deniedHint: "You do not have permission to access Patient Reach AI." },
+
   // 2. OP Management
   { id: "patients", label: "Patients", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "add", label: "Patient Registration", group: "op-management", module: "patient-registration", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
@@ -119,6 +122,10 @@ const MODULE_CUSTOM_INFO: Partial<Record<ModuleId, { label: string; description:
     label: "Doctor Prescription",
     description: "Access to Doctor OPD Prescription, Queued Patient Consultations, and Rx Generation.",
   },
+  "patient-reach-ai": {
+    label: "Patient Reach AI",
+    description: "Access to AI patient outreach, clinical discharge summaries, and WhatsApp messaging.",
+  },
 };
 
 export const MODULE_OPTIONS: ModuleOption[] = (() => {
@@ -138,7 +145,7 @@ export const MODULE_OPTIONS: ModuleOption[] = (() => {
   return options;
 })();
 
-export const DEFAULT_MODULE_ACCESS: ModuleId[] = ["dashboard", "patients", "bed-management", "ip-management", "emergency"];
+export const DEFAULT_MODULE_ACCESS: ModuleId[] = ["dashboard", "patients", "bed-management", "ip-management", "emergency", "patient-reach-ai"];
 export const ALL_ASSIGNABLE_MODULES: ModuleId[] = MODULE_OPTIONS.map((module) => module.value);
 
 export const ADMIN_PERMISSIONS: string[] = [
@@ -196,6 +203,7 @@ export const MODULE_PERMISSIONS: Record<ModuleId, string[]> = {
   "ip-management": ["patients.read", "patients.write"],
   "op-management": ["patients.read", "patients.write"],
   emergency: ["patients.read", "patients.write"],
+  "patient-reach-ai": ["patients.read"],
   settings: [],
   employees: ["admin.users.read", "admin.users.update"],
   // Legacy stored values remain supported.
@@ -216,6 +224,7 @@ export const PAGE_MODULE_MAP: Record<string, ModuleId> = {
   "op-queue-management": "queue-management",
   "patient-journey": "consultation",
   "discharge-summary": "ip-management",
+  "patient-reach-ai": "patient-reach-ai",
   "doctors-history": "doctors-history",
   "doctor-prescription": "doctor-prescription",
   billing: "billing",

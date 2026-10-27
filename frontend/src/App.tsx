@@ -43,7 +43,7 @@ import PharmacySettings from "./pages/pharmacy/PharmacySettings";
 import LabDiagnosticsCataloguePage from "./pages/LabDiagnosticsCataloguePage";
 import LabDiagnosticsOverviewPage from "./pages/LabDiagnosticsOverviewPage";
 import EmergencyWorklistPage from "./pages/EmergencyWorklistPage";
-import LabDiagnosticsOrdersPage from "./pages/LabDiagnosticsOrdersPage";
+import LabDiagnosticsSalesPage from "./pages/LabDiagnosticsSalesPage";
 import LabDiagnosticsLabPage from "./pages/LabDiagnosticsLabPage";
 import LabDiagnosticsImagingPage from "./pages/LabDiagnosticsImagingPage";
 import LabDiagnosticsReportsPage from "./pages/LabDiagnosticsReportsPage";
@@ -54,6 +54,7 @@ import PlatformAdminPage from "./pages/PlatformAdminPage";
 import RegistrationDeskPage from "./pages/RegistrationDeskPage";
 import PatientJourneyPage from "./pages/PatientJourneyPage";
 import DischargeSummaryPage from "./pages/DischargeSummaryPage";
+import PatientReachAiPage from "./pages/PatientReachAiPage";
 import DoctorsHistoryPage from "./pages/DoctorsHistoryPage";
 import InpatientAdmissionPage from "./pages/InpatientAdmissionPage";
 import BedManagementPage from "./pages/BedManagementPage";
@@ -67,7 +68,7 @@ import { resolvePermissions } from "./lib/format";
 import type { DashboardAnalytics, HospitalSummary, Notice, Patient, Stats, User } from "./types";
 import { downloadExportBlob } from "./lib/exportShare";
 
-type SidebarIconName = "dashboard" | "add" | "patients" | "readmit" | "billing" | "lab" | "hrms" | "ot" | "employees" | "settings" | "logout" | "profile" | "appointment" | "home" | "prescription" | "pill" | "box" | "cart" | "shield-check" | "chart" | "team" | "user-doctor" | "bed" | "check-circle" | "document-list";
+type SidebarIconName = "dashboard" | "add" | "patients" | "readmit" | "billing" | "lab" | "hrms" | "ot" | "employees" | "settings" | "logout" | "profile" | "appointment" | "home" | "prescription" | "pill" | "box" | "cart" | "shield-check" | "chart" | "team" | "user-doctor" | "bed" | "check-circle" | "document-list" | "patient-reach-ai";
 
 export const normalizeRouteAlias = (rawPage: string): string => {
   const p = (rawPage || "").toLowerCase().trim();
@@ -112,7 +113,7 @@ const VALID_PAGE_IDS = new Set([
   "billing-reconciliation", "billing-overview", "billing-patient-bills", "billing-ip-discharge",
   "billing-advances-refunds", "billing-doctor-payouts", "billing-reports-day-close",
   "consent-desk", "dashboard", "diag", "lab-diagnostics", "diag-catalogue", "diag-imaging", "diag-laboratory",
-  "diag-orders-billing", "diag-overview", "discharge-summary", "diag-quality-equipment", "diag-reports-approval", "diag-reports-history", "doctor-prescription",
+  "diag-orders-billing", "diag-overview", "discharge-summary", "patient-reach-ai", "diag-quality-equipment", "diag-reports-approval", "diag-reports-history", "doctor-prescription",
   "doctors-history", "emergency", "emergency-worklist", "employees", "hrms", "inpatient", "inpatient-patients", "insurance-desk", "ip-admission", "lab", "laboratory",
   "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients",
   "pharmacy", "pharmacy-overview", "pharmacy-op-dispense", "pharmacy-ip-dispense", "pharmacy-inventory", "pharmacy-inventory-stock",
@@ -134,6 +135,7 @@ const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   patients: "patients",
   "patient-journey": "patients",
   "discharge-summary": "bed",
+  "patient-reach-ai": "patient-reach-ai",
   readmit: "readmit",
   billing: "billing",
   "billing-overview": "dashboard",
@@ -360,6 +362,12 @@ function SidebarIcon({ name }: { name: SidebarIconName }) {
         <line x1="10" y1="9" x2="8" y2="9" {...stroke} />
       </>
     ),
+    "patient-reach-ai": (
+      <>
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" {...stroke} />
+        <path d="M9.5 9h.01M14.5 9h.01M12 14c-1.5 0-2.5-.8-3-1.5" {...stroke} />
+      </>
+    ),
   };
 
   return (
@@ -411,6 +419,7 @@ const PAGE_SUBTITLES: Record<string, string> = {
   "op-queue-management": "Monitor and update outpatient queues.",
   "patient-journey": "Track patient outpatient milestones.",
   "discharge-summary": "AI discharge summary from the patient's records across all modules.",
+  "patient-reach-ai": "Patient outreach & clinical discharge summaries via WhatsApp.",
   "op-desk": "Manage doctors and outpatient schedules.",
   "doctor-prescription": "Create branded prescriptions with medicines, lab tests, advice, and follow-up.",
   "ip-admission": "Admit patient and request bed allocation.",
@@ -603,6 +612,7 @@ function App() {
   const sidebarGroups = useMemo(() => {
     const groups: Array<{ key: string; label: string; items: typeof sidebarNavItems }> = [
       { key: "overview", label: "Overview Module", items: [] },
+      { key: "patient-reach-ai", label: "Patient Reach AI", items: [] },
       { key: "op-management", label: "OP Management Module", items: [] },
       { key: "emergency", label: "Emergency / Casualty", items: [] },
       { key: "inpatient", label: "Inpatient (IPD) Module", items: [] },
@@ -1505,7 +1515,7 @@ function App() {
           <span className="mobile-top-bar-title">HospAI</span>
         </div>
         <Container size="full">
-        {page !== "dashboard" && !page.startsWith("pharmacy-") && !isBillingRoute && page !== "doctor-prescription" && page !== "op-queue-management" && page !== "add" && page !== "ip-admission" && page !== "patient-journey" && page !== "discharge-summary" && page !== "bed-management" && page !== "inpatient-patients" && (
+        {page !== "dashboard" && !page.startsWith("pharmacy-") && !isBillingRoute && page !== "doctor-prescription" && page !== "op-queue-management" && page !== "add" && page !== "ip-admission" && page !== "patient-journey" && page !== "discharge-summary" && page !== "patient-reach-ai" && page !== "bed-management" && page !== "inpatient-patients" && (
           <header className="topbar module-unified-topbar">
             <div className="module-topbar-breadcrumb-row">
               <div className="module-topbar-breadcrumb">
@@ -1616,6 +1626,16 @@ function App() {
           <DischargeSummaryPage key={pageKeys[page] || 0} setNotice={setNotice} selectedPatient={selectedPatient} />
         )}
 
+        {page === "patient-reach-ai" && hasPermission("patients.read") && (
+          <PatientReachAiPage
+            key={pageKeys[page] || 0}
+            setNotice={setNotice}
+            selectedPatient={selectedPatient}
+            onSelectPatient={handleSelectPatient}
+            onNavigate={navigateToPage}
+          />
+        )}
+
         {page === "patients" && (
           <PatientsPage
             key={pageKeys[page] || 0}
@@ -1700,7 +1720,7 @@ function App() {
           <EmergencyWorklistPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
         )}
         {page === "diag-orders-billing" && (hasPermission("diag.read") || hasPermission("lab.read") || hasPermission("diag.order")) && (
-          <LabDiagnosticsOrdersPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
+          <LabDiagnosticsSalesPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
         )}
         {page === "diag-laboratory" && (hasPermission("diag.read") || hasPermission("lab.read")) && (
           <LabDiagnosticsLabPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />

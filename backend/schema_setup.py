@@ -9,7 +9,7 @@ from database import engine
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MIGRATIONS = ["migrations_billing_v2.sql", "migrations_insurance_providers.sql", "migrations_user_types.sql", "migrations_grn_item_fields.sql", "migrations_diag_turnaround.sql", "migrations_schema_gaps.sql"]
+MIGRATIONS = ["migrations_billing_v2.sql", "migrations_insurance_providers.sql", "migrations_user_types.sql", "migrations_grn_item_fields.sql", "migrations_diag_turnaround.sql", "migrations_schema_gaps.sql", "migrations_diag_external_sale.sql"]
 LOCK_ID = 7482915001
 
 

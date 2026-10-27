@@ -36,9 +36,9 @@ ASSIGNABLE_MODULES = (
     "doctor-prescription", "billing", "pharmacy", "laboratory", "finance", "reports",
     "bed-management", "doctor-scheduling", "hrms", "insurance-desk", "consent-desk",
     "follow-up", "ip-management", "op-management", "settings", "lab-diagnostics",
-    "lab", "ot", "accounts", "symptom_ai",
+    "lab", "ot", "accounts", "symptom_ai", "patient-reach-ai",
 )
-DEFAULT_NORMAL_MODULES = ("dashboard", "patients")
+DEFAULT_NORMAL_MODULES = ("dashboard", "patients", "patient-reach-ai")
 
 MODULE_PERMISSION_MAP = {
     "dashboard": {"patients.read"},
@@ -69,6 +69,7 @@ MODULE_PERMISSION_MAP = {
     "ot": {"ot.read", "ot.write"},
     "accounts": {"accounts.read", "accounts.write"},
     "symptom_ai": {"symptom_ai.use"},
+    "patient-reach-ai": {"patients.read"},
     # New Lab & Diagnostics department (Orders & Billing, Laboratory, Imaging,
     # Reports & Approval, Test Catalogue, Quality & Equipment). Distinct from
     # the legacy "laboratory"/"lab" outsourced-billing module above, which is

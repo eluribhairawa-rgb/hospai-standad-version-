@@ -325,7 +325,12 @@ def ensure_lab_diagnostics_tables(conn):
         CREATE TABLE IF NOT EXISTS diag_orders (
             id {id_column},
             order_no TEXT UNIQUE NOT NULL,
-            patient_id TEXT NOT NULL,
+            patient_id TEXT,
+            sale_type TEXT NOT NULL DEFAULT 'INTERNAL',
+            walkin_name TEXT,
+            walkin_mobile TEXT,
+            walkin_age TEXT,
+            walkin_gender TEXT,
             encounter_type TEXT NOT NULL CHECK(encounter_type IN ('OP', 'IP', 'EMERGENCY', 'EXTERNAL')),
             appointment_id INTEGER,
             admission_id INTEGER,
@@ -4280,7 +4285,7 @@ def create_invoice(db, data):
 
 
 
-def list_invoices(db, patient_id=None, module=None, payment_status=None, search=None, limit=None):
+def list_invoices(db, patient_id=None, module=None, payment_status=None, search=None, limit=None, external_sale=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
         clauses = []
@@ -4291,6 +4296,10 @@ def list_invoices(db, patient_id=None, module=None, payment_status=None, search=
         if module:
             clauses.append("i.module = ?")
             params.append(module)
+        if external_sale is True:
+            clauses.append("i.invoice_type = 'EXTERNAL_SALE'")
+        elif external_sale is False:
+            clauses.append("COALESCE(i.invoice_type, '') <> 'EXTERNAL_SALE'")
         if payment_status:
             if payment_status in ("pending_due", "due_pending", "due_or_partial"):
                 clauses.append("(COALESCE(i.due_amount, 0) > 0 OR i.payment_status IN ('due', 'partial'))")
@@ -4306,7 +4315,7 @@ def list_invoices(db, patient_id=None, module=None, payment_status=None, search=
         cursor.execute(
             f"""
             SELECT i.*, 
-                   COALESCE(p.name, i.referral_source, i.notes) AS name,
+                   COALESCE(p.name, CASE WHEN i.invoice_type = 'EXTERNAL_SALE' THEN i.patient_name END, i.referral_source, i.notes) AS name,
                    p.middle_name,
                    p.last_name,
                    COALESCE(p.age::text, i.patient_age) AS age,
@@ -4349,7 +4358,7 @@ def get_invoice_by_id(db, invoice_id):
         cursor.execute(
             """
             SELECT i.*, 
-                   COALESCE(p.name, i.referral_source, i.notes) AS name,
+                   COALESCE(p.name, CASE WHEN i.invoice_type = 'EXTERNAL_SALE' THEN i.patient_name END, i.referral_source, i.notes) AS name,
                    p.middle_name,
                    p.last_name,
                    COALESCE(p.age::text, i.patient_age) AS age,
@@ -10261,55 +10270,76 @@ def _generate_specimen_no():
 
 
 def create_diag_order(db, data, username=None):
-    patient_id = data["patient_id"]
-    encounter_type = data["encounter_type"]
+    is_external_sale = str(data.get("sale_type") or "INTERNAL").upper() == "EXTERNAL"
     items = data.get("items") or []
     if not items:
         raise ValueError("At least one service must be selected.")
-    if encounter_type not in ("OP", "IP", "EMERGENCY", "EXTERNAL"):
-        raise ValueError("Invalid encounter type.")
-    if encounter_type == "IP" and not data.get("admission_id"):
-        raise ValueError("An IPD order requires the patient's active admission.")
-    if encounter_type in ("OP", "EMERGENCY") and not data.get("appointment_id"):
-        raise ValueError(f"A {encounter_type} order requires the selected visit.")
-    if encounter_type == "EXTERNAL" and not (data.get("external_source") or "").strip():
-        raise ValueError("An external order requires the referring source.")
+    if is_external_sale:
+        # Walk-in sale: no UHID, identified by name + mobile only.
+        patient_id = None
+        encounter_type = "EXTERNAL"
+        walkin_name = (data.get("walkin_name") or "").strip()
+        walkin_mobile = re.sub(r"\D", "", str(data.get("walkin_mobile") or ""))
+        if not walkin_name:
+            raise ValueError("Patient name is required for an external sale.")
+        if len(walkin_mobile) < 7:
+            raise ValueError("A valid mobile number is required for an external sale.")
+        walkin_age = str(data.get("walkin_age") or "").strip() or None
+        walkin_gender = (data.get("walkin_gender") or "").strip() or None
+        external_source = (data.get("external_source") or "").strip() or "Walk-in"
+    else:
+        patient_id = data["patient_id"]
+        encounter_type = data["encounter_type"]
+        walkin_name = walkin_mobile = walkin_age = walkin_gender = None
+        external_source = data.get("external_source")
+        if encounter_type not in ("OP", "IP", "EMERGENCY", "EXTERNAL"):
+            raise ValueError("Invalid encounter type.")
+        if encounter_type == "IP" and not data.get("admission_id"):
+            raise ValueError("An IPD order requires the patient's active admission.")
+        if encounter_type in ("OP", "EMERGENCY") and not data.get("appointment_id"):
+            raise ValueError(f"A {encounter_type} order requires the selected visit.")
+        if encounter_type == "EXTERNAL" and not (data.get("external_source") or "").strip():
+            raise ValueError("An external order requires the referring source.")
 
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT patient_id FROM patients WHERE patient_id = ?", (patient_id,))
-        if not cursor.fetchone():
-            raise ValueError("Patient not found.")
-        if encounter_type == "IP":
-            cursor.execute("SELECT id FROM admissions WHERE id = ? AND patient_id = ?", (data["admission_id"], patient_id))
+        if not is_external_sale:
+            cursor.execute("SELECT patient_id FROM patients WHERE patient_id = ?", (patient_id,))
             if not cursor.fetchone():
-                raise ValueError("Admission does not belong to this patient.")
-        if encounter_type in ("OP", "EMERGENCY"):
-            cursor.execute("SELECT id FROM appointments WHERE id = ? AND patient_id = ?", (data["appointment_id"], patient_id))
-            if not cursor.fetchone():
-                raise ValueError("Visit does not belong to this patient.")
+                raise ValueError("Patient not found.")
+            if encounter_type == "IP":
+                cursor.execute("SELECT id FROM admissions WHERE id = ? AND patient_id = ?", (data["admission_id"], patient_id))
+                if not cursor.fetchone():
+                    raise ValueError("Admission does not belong to this patient.")
+            if encounter_type in ("OP", "EMERGENCY"):
+                cursor.execute("SELECT id FROM appointments WHERE id = ? AND patient_id = ?", (data["appointment_id"], patient_id))
+                if not cursor.fetchone():
+                    raise ValueError("Visit does not belong to this patient.")
 
         order_no = _generate_diag_order_no()
         cursor.execute(
             """
             INSERT INTO diag_orders (
                 order_no, patient_id, encounter_type, appointment_id, admission_id, external_source,
-                referring_clinician, priority, clinical_indication, notes, source_document_id, status, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
+                referring_clinician, priority, clinical_indication, notes, source_document_id, status, created_by,
+                sale_type, walkin_name, walkin_mobile, walkin_age, walkin_gender
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_no,
                 patient_id,
                 encounter_type,
-                data.get("appointment_id"),
-                data.get("admission_id"),
-                data.get("external_source"),
+                None if is_external_sale else data.get("appointment_id"),
+                None if is_external_sale else data.get("admission_id"),
+                external_source,
                 data.get("referring_clinician"),
                 data.get("priority", "Routine"),
                 data.get("clinical_indication"),
                 data.get("notes"),
                 data.get("source_document_id"),
                 username,
+                "EXTERNAL" if is_external_sale else "INTERNAL",
+                walkin_name, walkin_mobile, walkin_age, walkin_gender,
             ),
         )
         order_id = cursor.lastrowid
@@ -10379,11 +10409,14 @@ def get_diag_order(db, order_id):
         if p:
             order_dict["patient_name"] = f"{p['name']} {p['last_name'] or ''}".strip()
             order_dict["patient_phone"] = p["phone"]
+        elif order_dict.get("walkin_name"):
+            order_dict["patient_name"] = order_dict["walkin_name"]
+            order_dict["patient_phone"] = order_dict.get("walkin_mobile")
         return order_dict
 
 
 
-def list_diag_orders(db, patient_id=None, status=None, department_type=None, priority=None, encounter_type=None, admission_id=None):
+def list_diag_orders(db, patient_id=None, status=None, department_type=None, priority=None, encounter_type=None, admission_id=None, sale_type=None, search=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
         clauses = []
@@ -10403,13 +10436,20 @@ def list_diag_orders(db, patient_id=None, status=None, department_type=None, pri
         if admission_id:
             clauses.append("o.admission_id = ?")
             params.append(admission_id)
+        if sale_type:
+            clauses.append("o.sale_type = ?")
+            params.append(sale_type.upper())
+        if search:
+            term = f"%{search.strip().lower()}%"
+            clauses.append("(LOWER(o.order_no) LIKE ? OR LOWER(COALESCE(o.walkin_name, '')) LIKE ? OR COALESCE(o.walkin_mobile, '') LIKE ?)")
+            params.extend([term, term, term])
         if department_type:
             clauses.append("EXISTS (SELECT 1 FROM diag_order_items oi WHERE oi.order_id = o.id AND oi.department_type = ?)")
             params.append(department_type)
         where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         cursor.execute(
             f"""
-            SELECT o.*, p.name AS patient_first_name, p.last_name AS patient_last_name
+            SELECT o.*, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name
             FROM diag_orders o LEFT JOIN patients p ON p.patient_id = o.patient_id
             {where_clause} ORDER BY o.created_at DESC LIMIT 500
             """,
@@ -10419,7 +10459,7 @@ def list_diag_orders(db, patient_id=None, status=None, department_type=None, pri
         result = []
         for o in orders:
             od = dict(o)
-            od["patient_name"] = f"{od.pop('patient_first_name', '') or ''} {od.pop('patient_last_name', '') or ''}".strip()
+            od["patient_name"] = f"{od.pop('patient_first_name', '') or ''} {od.pop('patient_last_name', '') or ''}".strip() or od.get("walkin_name") or ""
             cursor.execute("SELECT * FROM diag_order_items WHERE order_id = ? ORDER BY id ASC", (od["id"],))
             od["items"] = [dict(r) for r in cursor.fetchall()]
             result.append(od)
@@ -10445,13 +10485,24 @@ def confirm_diag_order(db, order_id, username=None):
         invoice_id = None
         if order["encounter_type"] in ("OP", "EMERGENCY", "EXTERNAL"):
             invoice_no = f"INV-LAB-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-            cursor.execute(
-                """
-                INSERT INTO invoices (invoice_no, patient_id, module, referral_source, subtotal, tax, discount, total_amount, due_amount, payment_status, created_by)
-                VALUES (?, ?, 'LAB', ?, ?, 0, 0, ?, ?, 'due', ?)
-                """,
-                (invoice_no, order["patient_id"], order.get("external_source"), subtotal, subtotal, subtotal, username),
-            )
+            if order["sale_type"] == "EXTERNAL":
+                cursor.execute(
+                    """
+                    INSERT INTO invoices (invoice_no, patient_id, module, invoice_type, patient_name, patient_mobile, patient_age,
+                                          referral_source, doctor_name, subtotal, tax, discount, total_amount, due_amount, payment_status, created_by)
+                    VALUES (?, NULL, 'LAB', 'EXTERNAL_SALE', ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, 'due', ?)
+                    """,
+                    (invoice_no, order["walkin_name"], order["walkin_mobile"], order["walkin_age"],
+                     order.get("external_source"), order.get("referring_clinician"), subtotal, subtotal, subtotal, username),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO invoices (invoice_no, patient_id, module, referral_source, subtotal, tax, discount, total_amount, due_amount, payment_status, created_by)
+                    VALUES (?, ?, 'LAB', ?, ?, 0, 0, ?, ?, 'due', ?)
+                    """,
+                    (invoice_no, order["patient_id"], order.get("external_source"), subtotal, subtotal, subtotal, username),
+                )
             invoice_id = cursor.lastrowid
 
         for item in items:
@@ -10617,7 +10668,7 @@ def list_diag_lab_worklist(db, stage=None, search=None, priority=None):
         cursor.execute(
             f"""
             SELECT oi.*, o.order_no, o.patient_id, o.encounter_type, o.admission_id, o.appointment_id, o.priority,
-                   o.created_at AS order_created_at, p.name AS patient_first_name, p.last_name AS patient_last_name,
+                   o.created_at AS order_created_at, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name,
                    sp.id AS specimen_id, sp.specimen_no, sp.status AS specimen_status, sp.collected_at, sp.received_at,
                    sp.rejection_reason, sp.container_type, sp.collection_location, ds.turnaround_hours
             FROM diag_order_items oi
@@ -10983,7 +11034,7 @@ def list_diag_imaging_worklist(db, stage=None, modality=None, room=None, search=
         cursor.execute(
             f"""
             SELECT oi.*, o.order_no, o.patient_id, o.encounter_type, o.admission_id, o.priority,
-                   o.created_at AS order_created_at, p.name AS patient_first_name, p.last_name AS patient_last_name,
+                   o.created_at AS order_created_at, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name,
                    ex.id AS exam_id, ex.modality, ex.room, ex.scheduled_at, ex.expected_duration_min, ex.status AS exam_status,
                    ex.assigned_staff, ex.prep_instructions, ex.image_available, ds.turnaround_hours
             FROM diag_order_items oi
@@ -11371,7 +11422,7 @@ def list_diag_reports_worklist(db, status=None, report_type=None, search=None, d
         cursor.execute(
             f"""
             SELECT r.*, oi.service_name, oi.department_type, o.order_no, o.patient_id, o.admission_id, o.priority,
-                   o.created_at AS order_created_at, p.name AS patient_first_name, p.last_name AS patient_last_name,
+                   o.created_at AS order_created_at, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name,
                    ds.turnaround_hours,
                    EXISTS(SELECT 1 FROM diag_critical_alerts ca WHERE ca.order_item_id = oi.id AND ca.resolved_at IS NULL) AS has_open_critical
             FROM diag_reports r
@@ -11426,7 +11477,7 @@ def list_diag_critical_alerts(db, open_only=True):
         where_clause = " WHERE ca.resolved_at IS NULL" if open_only else ""
         cursor.execute(
             f"""
-            SELECT ca.*, oi.service_name, o.patient_id, o.order_no, p.name AS patient_first_name, p.last_name AS patient_last_name
+            SELECT ca.*, oi.service_name, o.patient_id, o.order_no, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name
             FROM diag_critical_alerts ca
             JOIN diag_order_items oi ON oi.id = ca.order_item_id
             JOIN diag_orders o ON o.id = oi.order_id
