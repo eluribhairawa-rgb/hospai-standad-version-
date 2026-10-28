@@ -3,12 +3,18 @@ import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../lib/api";
 import { printViaIframe } from "../lib/printViaIframe";
 import type { Notice, Patient } from "../types";
+import { SurveyManagementPanel, SurveyReportsPanel, SurveyResponsesPanel, SurveyTemplatesPanel, WhatsAppTemplatesPanel } from "./patientReach/SurveyPanels";
+import { WHATSAPP_CATEGORY_LABELS, renderTemplate, useWhatsAppTemplates } from "./patientReach/surveyCommon";
+import type { SurveyContext, SurveySummary, WhatsAppCategory } from "./patientReach/surveyCommon";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
   selectedPatient?: Patient | null;
   onSelectPatient?: (patient: Patient) => void;
   onNavigate?: (page: string) => void;
+  /** Sidebar sub-pages of the module render one survey panel instead of the patient workspace. */
+  view?: "workspace" | "survey-management" | "survey-templates" | "whatsapp-templates" | "survey-reports";
+  canWriteSurveys?: boolean;
 };
 
 type EncounterOption = {
@@ -81,30 +87,9 @@ type Certificate = {
   created_at?: string;
 };
 
-type TabKey = "discharge" | "journey" | "whatsapp" | "survey" | "notes";
+type TabKey = "discharge" | "journey" | "whatsapp" | "survey" | "survey-management" | "survey-templates" | "notes";
 
-type SurveyResponse = {
-  submitted: string;
-  overall: number;
-  doctor: number;
-  nursing: number;
-  cleanliness: number;
-  discharge: number;
-  comment: string;
-};
-
-type OutreachLog = { at: string; template: string; to: string; message: string };
-
-// No survey backend exists yet; these figures are sample data for the Survey Responses UI.
-const SAMPLE_SURVEYS: SurveyResponse[] = [
-  { submitted: "2026-10-28T16:15:00", overall: 5, doctor: 5, nursing: 5, cleanliness: 4, discharge: 5, comment: "Excellent service. The staff were attentive throughout my stay." },
-  { submitted: "2026-10-27T11:20:00", overall: 4, doctor: 4, nursing: 4, cleanliness: 5, discharge: 4, comment: "Good experience." },
-  { submitted: "2026-10-26T15:45:00", overall: 5, doctor: 5, nursing: 4, cleanliness: 4, discharge: 5, comment: "Very supportive staff." },
-  { submitted: "2026-10-25T10:30:00", overall: 4, doctor: 4, nursing: 4, cleanliness: 4, discharge: 4, comment: "Process was smooth." },
-  { submitted: "2026-10-24T17:10:00", overall: 5, doctor: 5, nursing: 5, cleanliness: 4, discharge: 5, comment: "Great care and support." },
-];
-
-const SAMPLE_KPIS = { total: 128, pending: 24, completed: 104, notSent: 8 };
+type WhatsAppMessage = { id: number; recipient_name: string | null; phone: string | null; purpose: string; template_name: string | null; message: string; sent_by: string | null; sent_at: string };
 
 const TEMPLATE_LABELS: Record<string, string> = {
   summary: "Discharge Summary",
@@ -113,7 +98,14 @@ const TEMPLATE_LABELS: Record<string, string> = {
   quick: "Quick Update",
 };
 
-const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+const TEMPLATE_PURPOSE: Record<string, WhatsAppCategory> = { summary: "DISCHARGE", meds: "DISCHARGE", followup: "FOLLOW_UP", quick: "GENERAL" };
+
+const VIEW_TITLES: Record<string, { title: string; subtitle: string }> = {
+  "survey-management": { title: "Survey Management", subtitle: "Queue patient feedback surveys, send them on WhatsApp and track replies" },
+  "survey-templates": { title: "Survey Templates", subtitle: "Survey questions, answer options and report categories" },
+  "whatsapp-templates": { title: "WhatsApp Templates", subtitle: "Reusable WhatsApp messages for surveys, reminders and follow-ups" },
+  "survey-reports": { title: "Survey Reports", subtitle: "Detailed patient feedback reports, trends and exports" },
+};
 
 const fmtDateTime = (iso: string) =>
   new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -182,7 +174,7 @@ const CheckIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-export default function PatientReachAiPage({ setNotice, selectedPatient: initialPatient, onSelectPatient }: Props) {
+export default function PatientReachAiPage({ setNotice, selectedPatient: initialPatient, onSelectPatient, view = "workspace", canWriteSurveys = false }: Props) {
   // Patients directory state
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loadingPatients, setLoadingPatients] = useState(false);
@@ -206,12 +198,55 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
   const [recipientName, setRecipientName] = useState("");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<"summary" | "meds" | "followup" | "quick">("summary");
+  const [savedTemplateId, setSavedTemplateId] = useState<number | null>(null);
+  const { templates: savedWhatsAppTemplates, hospitalName } = useWhatsAppTemplates(setNotice, true);
   const [copied, setCopied] = useState(false);
 
   // Tabs, outreach history and notes
   const [activeTab, setActiveTab] = useState<TabKey>("discharge");
-  const [outreachLog, setOutreachLog] = useState<OutreachLog[]>([]);
+  const [waHistory, setWaHistory] = useState<WhatsAppMessage[]>([]);
   const [notesByPatient, setNotesByPatient] = useState<Record<string, string>>({});
+
+  // Survey KPIs (header cards); surveyRefresh bumps after any survey change.
+  const [surveySummary, setSurveySummary] = useState<SurveySummary | null>(null);
+  const [surveyRefresh, setSurveyRefresh] = useState(0);
+  const bumpSurveys = () => setSurveyRefresh((n) => n + 1);
+
+  useEffect(() => {
+    apiFetch<SurveySummary>("/api/reach/survey-summary")
+      .then(setSurveySummary)
+      .catch(() => setSurveySummary(null));
+  }, [surveyRefresh]);
+
+  const loadWhatsAppHistory = async (patientId: string) => {
+    try {
+      const res = await apiFetch<{ messages: WhatsAppMessage[] }>(`/api/reach/whatsapp-messages?patient_id=${encodeURIComponent(patientId)}`);
+      setWaHistory(res.messages || []);
+    } catch {
+      setWaHistory([]);
+    }
+  };
+
+  useEffect(() => {
+    if (view === "workspace" && activePatient?.patient_id) void loadWhatsAppHistory(activePatient.patient_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePatient?.patient_id, view]);
+
+  const activePatientName = activePatient
+    ? [activePatient.name, activePatient.middle_name, activePatient.last_name].filter(Boolean).join(" ")
+    : "";
+
+  // Survey context: the visit currently selected in the workspace
+  const surveyContext = useMemo<SurveyContext>(() => {
+    const enc = encounters.find((e) => e.key === selectedEncounterKey);
+    return {
+      encounter_type: enc?.encounter_type || records?.encounter?.type || null,
+      encounter_id: enc?.encounter_id ?? records?.encounter?.id ?? null,
+      encounter_label: records?.encounter?.label || enc?.label || null,
+      doctor_name: records?.encounter?.attending_doctor || activePatient?.latest_doctor_name || null,
+      department: activePatient?.latest_department || null,
+    };
+  }, [encounters, selectedEncounterKey, records, activePatient]);
 
   // Load patient directory
   const fetchPatients = async (query = "") => {
@@ -222,7 +257,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
       const list = res.patients || [];
       setPatients(list);
       // If we don't have an active patient yet, select the first one
-      if (!activePatient && list.length > 0) {
+      if (view === "workspace" && !activePatient && list.length > 0) {
         selectPatient(list[0]);
       }
     } catch (err) {
@@ -239,7 +274,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
 
   // When initialPatient prop changes from parent
   useEffect(() => {
-    if (initialPatient?.patient_id && initialPatient.patient_id !== activePatient?.patient_id) {
+    if (view === "workspace" && initialPatient?.patient_id && initialPatient.patient_id !== activePatient?.patient_id) {
       selectPatient(initialPatient);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -492,6 +527,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
     const phone = activePatient.phone || activePatient.family_mobile || "";
     setRecipientPhone(phone);
     setRecipientName([activePatient.name, activePatient.last_name].filter(Boolean).join(" "));
+    setSavedTemplateId(null);
     const initialMsg = buildTemplateMessage(selectedTemplate);
     setWhatsAppMessage(initialMsg);
     setCopied(false);
@@ -501,8 +537,24 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
   // Change WhatsApp template
   const handleTemplateSwitch = (tmpl: "summary" | "meds" | "followup" | "quick") => {
     setSelectedTemplate(tmpl);
+    setSavedTemplateId(null);
     const msg = buildTemplateMessage(tmpl);
     setWhatsAppMessage(msg);
+  };
+
+  // Saved templates from WhatsApp Templates, filled with this patient's details
+  const handleSavedTemplateSwitch = (templateId: number) => {
+    const tpl = savedWhatsAppTemplates.find((t) => t.id === templateId);
+    if (!tpl || !activePatient) return;
+    setSavedTemplateId(templateId);
+    setWhatsAppMessage(renderTemplate(tpl.body, {
+      patient_name: activePatientName || activePatient.name,
+      uhid: activePatient.patient_id,
+      doctor_name: records?.encounter?.attending_doctor || activePatient.latest_doctor_name,
+      department: activePatient.latest_department,
+      visit: records?.encounter?.label,
+      hospital_name: hospitalName,
+    }));
   };
 
   // Launch WhatsApp link
@@ -515,10 +567,21 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
 
     window.open(url, "_blank", "noopener,noreferrer");
     if (activePatient) {
-      setOutreachLog((prev) => [
-        { at: new Date().toISOString(), template: selectedTemplate, to: `${recipientName || activePatient.patient_id}${recipientPhone ? ` (${recipientPhone})` : ""}`, message: whatsAppMessage },
-        ...prev,
-      ]);
+      const saved = savedWhatsAppTemplates.find((t) => t.id === savedTemplateId);
+      const patientId = activePatient.patient_id;
+      apiFetch("/api/reach/whatsapp-messages", {
+        method: "POST",
+        body: JSON.stringify({
+          patient_id: patientId,
+          recipient_name: recipientName,
+          phone: recipientPhone,
+          purpose: saved ? saved.category : TEMPLATE_PURPOSE[selectedTemplate],
+          template_name: saved ? saved.name : TEMPLATE_LABELS[selectedTemplate],
+          message: whatsAppMessage,
+        }),
+      })
+        .then(() => loadWhatsAppHistory(patientId))
+        .catch(() => setNotice({ type: "warning", message: "WhatsApp opened, but the message could not be saved to WhatsApp History." }));
     }
     setNotice({
       type: "success",
@@ -649,10 +712,6 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
     });
   }, [patients, searchQuery, filterType]);
 
-  const activePatientName = activePatient
-    ? [activePatient.name, activePatient.middle_name, activePatient.last_name].filter(Boolean).join(" ")
-    : "";
-
   return (
     <div style={{ padding: "20px 28px 48px", background: "#f8fafc", minHeight: "100vh" }}>
       {/* Module Header */}
@@ -662,14 +721,15 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
             <SparkleIcon size={14} /> AI Patient Engagement & Outreach
           </div>
           <h1 style={{ fontSize: "28px", fontWeight: 800, color: "#0f172a", margin: "0 0 6px 0", letterSpacing: "-0.025em" }}>
-            Patient Reach AI
+            {VIEW_TITLES[view]?.title || "Patient Reach AI"}
           </h1>
           <p style={{ fontSize: "14px", color: "#64748b", margin: 0, maxWidth: "720px" }}>
-            Patient outreach, discharge summaries and feedback management
+            {VIEW_TITLES[view]?.subtitle || "Patient outreach, discharge summaries and feedback management"}
           </p>
         </div>
 
         {/* Global Action Chips */}
+        {view === "workspace" && (
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
           <button
             type="button"
@@ -695,30 +755,51 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
             {loadingPatients ? "Refreshing…" : "Refresh Patients"}
           </button>
         </div>
+        )}
       </div>
 
-      {/* KPI Summary Row (sample figures until a survey backend exists) */}
+      {/* KPI Summary Row (survey figures from /api/reach/survey-summary) */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>
         {[
-          { label: "Total Responses", value: String(SAMPLE_KPIS.total), bg: "#ecfdf5", border: "#d1fae5", iconBg: "#d1fae5", color: "#059669", icon: "💬" },
-          { label: "Pending Responses", value: String(SAMPLE_KPIS.pending), bg: "#fffbeb", border: "#fde68a", iconBg: "#fde68a", color: "#d97706", icon: "🕒" },
-          { label: "Completed Surveys", value: String(SAMPLE_KPIS.completed), bg: "#eff6ff", border: "#dbeafe", iconBg: "#dbeafe", color: "#2563eb", icon: "✔" },
-          { label: "Average Rating", value: `${avg(SAMPLE_SURVEYS.map((r) => r.overall)).toFixed(1)}`, suffix: " / 5", bg: "#faf5ff", border: "#e9d5ff", iconBg: "#e9d5ff", color: "#7c3aed", icon: "★" },
-        ].map((k) => (
-          <div key={k.label} style={{ display: "flex", alignItems: "center", gap: "16px", background: k.bg, border: `1px solid ${k.border}`, borderRadius: "14px", padding: "18px 22px" }}>
-            <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: k.iconBg, color: k.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", flexShrink: 0 }}>{k.icon}</div>
-            <div>
-              <div style={{ fontSize: "13px", fontWeight: 600, color: "#475569" }}>{k.label}</div>
-              <div style={{ fontSize: "30px", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
-                {k.value}
-                {"suffix" in k && k.suffix && <span style={{ fontSize: "17px", fontWeight: 700, color: "#475569" }}>{k.suffix}</span>}
+          { label: "Total Responses", value: String(surveySummary?.total ?? "—"), trend: surveySummary?.trend.total_pct, bg: "#ecfdf5", border: "#d1fae5", iconBg: "#d1fae5", color: "#059669", icon: "💬" },
+          { label: "Pending Responses", value: String(surveySummary?.pending ?? "—"), trend: surveySummary?.trend.pending_pct, bg: "#fffbeb", border: "#fde68a", iconBg: "#fde68a", color: "#d97706", icon: "🕒" },
+          { label: "Completed Surveys", value: String(surveySummary?.completed ?? "—"), trend: surveySummary?.trend.completed_pct, bg: "#eff6ff", border: "#dbeafe", iconBg: "#dbeafe", color: "#2563eb", icon: "✔" },
+          { label: "Average Rating", value: surveySummary?.avg_rating != null ? surveySummary.avg_rating.toFixed(1) : "—", suffix: " / 5", delta: surveySummary?.trend.avg_rating_delta, bg: "#faf5ff", border: "#e9d5ff", iconBg: "#e9d5ff", color: "#7c3aed", icon: "★" },
+        ].map((k) => {
+          const change = "delta" in k ? k.delta : k.trend;
+          const changeText = change == null ? null : "delta" in k ? `${Math.abs(change).toFixed(1)}` : `${Math.abs(change)}%`;
+          return (
+            <div key={k.label} style={{ display: "flex", alignItems: "center", gap: "16px", background: k.bg, border: `1px solid ${k.border}`, borderRadius: "14px", padding: "18px 22px" }}>
+              <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: k.iconBg, color: k.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", flexShrink: 0 }}>{k.icon}</div>
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#475569" }}>{k.label}</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "12px", flexWrap: "wrap" }}>
+                  <div style={{ fontSize: "30px", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                    {k.value}
+                    {"suffix" in k && k.suffix && <span style={{ fontSize: "17px", fontWeight: 700, color: "#475569" }}>{k.suffix}</span>}
+                  </div>
+                  {changeText && (
+                    <div style={{ fontSize: "11.5px", lineHeight: 1.3 }}>
+                      <div style={{ fontWeight: 700, color: change! >= 0 ? "#059669" : "#dc2626" }}>{change! >= 0 ? "↑" : "↓"} {changeText}</div>
+                      <div style={{ color: "#64748b" }}>from last month</div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
+      {view === "survey-management" && (
+        <SurveyManagementPanel setNotice={setNotice} canWrite={canWriteSurveys} patients={patients} refreshKey={surveyRefresh} onChanged={bumpSurveys} />
+      )}
+      {view === "survey-templates" && <SurveyTemplatesPanel setNotice={setNotice} canWrite={canWriteSurveys} />}
+      {view === "whatsapp-templates" && <WhatsAppTemplatesPanel setNotice={setNotice} canWrite={canWriteSurveys} />}
+      {view === "survey-reports" && <SurveyReportsPanel setNotice={setNotice} />}
+
       {/* Main Grid: Split Layout */}
+      {view === "workspace" && (
       <div style={{ display: "grid", gridTemplateColumns: "360px minmax(0, 1fr)", gap: "22px", alignItems: "start" }}>
         {/* Left Column: All Existing Patients Directory */}
         <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", flexDirection: "column", height: "calc(100vh - 170px)", minHeight: "560px" }}>
@@ -973,6 +1054,8 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                   ["journey", "Patient Journey"],
                   ["whatsapp", "WhatsApp History"],
                   ["survey", "Survey Responses"],
+                  ["survey-management", "Survey Management"],
+                  ["survey-templates", "Survey Templates"],
                   ["notes", "Notes"],
                 ] as [TabKey, string][]).map(([key, label]) => (
                   <button
@@ -1025,16 +1108,18 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
               {activeTab === "whatsapp" && (
                 <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
                   <h3 style={{ fontSize: "17px", fontWeight: 800, color: "#0f172a", margin: "0 0 2px" }}>WhatsApp History</h3>
-                  <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>Messages launched from this screen in the current session.</p>
-                  {outreachLog.length === 0 ? (
+                  <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>WhatsApp messages opened for this patient from Patient Reach AI (discharge outreach and surveys).</p>
+                  {waHistory.length === 0 ? (
                     <div style={{ color: "#94a3b8", fontSize: "13px" }}>No WhatsApp messages sent yet.</div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                      {outreachLog.map((l, i) => (
-                        <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px 14px", fontSize: "12.5px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#1e293b" }}>
-                            <span>{TEMPLATE_LABELS[l.template] || l.template} → {l.to}</span>
-                            <span style={{ color: "#94a3b8", fontWeight: 500, fontSize: "11.5px" }}>{fmtDateTime(l.at)}</span>
+                      {waHistory.map((l) => (
+                        <div key={l.id} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px 14px", fontSize: "12.5px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontWeight: 700, color: "#1e293b" }}>
+                            <span>
+                              {l.template_name || WHATSAPP_CATEGORY_LABELS[l.purpose as WhatsAppCategory] || "Message"} → {l.recipient_name || activePatientName}{l.phone ? ` (${l.phone})` : ""}
+                            </span>
+                            <span style={{ color: "#94a3b8", fontWeight: 500, fontSize: "11.5px", whiteSpace: "nowrap" }}>{fmtDateTime(l.sent_at)}{l.sent_by ? ` · ${l.sent_by}` : ""}</span>
                           </div>
                           <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", color: "#475569", fontSize: "12px" }}>{l.message}</pre>
                         </div>
@@ -1044,106 +1129,17 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                 </div>
               )}
 
-              {activeTab === "survey" && (() => {
-                const rows = SAMPLE_SURVEYS;
-                const cats = [
-                  { label: "Doctor Behaviour", value: avg(rows.map((r) => r.doctor)), color: "#34d399" },
-                  { label: "Nursing Care", value: avg(rows.map((r) => r.nursing)), color: "#06b6d4" },
-                  { label: "Cleanliness", value: avg(rows.map((r) => r.cleanliness)), color: "#8b5cf6" },
-                  { label: "Discharge Process", value: avg(rows.map((r) => r.discharge)), color: "#f97316" },
-                ];
-                const overall = avg(rows.map((r) => r.overall));
-                const rate = Math.round((SAMPLE_KPIS.completed / SAMPLE_KPIS.total) * 100);
-                const completedPct = (SAMPLE_KPIS.completed / (SAMPLE_KPIS.completed + SAMPLE_KPIS.pending + SAMPLE_KPIS.notSent)) * 100;
-                const pendingPct = (SAMPLE_KPIS.pending / (SAMPLE_KPIS.completed + SAMPLE_KPIS.pending + SAMPLE_KPIS.notSent)) * 100;
-                const card = { border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px" } as const;
-                const th = { padding: "10px 8px", textAlign: "left", fontSize: "11.5px", fontWeight: 700, color: "#475569", background: "#f8fafc", whiteSpace: "nowrap" } as const;
-                const td = { padding: "11px 8px", fontSize: "12.5px", color: "#334155", borderTop: "1px solid #f1f5f9" } as const;
-                return (
-                  <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
-                      <div>
-                        <h3 style={{ fontSize: "20px", fontWeight: 800, color: "#0f172a", margin: "0 0 2px" }}>Survey Responses</h3>
-                        <p style={{ fontSize: "12.5px", color: "#64748b", margin: 0 }}>Patient feedback received through WhatsApp (sample data)</p>
-                      </div>
-                      <button type="button" style={{ height: "36px", padding: "0 14px", borderRadius: "8px", background: "#fff", border: "1px solid #cbd5e1", fontSize: "12.5px", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
-                        View All Responses
-                      </button>
-                    </div>
+              {activeTab === "survey" && (
+                <SurveyResponsesPanel setNotice={setNotice} canWrite={canWriteSurveys} patients={patients} activePatient={activePatient}
+                  context={surveyContext} refreshKey={surveyRefresh} onChanged={bumpSurveys} />
+              )}
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 1fr", gap: "16px", marginBottom: "20px" }}>
-                      <div style={card}>
-                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155" }}>Overall Satisfaction</div>
-                        <div style={{ fontSize: "34px", fontWeight: 800, color: "#0f172a", margin: "8px 0 4px" }}>
-                          {overall.toFixed(1)}<span style={{ fontSize: "18px", color: "#475569" }}> / 5</span>
-                        </div>
-                        <div style={{ fontSize: "26px", color: "#7c3aed", letterSpacing: "2px" }}>
-                          {[1, 2, 3, 4, 5].map((n) => <span key={n} style={{ color: n <= Math.round(overall) ? "#7c3aed" : "#cbd5e1" }}>★</span>)}
-                        </div>
-                      </div>
+              {activeTab === "survey-management" && (
+                <SurveyManagementPanel setNotice={setNotice} canWrite={canWriteSurveys} patients={patients} activePatient={activePatient}
+                  context={surveyContext} refreshKey={surveyRefresh} onChanged={bumpSurveys} />
+              )}
 
-                      <div style={card}>
-                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "10px" }}>Responses by Category</div>
-                        {cats.map((c) => (
-                          <div key={c.label} style={{ display: "grid", gridTemplateColumns: "130px 34px 1fr", alignItems: "center", gap: "8px", fontSize: "12.5px", color: "#475569", marginBottom: "8px" }}>
-                            <span>{c.label}</span>
-                            <strong style={{ color: "#0f172a" }}>{c.value.toFixed(1)}</strong>
-                            <div style={{ height: "7px", borderRadius: "4px", background: "#e2e8f0" }}>
-                              <div style={{ width: `${(c.value / 5) * 100}%`, height: "100%", borderRadius: "4px", background: c.color }} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div style={card}>
-                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "10px" }}>Response Rate</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "18px" }}>
-                          <div style={{ position: "relative", width: "96px", height: "96px", flexShrink: 0 }}>
-                            <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: `conic-gradient(#10b981 0 ${completedPct}%, #f59e0b ${completedPct}% ${completedPct + pendingPct}%, #cbd5e1 ${completedPct + pendingPct}% 100%)` }} />
-                            <div style={{ position: "absolute", inset: "12px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", fontWeight: 800, color: "#0f172a" }}>{rate}%</div>
-                          </div>
-                          <div style={{ fontSize: "12.5px", color: "#475569", display: "flex", flexDirection: "column", gap: "6px" }}>
-                            <span><span style={{ color: "#10b981" }}>●</span> Completed ({SAMPLE_KPIS.completed})</span>
-                            <span><span style={{ color: "#f59e0b" }}>●</span> Pending ({SAMPLE_KPIS.pending})</span>
-                            <span><span style={{ color: "#cbd5e1" }}>●</span> Not Sent ({SAMPLE_KPIS.notSent})</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ overflowX: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                        <thead>
-                          <tr>
-                            {["Sl.No", "Submitted On", "Overall Rating", "Doctor Behaviour", "Nursing Care", "Cleanliness", "Discharge Process", "Comments", "Actions"].map((h) => (
-                              <th key={h} style={th}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((r, i) => (
-                            <tr key={i}>
-                              <td style={td}>{i + 1}</td>
-                              <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDateTime(r.submitted)}</td>
-                              <td style={td}><span style={{ color: "#f59e0b" }}>★</span> {r.overall}</td>
-                              <td style={td}>{r.doctor}</td>
-                              <td style={td}>{r.nursing}</td>
-                              <td style={td}>{r.cleanliness}</td>
-                              <td style={td}>{r.discharge}</td>
-                              <td style={{ ...td, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.comment}>{r.comment}</td>
-                              <td style={td}>
-                                <button type="button" onClick={() => setNotice({ type: "info", message: r.comment })} style={{ height: "28px", padding: "0 10px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#fff", fontSize: "12px", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
-                                  👁 View
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                );
-              })()}
+              {activeTab === "survey-templates" && <SurveyTemplatesPanel setNotice={setNotice} canWrite={canWriteSurveys} />}
 
               {activeTab === "notes" && activePatient && (
                 <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
@@ -1375,6 +1371,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
           )}
         </div>
       </div>
+      )}
 
       {/* WhatsApp Outreach Modal */}
       {whatsAppModalOpen && (
@@ -1498,8 +1495,8 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                         padding: "8px 10px",
                         borderRadius: "8px",
                         textAlign: "left",
-                        border: selectedTemplate === t.key ? "1.5px solid #25D366" : "1px solid #e2e8f0",
-                        background: selectedTemplate === t.key ? "#f0fdf4" : "#f8fafc",
+                        border: !savedTemplateId && selectedTemplate === t.key ? "1.5px solid #25D366" : "1px solid #e2e8f0",
+                        background: !savedTemplateId && selectedTemplate === t.key ? "#f0fdf4" : "#f8fafc",
                         cursor: "pointer",
                       }}
                     >
@@ -1510,6 +1507,26 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                     </button>
                   ))}
                 </div>
+                {savedWhatsAppTemplates.length > 0 && (
+                  <div style={{ marginTop: "12px" }}>
+                    <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "6px" }}>
+                      Saved WhatsApp Templates
+                    </label>
+                    <select
+                      value={savedTemplateId ?? ""}
+                      onChange={(e) => (e.target.value ? handleSavedTemplateSwitch(Number(e.target.value)) : handleTemplateSwitch(selectedTemplate))}
+                      style={{ width: "100%", height: "38px", padding: "0 10px", borderRadius: "8px", border: savedTemplateId ? "1.5px solid #25D366" : "1.5px solid #cbd5e1", fontSize: "13px", background: "#fff" }}
+                    >
+                      <option value="">— Use a discharge template above —</option>
+                      {savedWhatsAppTemplates.filter((t) => t.category !== "SURVEY" && t.category !== "REMINDER").map((t) => (
+                        <option key={t.id} value={t.id}>{t.name} · {WHATSAPP_CATEGORY_LABELS[t.category]}</option>
+                      ))}
+                    </select>
+                    <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
+                      Manage these under WhatsApp Templates. To send a feedback survey, use Survey Management so the reply can be tracked.
+                    </div>
+                  </div>
+                )}
               </div>
 
             <div style={{ marginTop: "auto", paddingTop: "14px", borderTop: "1px solid #e2e8f0", display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between", alignItems: "center" }}>

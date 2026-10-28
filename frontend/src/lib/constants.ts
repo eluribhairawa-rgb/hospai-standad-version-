@@ -35,6 +35,10 @@ export const NAV_ITEMS: NavItem[] = [
 
   // Patient Reach AI
   { id: "patient-reach-ai", label: "Patient Reach AI", group: "patient-reach-ai", module: "patient-reach-ai", permission: "patients.read", deniedHint: "You do not have permission to access Patient Reach AI." },
+  { id: "reach-survey-management", label: "Survey Management", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+  { id: "reach-survey-templates", label: "Survey Templates", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+  { id: "reach-whatsapp-templates", label: "WhatsApp Templates", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+  { id: "reach-survey-reports", label: "Survey Reports", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
 
   // 2. OP Management
   { id: "patients", label: "Patients", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
@@ -124,7 +128,7 @@ const MODULE_CUSTOM_INFO: Partial<Record<ModuleId, { label: string; description:
   },
   "patient-reach-ai": {
     label: "Patient Reach AI",
-    description: "Access to AI patient outreach, clinical discharge summaries, and WhatsApp messaging.",
+    description: "Access to AI patient outreach, discharge summaries, WhatsApp messaging, patient surveys and feedback reports.",
   },
 };
 
@@ -157,6 +161,7 @@ export const ADMIN_PERMISSIONS: string[] = [
   "pharmacy.collect", "pharmacy.settle", "pharmacy.report",
   "diag.read", "diag.order", "diag.bill", "diag.specimen", "diag.result",
   "diag.imaging", "diag.report", "diag.authorize", "diag.catalogue", "diag.qc",
+  "reach.read", "reach.write",
 ];
 
 export const SUPER_ADMIN_PERMISSIONS: string[] = [
@@ -203,7 +208,7 @@ export const MODULE_PERMISSIONS: Record<ModuleId, string[]> = {
   "ip-management": ["patients.read", "patients.write"],
   "op-management": ["patients.read", "patients.write"],
   emergency: ["patients.read", "patients.write"],
-  "patient-reach-ai": ["patients.read"],
+  "patient-reach-ai": ["patients.read", "reach.read", "reach.write"],
   settings: [],
   employees: ["admin.users.read", "admin.users.update"],
   // Legacy stored values remain supported.
@@ -225,6 +230,10 @@ export const PAGE_MODULE_MAP: Record<string, ModuleId> = {
   "patient-journey": "consultation",
   "discharge-summary": "ip-management",
   "patient-reach-ai": "patient-reach-ai",
+  "reach-survey-management": "patient-reach-ai",
+  "reach-survey-templates": "patient-reach-ai",
+  "reach-whatsapp-templates": "patient-reach-ai",
+  "reach-survey-reports": "patient-reach-ai",
   "doctors-history": "doctors-history",
   "doctor-prescription": "doctor-prescription",
   billing: "billing",

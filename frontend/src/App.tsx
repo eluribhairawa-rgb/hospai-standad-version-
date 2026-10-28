@@ -113,7 +113,7 @@ const VALID_PAGE_IDS = new Set([
   "billing-reconciliation", "billing-overview", "billing-patient-bills", "billing-ip-discharge",
   "billing-advances-refunds", "billing-doctor-payouts", "billing-reports-day-close",
   "consent-desk", "dashboard", "diag", "lab-diagnostics", "diag-catalogue", "diag-imaging", "diag-laboratory",
-  "diag-orders-billing", "diag-overview", "discharge-summary", "patient-reach-ai", "diag-quality-equipment", "diag-reports-approval", "diag-reports-history", "doctor-prescription",
+  "diag-orders-billing", "diag-overview", "discharge-summary", "patient-reach-ai", "reach-survey-management", "reach-survey-templates", "reach-whatsapp-templates", "reach-survey-reports", "diag-quality-equipment", "diag-reports-approval", "diag-reports-history", "doctor-prescription",
   "doctors-history", "emergency", "emergency-worklist", "employees", "hrms", "inpatient", "inpatient-patients", "insurance-desk", "ip-admission", "lab", "laboratory",
   "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients",
   "pharmacy", "pharmacy-overview", "pharmacy-op-dispense", "pharmacy-ip-dispense", "pharmacy-inventory", "pharmacy-inventory-stock",
@@ -136,6 +136,10 @@ const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   "patient-journey": "patients",
   "discharge-summary": "bed",
   "patient-reach-ai": "patient-reach-ai",
+  "reach-survey-management": "check-circle",
+  "reach-survey-templates": "document-list",
+  "reach-whatsapp-templates": "patient-reach-ai",
+  "reach-survey-reports": "chart",
   readmit: "readmit",
   billing: "billing",
   "billing-overview": "dashboard",
@@ -420,6 +424,10 @@ const PAGE_SUBTITLES: Record<string, string> = {
   "patient-journey": "Track patient outpatient milestones.",
   "discharge-summary": "AI discharge summary from the patient's records across all modules.",
   "patient-reach-ai": "Patient outreach & clinical discharge summaries via WhatsApp.",
+  "reach-survey-management": "Queue, send and track patient feedback surveys over WhatsApp.",
+  "reach-survey-templates": "Create survey questions and answer options.",
+  "reach-whatsapp-templates": "Reusable WhatsApp messages for surveys, reminders and follow-ups.",
+  "reach-survey-reports": "Detailed patient feedback reports and exports.",
   "op-desk": "Manage doctors and outpatient schedules.",
   "doctor-prescription": "Create branded prescriptions with medicines, lab tests, advice, and follow-up.",
   "ip-admission": "Admit patient and request bed allocation.",
@@ -1515,7 +1523,7 @@ function App() {
           <span className="mobile-top-bar-title">HospAI</span>
         </div>
         <Container size="full">
-        {page !== "dashboard" && !page.startsWith("pharmacy-") && !isBillingRoute && page !== "doctor-prescription" && page !== "op-queue-management" && page !== "add" && page !== "ip-admission" && page !== "patient-journey" && page !== "discharge-summary" && page !== "patient-reach-ai" && page !== "bed-management" && page !== "inpatient-patients" && (
+        {page !== "dashboard" && !page.startsWith("pharmacy-") && !isBillingRoute && page !== "doctor-prescription" && page !== "op-queue-management" && page !== "add" && page !== "ip-admission" && page !== "patient-journey" && page !== "discharge-summary" && page !== "patient-reach-ai" && !page.startsWith("reach-") && page !== "bed-management" && page !== "inpatient-patients" && (
           <header className="topbar module-unified-topbar">
             <div className="module-topbar-breadcrumb-row">
               <div className="module-topbar-breadcrumb">
@@ -1633,6 +1641,19 @@ function App() {
             selectedPatient={selectedPatient}
             onSelectPatient={handleSelectPatient}
             onNavigate={navigateToPage}
+            canWriteSurveys={hasPermission("reach.write")}
+          />
+        )}
+
+        {(page === "reach-survey-management" || page === "reach-survey-templates" || page === "reach-whatsapp-templates" || page === "reach-survey-reports") && hasPermission("reach.read") && (
+          <PatientReachAiPage
+            key={`${page}-${pageKeys[page] || 0}`}
+            view={page.replace("reach-", "") as "survey-management" | "survey-templates" | "whatsapp-templates" | "survey-reports"}
+            setNotice={setNotice}
+            selectedPatient={selectedPatient}
+            onSelectPatient={handleSelectPatient}
+            onNavigate={navigateToPage}
+            canWriteSurveys={hasPermission("reach.write")}
           />
         )}
 

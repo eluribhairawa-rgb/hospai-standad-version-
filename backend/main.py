@@ -93,11 +93,12 @@ from routers.pharmacy import router as pharmacy_router, emar_router
 from routers.lab_ot_accounts_hr import router as lab_ot_accounts_hr_router
 from routers.reports_exports import router as reports_exports_router
 from routers.diagnostics import router as diagnostics_router
+from routers.patient_reach import router as patient_reach_router
 
 for r in (
     auth_router, platform_router, clinical_router, patients_router, employees_bed_router,
     billing_router, pharmacy_router, emar_router, lab_ot_accounts_hr_router, reports_exports_router,
-    diagnostics_router,
+    diagnostics_router, patient_reach_router,
 ):
     app.include_router(r)
 

@@ -69,7 +69,7 @@ MODULE_PERMISSION_MAP = {
     "ot": {"ot.read", "ot.write"},
     "accounts": {"accounts.read", "accounts.write"},
     "symptom_ai": {"symptom_ai.use"},
-    "patient-reach-ai": {"patients.read"},
+    "patient-reach-ai": {"patients.read", "reach.read", "reach.write"},
     # New Lab & Diagnostics department (Orders & Billing, Laboratory, Imaging,
     # Reports & Approval, Test Catalogue, Quality & Equipment). Distinct from
     # the legacy "laboratory"/"lab" outsourced-billing module above, which is
@@ -105,6 +105,8 @@ ADMIN_PERMISSIONS = {
     "diag.authorize",
     "diag.catalogue",
     "diag.qc",
+    "reach.read",
+    "reach.write",
 }
 
 SUPER_ADMIN_PERMISSIONS = ADMIN_PERMISSIONS | {
