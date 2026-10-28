@@ -48,6 +48,28 @@ const IMAGE_NAME_PATTERN = /\.(png|jpe?g|webp|bmp|gif|tiff?|heic|heif)$/i;
 const ACTIVE_READMIT_STATUSES = new Set(["In Queue", "In Consultation"]);
 const FOLLOW_UP_PAYMENT_MODES = ["Cash", "UPI", "Card"];
 
+type QueueStatusLabel = "Waiting" | "In Consultation" | "Completed";
+type QueueEntry = { status: QueueStatusLabel; time: string; doctor: string; department: string; token: string };
+type StatusFilter = "All" | QueueStatusLabel | "Not in Queue";
+
+const STATUS_FILTERS: StatusFilter[] = ["All", "Waiting", "In Consultation", "Completed", "Not in Queue"];
+const STATUS_PRIORITY: Record<QueueStatusLabel, number> = { "In Consultation": 3, Waiting: 2, Completed: 1 };
+const STATUS_BADGE_STYLE: Record<QueueStatusLabel | "Not in Queue", { bg: string; fg: string; border: string }> = {
+  Waiting: { bg: "#fef3c7", fg: "#92400e", border: "#fcd34d" },
+  "In Consultation": { bg: "#dbeafe", fg: "#1e40af", border: "#93c5fd" },
+  Completed: { bg: "#dcfce7", fg: "#166534", border: "#86efac" },
+  "Not in Queue": { bg: "#f1f5f9", fg: "#475569", border: "#cbd5e1" },
+};
+const QUEUE_REFRESH_MS = 15000;
+
+// Mirrors the status mapping used by OP Queue Management so both pages agree.
+function mapQueueStatus(raw: unknown): QueueStatusLabel {
+  const status = String(raw || "").trim().toLowerCase();
+  if (["in_consultation", "in consultation", "consulting"].includes(status)) return "In Consultation";
+  if (["completed", "done", "consulted", "finished"].includes(status)) return "Completed";
+  return "Waiting";
+}
+
 function getStoredReadmitQueue() {
   try {
     const storedQueue = JSON.parse(localStorage.getItem("hospai_op_queue") || "[]");
@@ -129,6 +151,49 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
   const [previousDocuments, setPreviousDocuments] = useState<DocumentItem[]>([]);
   const [previousDocumentsLoading, setPreviousDocumentsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [queueByUhid, setQueueByUhid] = useState<Record<string, QueueEntry>>({});
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+
+  // Today's OP queue keyed by UHID, from the same endpoint OP Queue Management reads.
+  const loadTodayQueue = async () => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA");
+      const data = await apiFetch<{ appointments?: Array<any> }>(`/api/appointments?date=${today}`);
+      const next: Record<string, QueueEntry> = {};
+      (data.appointments || []).forEach((a) => {
+        const visitType = String(a.visit_type || "").trim().toLowerCase();
+        if (visitType === "emergency" || visitType === "ip") return;
+        const uhid = String(a.patient_id || "").trim();
+        if (!uhid) return;
+        const status = mapQueueStatus(a.status);
+        const existing = next[uhid];
+        if (existing && STATUS_PRIORITY[existing.status] >= STATUS_PRIORITY[status]) return;
+        next[uhid] = {
+          status,
+          // Same derivation as OP Queue Management: the appointments table stores the
+          // time inside appointment_date, there is no separate time column.
+          time: a.appointment_time || (a.appointment_date ? new Date(a.appointment_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"),
+          doctor: a.doctor_name || "-",
+          department: a.department || "",
+          token: String(a.token_no || a.id || ""),
+        };
+      });
+      setQueueByUhid(next);
+    } catch {
+      // Keep the last known queue state rather than clearing it on a transient error.
+    }
+  };
+
+  useEffect(() => {
+    void loadTodayQueue();
+    const timer = window.setInterval(() => void loadTodayQueue(), QUEUE_REFRESH_MS);
+    const onFocus = () => void loadTodayQueue();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   const normalizeProfile = (patient: Patient): ProfileUpdates => {
     let sys = "";
@@ -248,6 +313,20 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
         );
       })
     : patients;
+
+  const getRowStatus = (patient: Patient): QueueStatusLabel | "Not in Queue" =>
+    queueByUhid[String(patient.patient_id || "").trim()]?.status || "Not in Queue";
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<StatusFilter, number> = { All: results.length, Waiting: 0, "In Consultation": 0, Completed: 0, "Not in Queue": 0 };
+    results.forEach((patient) => {
+      counts[getRowStatus(patient)] += 1;
+    });
+    return counts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, queueByUhid]);
+
+  const filteredResults = statusFilter === "All" ? results : results.filter((patient) => getRowStatus(patient) === statusFilter);
 
   const doctorNames = useMemo(() => {
     const unique = new Set<string>();
@@ -676,6 +755,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
       setPreviousDocuments([]);
       onSelect({ ...activePatient, ...profileUpdates, appointment_id: data.appointment_id });
       await onReadmitComplete?.(activePatient.patient_id);
+      await loadTodayQueue();
     } catch (error) {
       reportError(setNotice, error as { message?: string; status?: number }, "Unable to re-visit patient.");
     } finally {
@@ -692,9 +772,33 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
       <div className="list-meta">
         <p className="muted">
           {query.trim()
-            ? `Showing ${results.length} search result${results.length === 1 ? "" : "s"}.`
-            : `Showing ${results.length} patient${results.length === 1 ? "" : "s"}.`}
+            ? `Showing ${filteredResults.length} search result${filteredResults.length === 1 ? "" : "s"}.`
+            : `Showing ${filteredResults.length} patient${filteredResults.length === 1 ? "" : "s"}.`}
         </p>
+      </div>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", margin: "0 0 12px" }}>
+        {STATUS_FILTERS.map((filter) => {
+          const active = statusFilter === filter;
+          return (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => setStatusFilter(filter)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "999px",
+                fontSize: "12.5px",
+                fontWeight: 700,
+                cursor: "pointer",
+                border: active ? "1.5px solid #0f766e" : "1px solid #cbd5e1",
+                background: active ? "#ccfbf1" : "#ffffff",
+                color: active ? "#0f766e" : "#475569",
+              }}
+            >
+              {filter === "Not in Queue" ? "Not in Today's Queue" : filter} ({statusCounts[filter]})
+            </button>
+          );
+        })}
       </div>
       <div className="search-results">
         <Table className="readmit-results-table">
@@ -704,17 +808,26 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
             <TableCell>Age</TableCell>
             <TableCell>Gender</TableCell>
             <TableCell>Phone</TableCell>
-            <TableCell>Created</TableCell>
+            <TableCell>Queue Status</TableCell>
+            <TableCell>Appt. Time</TableCell>
+            <TableCell>Doctor</TableCell>
             <TableCell>Actions</TableCell>
           </TableHead>
-          {results.map((patient) => {
-            const expanded = activePatient?.patient_id === patient.patient_id;
+          {filteredResults.length === 0 && <p className="muted" style={{ padding: "12px" }}>No patients match the selected filter.</p>}
+          {filteredResults.map((patient) => {
+            const queueEntry = queueByUhid[String(patient.patient_id || "").trim()];
+            const rowStatus = queueEntry?.status || "Not in Queue";
+            const badge = STATUS_BADGE_STYLE[rowStatus];
+            const inQueue = Boolean(queueEntry);
+            const expanded = !inQueue && activePatient?.patient_id === patient.patient_id;
             return (
               <Fragment key={patient.patient_id}>
                 <TableRow 
                   className={`${expanded ? "active" : ""} cursor-pointer`}
                   style={{ cursor: 'pointer' }}
                   onClick={() => {
+                    // Patients already in today's queue are not re-admitted from here (no duplicate visits).
+                    if (inQueue) return;
                     if (expanded) {
                       setActivePatient(null);
                       return;
@@ -729,14 +842,44 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                   <TableCell>{patient.age || "-"}</TableCell>
                   <TableCell>{patient.gender || "-"}</TableCell>
                   <TableCell>{patient.phone || "-"}</TableCell>
-                  <TableCell>{formatDateTimeIST(patient.created_at || patient.registration_date || patient.created_on)}</TableCell>
-                  <TableCell className="row-actions">
-                    <Button
-                      variant={expanded ? "ghost" : "primary"}
-                      size="sm"
+                  <TableCell>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "3px 10px",
+                        borderRadius: "999px",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        background: badge.bg,
+                        color: badge.fg,
+                        border: `1px solid ${badge.border}`,
+                      }}
                     >
-                      {expanded ? "Hide" : "Readmit"}
-                    </Button>
+                      {rowStatus === "Not in Queue" ? "Not in Today's Queue" : rowStatus}
+                    </span>
+                  </TableCell>
+                  <TableCell>{queueEntry?.time || "-"}</TableCell>
+                  <TableCell title={queueEntry?.department || undefined}>{queueEntry?.doctor || "-"}</TableCell>
+                  <TableCell className="row-actions">
+                    {inQueue ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onNavigate?.("op-queue-management");
+                        }}
+                      >
+                        View Queue
+                      </Button>
+                    ) : (
+                      <Button
+                        variant={expanded ? "ghost" : "primary"}
+                        size="sm"
+                      >
+                        {expanded ? "Hide" : "Readmit"}
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
                 {expanded && activePatient && (

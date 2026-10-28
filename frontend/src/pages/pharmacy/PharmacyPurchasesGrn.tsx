@@ -682,10 +682,10 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
       {/* Sub-tabs Navigation */}
       <div style={{ display: "flex", borderBottom: "2px solid #e2e8f0", gap: "1.5rem", marginBottom: "1.5rem", overflowX: "auto" }}>
         {[
-          { id: "grn", label: "Receive Goods (New GRN)" },
-          { id: "grn_history", label: `GRN Inward History (${goodsReceipts.length})` },
           { id: "pr", label: `Purchase Requests (${purchaseRequests.length})` },
           { id: "po", label: `Purchase Orders (${purchaseOrders.length})` },
+          { id: "grn", label: "Receive Goods (New GRN)" },
+          { id: "grn_history", label: `GRN Inward History (${goodsReceipts.length})` },
           { id: "returns", label: "Purchase Returns" },
         ].map((tab) => (
           <button

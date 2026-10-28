@@ -8028,7 +8028,8 @@ button.hosp-rev-due-row:hover .hosp-pay-pill {
 .hosp-revenue-pop-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 .readmit-results-table .table-head,
 .readmit-results-table .table-row {
-  grid-template-columns: minmax(180px, 1.35fr) minmax(170px, 1.15fr) minmax(58px, 0.42fr) minmax(82px, 0.6fr) minmax(120px, 0.85fr) minmax(190px, 1.2fr) minmax(120px, 0.72fr);
+  grid-template-columns: minmax(140px, 1.2fr) minmax(120px, 1fr) minmax(48px, 0.35fr) minmax(64px, 0.5fr) minmax(100px, 0.8fr) minmax(150px, 1fr) minmax(70px, 0.55fr) minmax(110px, 0.9fr) minmax(112px, 0.7fr);
+  min-width: 980px;
   align-items: center;
 }
 .readmit-results-table .table-row > span,
@@ -8036,8 +8037,20 @@ button.hosp-rev-due-row:hover .hosp-pay-pill {
   min-width: 0;
   white-space: nowrap;
 }
+.readmit-results-table { overflow-x: auto; }
+.readmit-results-table .table-head > span:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: #f8fafc;
+}
 .readmit-results-table .row-actions {
   display: flex;
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: #ffffff;
+  box-shadow: -6px 0 8px -6px rgba(15, 23, 42, 0.18);
   align-items: center;
   justify-content: flex-start;
 }

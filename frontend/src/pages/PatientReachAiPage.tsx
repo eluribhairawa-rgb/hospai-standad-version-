@@ -81,6 +81,43 @@ type Certificate = {
   created_at?: string;
 };
 
+type TabKey = "discharge" | "journey" | "whatsapp" | "survey" | "notes";
+
+type SurveyResponse = {
+  submitted: string;
+  overall: number;
+  doctor: number;
+  nursing: number;
+  cleanliness: number;
+  discharge: number;
+  comment: string;
+};
+
+type OutreachLog = { at: string; template: string; to: string; message: string };
+
+// No survey backend exists yet; these figures are sample data for the Survey Responses UI.
+const SAMPLE_SURVEYS: SurveyResponse[] = [
+  { submitted: "2026-10-28T16:15:00", overall: 5, doctor: 5, nursing: 5, cleanliness: 4, discharge: 5, comment: "Excellent service. The staff were attentive throughout my stay." },
+  { submitted: "2026-10-27T11:20:00", overall: 4, doctor: 4, nursing: 4, cleanliness: 5, discharge: 4, comment: "Good experience." },
+  { submitted: "2026-10-26T15:45:00", overall: 5, doctor: 5, nursing: 4, cleanliness: 4, discharge: 5, comment: "Very supportive staff." },
+  { submitted: "2026-10-25T10:30:00", overall: 4, doctor: 4, nursing: 4, cleanliness: 4, discharge: 4, comment: "Process was smooth." },
+  { submitted: "2026-10-24T17:10:00", overall: 5, doctor: 5, nursing: 5, cleanliness: 4, discharge: 5, comment: "Great care and support." },
+];
+
+const SAMPLE_KPIS = { total: 128, pending: 24, completed: 104, notSent: 8 };
+
+const TEMPLATE_LABELS: Record<string, string> = {
+  summary: "Discharge Summary",
+  meds: "Medication & Care",
+  followup: "Follow-up Reminder",
+  quick: "Quick Update",
+};
+
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+
+const fmtDateTime = (iso: string) =>
+  new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
 const esc = (value: unknown) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 
@@ -170,6 +207,11 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<"summary" | "meds" | "followup" | "quick">("summary");
   const [copied, setCopied] = useState(false);
+
+  // Tabs, outreach history and notes
+  const [activeTab, setActiveTab] = useState<TabKey>("discharge");
+  const [outreachLog, setOutreachLog] = useState<OutreachLog[]>([]);
+  const [notesByPatient, setNotesByPatient] = useState<Record<string, string>>({});
 
   // Load patient directory
   const fetchPatients = async (query = "") => {
@@ -472,6 +514,12 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
       : `https://api.whatsapp.com/send?text=${encoded}`;
 
     window.open(url, "_blank", "noopener,noreferrer");
+    if (activePatient) {
+      setOutreachLog((prev) => [
+        { at: new Date().toISOString(), template: selectedTemplate, to: `${recipientName || activePatient.patient_id}${recipientPhone ? ` (${recipientPhone})` : ""}`, message: whatsAppMessage },
+        ...prev,
+      ]);
+    }
     setNotice({
       type: "success",
       message: `WhatsApp launched for ${recipientName || "patient"}. Message is ready to send.`,
@@ -617,7 +665,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
             Patient Reach AI
           </h1>
           <p style={{ fontSize: "14px", color: "#64748b", margin: 0, maxWidth: "720px" }}>
-            Browse all hospital patients, inspect automated clinical discharge summaries, and engage patients directly via WhatsApp with one click.
+            Patient outreach, discharge summaries and feedback management
           </p>
         </div>
 
@@ -647,6 +695,27 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
             {loadingPatients ? "Refreshing…" : "Refresh Patients"}
           </button>
         </div>
+      </div>
+
+      {/* KPI Summary Row (sample figures until a survey backend exists) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "20px" }}>
+        {[
+          { label: "Total Responses", value: String(SAMPLE_KPIS.total), bg: "#ecfdf5", border: "#d1fae5", iconBg: "#d1fae5", color: "#059669", icon: "💬" },
+          { label: "Pending Responses", value: String(SAMPLE_KPIS.pending), bg: "#fffbeb", border: "#fde68a", iconBg: "#fde68a", color: "#d97706", icon: "🕒" },
+          { label: "Completed Surveys", value: String(SAMPLE_KPIS.completed), bg: "#eff6ff", border: "#dbeafe", iconBg: "#dbeafe", color: "#2563eb", icon: "✔" },
+          { label: "Average Rating", value: `${avg(SAMPLE_SURVEYS.map((r) => r.overall)).toFixed(1)}`, suffix: " / 5", bg: "#faf5ff", border: "#e9d5ff", iconBg: "#e9d5ff", color: "#7c3aed", icon: "★" },
+        ].map((k) => (
+          <div key={k.label} style={{ display: "flex", alignItems: "center", gap: "16px", background: k.bg, border: `1px solid ${k.border}`, borderRadius: "14px", padding: "18px 22px" }}>
+            <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: k.iconBg, color: k.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", flexShrink: 0 }}>{k.icon}</div>
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "#475569" }}>{k.label}</div>
+              <div style={{ fontSize: "30px", fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
+                {k.value}
+                {"suffix" in k && k.suffix && <span style={{ fontSize: "17px", fontWeight: 700, color: "#475569" }}>{k.suffix}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Main Grid: Split Layout */}
@@ -897,7 +966,201 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                 )}
               </div>
 
+              {/* Tabs */}
+              <div style={{ display: "flex", gap: "28px", borderBottom: "1px solid #e2e8f0", padding: "0 6px", background: "#ffffff", borderRadius: "14px 14px 0 0", overflowX: "auto" }}>
+                {([
+                  ["discharge", "Discharge Summary"],
+                  ["journey", "Patient Journey"],
+                  ["whatsapp", "WhatsApp History"],
+                  ["survey", "Survey Responses"],
+                  ["notes", "Notes"],
+                ] as [TabKey, string][]).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setActiveTab(key)}
+                    style={{
+                      padding: "14px 4px",
+                      background: "none",
+                      border: "none",
+                      borderBottom: activeTab === key ? "2px solid #00828a" : "2px solid transparent",
+                      marginBottom: "-1px",
+                      fontSize: "13.5px",
+                      fontWeight: activeTab === key ? 700 : 500,
+                      color: activeTab === key ? "#0f766e" : "#64748b",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {activeTab === "journey" && (
+                <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
+                  <h3 style={{ fontSize: "17px", fontWeight: 800, color: "#0f172a", margin: "0 0 12px" }}>Patient Journey</h3>
+                  {loadingRecords ? (
+                    <div style={{ color: "#94a3b8", fontSize: "13px" }}>Loading…</div>
+                  ) : records?.timeline && records.timeline.length > 0 ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {records.timeline.map((t, i) => (
+                        <div key={i} style={{ display: "flex", gap: "12px", fontSize: "13px" }}>
+                          <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#00828a", marginTop: "5px", flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontWeight: 700, color: "#1e293b" }}>{t.title || t.label || t.event || t.type || "Event"}</div>
+                            <div style={{ color: "#64748b", fontSize: "12px" }}>
+                              {[t.at || t.time || t.date, t.detail || t.description].filter(Boolean).join(" · ")}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ color: "#94a3b8", fontSize: "13px" }}>No journey events recorded for this visit.</div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "whatsapp" && (
+                <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
+                  <h3 style={{ fontSize: "17px", fontWeight: 800, color: "#0f172a", margin: "0 0 2px" }}>WhatsApp History</h3>
+                  <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>Messages launched from this screen in the current session.</p>
+                  {outreachLog.length === 0 ? (
+                    <div style={{ color: "#94a3b8", fontSize: "13px" }}>No WhatsApp messages sent yet.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      {outreachLog.map((l, i) => (
+                        <div key={i} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "10px 14px", fontSize: "12.5px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#1e293b" }}>
+                            <span>{TEMPLATE_LABELS[l.template] || l.template} → {l.to}</span>
+                            <span style={{ color: "#94a3b8", fontWeight: 500, fontSize: "11.5px" }}>{fmtDateTime(l.at)}</span>
+                          </div>
+                          <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", color: "#475569", fontSize: "12px" }}>{l.message}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "survey" && (() => {
+                const rows = SAMPLE_SURVEYS;
+                const cats = [
+                  { label: "Doctor Behaviour", value: avg(rows.map((r) => r.doctor)), color: "#34d399" },
+                  { label: "Nursing Care", value: avg(rows.map((r) => r.nursing)), color: "#06b6d4" },
+                  { label: "Cleanliness", value: avg(rows.map((r) => r.cleanliness)), color: "#8b5cf6" },
+                  { label: "Discharge Process", value: avg(rows.map((r) => r.discharge)), color: "#f97316" },
+                ];
+                const overall = avg(rows.map((r) => r.overall));
+                const rate = Math.round((SAMPLE_KPIS.completed / SAMPLE_KPIS.total) * 100);
+                const completedPct = (SAMPLE_KPIS.completed / (SAMPLE_KPIS.completed + SAMPLE_KPIS.pending + SAMPLE_KPIS.notSent)) * 100;
+                const pendingPct = (SAMPLE_KPIS.pending / (SAMPLE_KPIS.completed + SAMPLE_KPIS.pending + SAMPLE_KPIS.notSent)) * 100;
+                const card = { border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px" } as const;
+                const th = { padding: "10px 8px", textAlign: "left", fontSize: "11.5px", fontWeight: 700, color: "#475569", background: "#f8fafc", whiteSpace: "nowrap" } as const;
+                const td = { padding: "11px 8px", fontSize: "12.5px", color: "#334155", borderTop: "1px solid #f1f5f9" } as const;
+                return (
+                  <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+                      <div>
+                        <h3 style={{ fontSize: "20px", fontWeight: 800, color: "#0f172a", margin: "0 0 2px" }}>Survey Responses</h3>
+                        <p style={{ fontSize: "12.5px", color: "#64748b", margin: 0 }}>Patient feedback received through WhatsApp (sample data)</p>
+                      </div>
+                      <button type="button" style={{ height: "36px", padding: "0 14px", borderRadius: "8px", background: "#fff", border: "1px solid #cbd5e1", fontSize: "12.5px", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
+                        View All Responses
+                      </button>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 1fr", gap: "16px", marginBottom: "20px" }}>
+                      <div style={card}>
+                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155" }}>Overall Satisfaction</div>
+                        <div style={{ fontSize: "34px", fontWeight: 800, color: "#0f172a", margin: "8px 0 4px" }}>
+                          {overall.toFixed(1)}<span style={{ fontSize: "18px", color: "#475569" }}> / 5</span>
+                        </div>
+                        <div style={{ fontSize: "26px", color: "#7c3aed", letterSpacing: "2px" }}>
+                          {[1, 2, 3, 4, 5].map((n) => <span key={n} style={{ color: n <= Math.round(overall) ? "#7c3aed" : "#cbd5e1" }}>★</span>)}
+                        </div>
+                      </div>
+
+                      <div style={card}>
+                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "10px" }}>Responses by Category</div>
+                        {cats.map((c) => (
+                          <div key={c.label} style={{ display: "grid", gridTemplateColumns: "130px 34px 1fr", alignItems: "center", gap: "8px", fontSize: "12.5px", color: "#475569", marginBottom: "8px" }}>
+                            <span>{c.label}</span>
+                            <strong style={{ color: "#0f172a" }}>{c.value.toFixed(1)}</strong>
+                            <div style={{ height: "7px", borderRadius: "4px", background: "#e2e8f0" }}>
+                              <div style={{ width: `${(c.value / 5) * 100}%`, height: "100%", borderRadius: "4px", background: c.color }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={card}>
+                        <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155", marginBottom: "10px" }}>Response Rate</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "18px" }}>
+                          <div style={{ position: "relative", width: "96px", height: "96px", flexShrink: 0 }}>
+                            <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: `conic-gradient(#10b981 0 ${completedPct}%, #f59e0b ${completedPct}% ${completedPct + pendingPct}%, #cbd5e1 ${completedPct + pendingPct}% 100%)` }} />
+                            <div style={{ position: "absolute", inset: "12px", borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", fontWeight: 800, color: "#0f172a" }}>{rate}%</div>
+                          </div>
+                          <div style={{ fontSize: "12.5px", color: "#475569", display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <span><span style={{ color: "#10b981" }}>●</span> Completed ({SAMPLE_KPIS.completed})</span>
+                            <span><span style={{ color: "#f59e0b" }}>●</span> Pending ({SAMPLE_KPIS.pending})</span>
+                            <span><span style={{ color: "#cbd5e1" }}>●</span> Not Sent ({SAMPLE_KPIS.notSent})</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr>
+                            {["Sl.No", "Submitted On", "Overall Rating", "Doctor Behaviour", "Nursing Care", "Cleanliness", "Discharge Process", "Comments", "Actions"].map((h) => (
+                              <th key={h} style={th}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r, i) => (
+                            <tr key={i}>
+                              <td style={td}>{i + 1}</td>
+                              <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDateTime(r.submitted)}</td>
+                              <td style={td}><span style={{ color: "#f59e0b" }}>★</span> {r.overall}</td>
+                              <td style={td}>{r.doctor}</td>
+                              <td style={td}>{r.nursing}</td>
+                              <td style={td}>{r.cleanliness}</td>
+                              <td style={td}>{r.discharge}</td>
+                              <td style={{ ...td, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.comment}>{r.comment}</td>
+                              <td style={td}>
+                                <button type="button" onClick={() => setNotice({ type: "info", message: r.comment })} style={{ height: "28px", padding: "0 10px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#fff", fontSize: "12px", fontWeight: 600, color: "#334155", cursor: "pointer" }}>
+                                  👁 View
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {activeTab === "notes" && activePatient && (
+                <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px" }}>
+                  <h3 style={{ fontSize: "17px", fontWeight: 800, color: "#0f172a", margin: "0 0 2px" }}>Notes</h3>
+                  <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 12px" }}>Outreach notes for {activePatientName} (kept in this session only).</p>
+                  <textarea
+                    value={notesByPatient[activePatient.patient_id] || ""}
+                    onChange={(e) => setNotesByPatient((prev) => ({ ...prev, [activePatient.patient_id]: e.target.value }))}
+                    placeholder="Add a note about calls, feedback or follow-ups…"
+                    rows={8}
+                    style={{ width: "100%", boxSizing: "border-box", borderRadius: "8px", border: "1.5px solid #cbd5e1", padding: "10px 12px", fontSize: "13px", fontFamily: "inherit", resize: "vertical" }}
+                  />
+                </div>
+              )}
+
               {/* Discharge Summary Main Panel */}
+              {activeTab === "discharge" && (
               <div style={{ background: "#ffffff", borderRadius: "14px", border: "1px solid #e2e8f0", padding: "20px 24px", boxShadow: "0 2px 6px rgba(0,0,0,0.03)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
                   <div>
@@ -1107,6 +1370,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                   </>
                 )}
               </div>
+              )}
             </>
           )}
         </div>
@@ -1135,7 +1399,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
               background: "#ffffff",
               borderRadius: "16px",
               width: "100%",
-              maxWidth: "640px",
+              maxWidth: "1040px",
               boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
               overflow: "hidden",
               display: "flex",
@@ -1164,7 +1428,9 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
             </div>
 
             {/* Modal Body */}
-            <div style={{ padding: "20px", overflowY: "auto", flex: 1 }}>
+            <div style={{ display: "flex", flex: 1, minHeight: 0, overflowY: "auto", flexWrap: "wrap" }}>
+              {/* Left column: recipient, templates, actions */}
+              <div style={{ flex: "1 1 380px", minWidth: 0, padding: "20px", display: "flex", flexDirection: "column", background: "#ffffff" }}>
               {/* Recipient Details */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
                 <div>
@@ -1246,38 +1512,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                 </div>
               </div>
 
-              {/* Live Message Preview & Editor */}
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>
-                    WhatsApp Message Text (Editable)
-                  </label>
-                  <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
-                    {whatsAppMessage.length} characters
-                  </span>
-                </div>
-                <textarea
-                  value={whatsAppMessage}
-                  onChange={(e) => setWhatsAppMessage(e.target.value)}
-                  rows={9}
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    borderRadius: "8px",
-                    border: "1.5px solid #cbd5e1",
-                    padding: "10px 12px",
-                    fontSize: "12.5px",
-                    lineHeight: "1.5",
-                    fontFamily: "monospace",
-                    background: "#f8fafc",
-                    resize: "vertical",
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div style={{ padding: "14px 20px", background: "#f8fafc", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ marginTop: "auto", paddingTop: "14px", borderTop: "1px solid #e2e8f0", display: "flex", flexWrap: "wrap", gap: "10px", justifyContent: "space-between", alignItems: "center" }}>
               <button
                 type="button"
                 onClick={handleCopyMessage}
@@ -1340,6 +1575,42 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                   <WhatsAppIcon size={17} />
                   Open in WhatsApp
                 </button>
+              </div>
+            </div>
+              </div>
+
+              {/* Right column: editable message */}
+              <div style={{ flex: "1.3 1 440px", minWidth: 0, padding: "20px", display: "flex", flexDirection: "column", background: "#f8fafc", borderLeft: "1px solid #e2e8f0" }}>
+              {/* Live Message Preview & Editor */}
+              <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 700, color: "#475569" }}>
+                    WhatsApp Message Text (Editable)
+                  </label>
+                  <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                    {whatsAppMessage.length} characters
+                  </span>
+                </div>
+                <textarea
+                  value={whatsAppMessage}
+                  onChange={(e) => setWhatsAppMessage(e.target.value)}
+                  rows={18}
+                  style={{
+                    flex: 1,
+                    minHeight: "380px",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    borderRadius: "8px",
+                    border: "1.5px solid #cbd5e1",
+                    padding: "10px 12px",
+                    fontSize: "12.5px",
+                    lineHeight: "1.5",
+                    fontFamily: "monospace",
+                    background: "#ffffff",
+                    resize: "vertical",
+                  }}
+                />
+              </div>
               </div>
             </div>
           </div>
