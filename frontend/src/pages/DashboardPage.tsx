@@ -34,6 +34,12 @@ function formatCurrency(amount?: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount || 0);
 }
 
+function formatAmount(amount?: number) {
+  const value = Math.round((amount || 0) * 100) / 100;
+  const fraction = Number.isInteger(value) ? 0 : 2;
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: fraction, maximumFractionDigits: fraction }).format(value);
+}
+
 function formatNumber(amount?: number) {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(amount || 0);
 }
@@ -433,7 +439,7 @@ export default function DashboardPage({
       if (setNotice) {
         setNotice({
           type: "success",
-          message: `Payment of ${formatCurrency(totalRecorded)} received successfully! Dues settled.`,
+          message: `Payment of ${formatAmount(totalRecorded)} received successfully! Dues settled.`,
         });
       }
 
@@ -460,7 +466,7 @@ export default function DashboardPage({
       ],
       meta: [
         { label: "Receipt No", value: rcp.receipt_no },
-        { label: "Total Paid", value: formatCurrency(rcp.total_amount) },
+        { label: "Total Paid", value: formatAmount(rcp.total_amount) },
         { label: "Payment Mode", value: rcp.payment_mode },
         { label: "Settlement Status", value: "SETTLED / PAID" },
       ],
@@ -469,12 +475,12 @@ export default function DashboardPage({
         b.invoice_no || "-",
         b.module || "Hospital",
         b.patient_name || "-",
-        formatCurrency(b.amount),
+        formatAmount(b.amount),
       ]),
       totals: [
         {
           label: "Total Amount Received",
-          value: formatCurrency(rcp.total_amount),
+          value: formatAmount(rcp.total_amount),
           grand: true,
         },
       ],
@@ -1373,7 +1379,7 @@ export default function DashboardPage({
               <h4>Payment Settled Successfully!</h4>
               <p style={{ margin: "4px 0", color: "#166534", fontSize: "0.9rem" }}>
                 Receipt <strong>{paymentSuccessReceipt.receipt_no}</strong> for{" "}
-                <strong>{formatCurrency(paymentSuccessReceipt.total_amount)}</strong> has been recorded.
+                <strong>{formatAmount(paymentSuccessReceipt.total_amount)}</strong> has been recorded.
               </p>
               <p style={{ margin: "2px 0", color: "#475569", fontSize: "0.78rem" }}>
                 Mode: <strong>{paymentSuccessReceipt.payment_mode}</strong> · Date: {paymentSuccessReceipt.date}
@@ -1388,7 +1394,7 @@ export default function DashboardPage({
                 {paymentSuccessReceipt.settled_bills?.map((sb: any, idx: number) => (
                   <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", padding: "4px 0", borderBottom: "1px dashed #e2e8f0" }}>
                     <span>{sb.invoice_no} ({sb.module || "General"}) · {sb.patient_name || "Patient"}</span>
-                    <strong style={{ color: "#16a34a" }}>{formatCurrency(sb.amount)}</strong>
+                    <strong style={{ color: "#16a34a" }}>{formatAmount(sb.amount)}</strong>
                   </div>
                 ))}
               </div>
@@ -1410,19 +1416,19 @@ export default function DashboardPage({
               <div className="hosp-dues-summary-item">
                 <span className="hosp-dues-summary-label">Total Outstanding</span>
                 <span className="hosp-dues-summary-value" style={{ color: "#dc2626" }}>
-                  {formatCurrency(dueRevenue)}
+                  {formatAmount(dueRevenue)}
                 </span>
               </div>
               <div className="hosp-dues-summary-item">
                 <span className="hosp-dues-summary-label">Amount To Pay</span>
                 <span className="hosp-dues-summary-value" style={{ color: "#0284c7" }}>
-                  {formatCurrency(parseFloat(payAmount) || 0)}
+                  {formatAmount(parseFloat(payAmount) || 0)}
                 </span>
               </div>
               <div className="hosp-dues-summary-item">
                 <span className="hosp-dues-summary-label">Remaining Balance</span>
                 <span className="hosp-dues-summary-value" style={{ color: "#16a34a" }}>
-                  {formatCurrency(Math.max(dueRevenue - (parseFloat(payAmount) || 0), 0))}
+                  {formatAmount(Math.max(dueRevenue - (parseFloat(payAmount) || 0), 0))}
                 </span>
               </div>
             </div>
@@ -1452,7 +1458,7 @@ export default function DashboardPage({
                 <div style={{ padding: "18px", textAlign: "center", background: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
                   <p style={{ margin: "0 0 4px", fontWeight: 600, color: "#334155" }}>No individual invoices found</p>
                   <p style={{ margin: 0, fontSize: "0.78rem", color: "#64748b" }}>
-                    You can record a direct settlement for the outstanding balance of {formatCurrency(dueRevenue)}.
+                    You can record a direct settlement for the outstanding balance of {formatAmount(dueRevenue)}.
                   </p>
                 </div>
               ) : (
@@ -1486,9 +1492,9 @@ export default function DashboardPage({
                           </div>
                         </div>
                         <div className="hosp-dues-bill-amounts">
-                          <div className="hosp-dues-bill-due">{formatCurrency(bill.balance)}</div>
+                          <div className="hosp-dues-bill-due">{formatAmount(bill.balance)}</div>
                           <div className="hosp-dues-bill-meta">
-                            Billed: {formatCurrency(bill.net_bill)} · Paid: {formatCurrency(bill.applied)}
+                            Billed: {formatAmount(bill.net_bill)} · Paid: {formatAmount(bill.applied)}
                           </div>
                         </div>
                       </div>
@@ -1598,7 +1604,7 @@ export default function DashboardPage({
                 >
                   {processingPayment
                     ? "Recording Payment..."
-                    : `Pay ${formatCurrency(parseFloat(payAmount) || 0)} Now`}
+                    : `Pay ${formatAmount(parseFloat(payAmount) || 0)} Now`}
                 </Button>
               </div>
             </div>
