@@ -9643,7 +9643,7 @@ button.hosp-rev-due-row:hover .hosp-pay-pill {
 
 .module-table-doctors-history .table-head,
 .module-table-doctors-history .table-row {
-  grid-template-columns: 1.2fr 1.2fr 1fr 1fr 2fr 1fr 0.8fr;
+  grid-template-columns: 1.2fr 1.2fr 1fr 1.1fr 1fr 2fr 1fr 0.8fr;
   align-items: center;
 }
 

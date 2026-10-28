@@ -315,6 +315,7 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient }: Props) 
                 <TableCell>Date & Time</TableCell>
                 <TableCell>Patient Name</TableCell>
                 <TableCell>Patient ID</TableCell>
+                <TableCell>Doctor</TableCell>
                 <TableCell>Visit Type</TableCell>
                 <TableCell>Chief Complaint</TableCell>
                 <TableCell>Status</TableCell>
@@ -329,6 +330,7 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient }: Props) 
                     <TableCell>
                       <b className="patient-id-chip">{record.patient_id || "-"}</b>
                     </TableCell>
+                    <TableCell>{record.doctor_name || "-"}</TableCell>
                     <TableCell>{formatVisitType(record)}</TableCell>
                     <TableCell className="chief-complaint-cell">{record.notes || "-"}</TableCell>
                     <TableCell>
@@ -355,7 +357,7 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient }: Props) 
                 ))
               ) : (
                 <TableRow>
-                  <TableCell className="empty-row-cell" style={{ gridColumn: "span 7", textAlign: "center", padding: "2rem", color: "var(--text-muted)", display: "block", width: "100%" }}>
+                  <TableCell className="empty-row-cell" style={{ gridColumn: "span 8", textAlign: "center", padding: "2rem", color: "var(--text-muted)", display: "block", width: "100%" }}>
                     No consultation records found matching filters.
                   </TableCell>
                 </TableRow>
