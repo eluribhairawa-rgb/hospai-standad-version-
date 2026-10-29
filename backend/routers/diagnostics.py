@@ -2,11 +2,12 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Reques
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from database import get_db
+# Every write below commits together with its audit_logs row (see database.get_audited_db).
+from database import get_audited_db as get_db
 from deps import require_permissions
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip
 import legacy_queries as lq
-from qwen_ocr import extract_lab_results
+from qwen_ocr import extract_lab_results, lab_identity_warnings
 
 router = APIRouter(prefix="/api", tags=["diagnostics"])
 
@@ -193,9 +194,10 @@ def diag_order_add_items(order_id: int, request: Request, payload: dict = Body(.
 @router.post("/diag/order-items/{item_id}/cancel")
 def diag_order_item_cancel(item_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                             user: dict = Depends(require_permissions("diag.order"))):
-    lq.cancel_diag_order_item(db, item_id, payload.get("reason"), user.get("username"))
-    log_audit_event(db, user, client_ip(request), "cancel", "diag_order_items", str(item_id), {"reason": payload.get("reason")})
-    return {"status": "ok"}
+    result = lq.cancel_diag_order_item(db, item_id, payload.get("reason"), user.get("username"), payload.get("refund_mode"))
+    log_audit_event(db, user, client_ip(request), "cancel", "diag_order_items", str(item_id),
+                    {"reason": payload.get("reason"), "refund_amount": result["refund_amount"]})
+    return {"status": "ok", **result}
 
 
 @router.get("/admissions/{admission_id}/diag-running-charges")
@@ -276,7 +278,7 @@ def diag_specimen_receive(specimen_id: int, request: Request, payload: dict = Bo
 
 
 @router.post("/diag/lab/items/{item_id}/ocr")
-def diag_results_ocr(item_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+def diag_results_ocr(item_id: int, request: Request, file: UploadFile = File(...), db: Session = Depends(get_db),
                      user: dict = Depends(require_permissions("diag.result"))):
     item = lq.get_diag_lab_item_detail(db, item_id)
     if not item:
@@ -288,11 +290,20 @@ def diag_results_ocr(item_id: int, file: UploadFile = File(...), db: Session = D
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
     try:
-        return extract_lab_results(content, parameters, item.get("service_name"))
+        extracted = extract_lab_results(content, parameters, item.get("service_name"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    patient = item.get("patient") or {}
+    patient_name = f"{patient.get('name') or ''} {patient.get('last_name') or ''}".strip() or (item.get("walkin_name") or "")
+    extracted["identity_warnings"] = lab_identity_warnings(
+        extracted, patient_name, [s.get("specimen_no") for s in item.get("specimens") or []])
+    log_audit_event(db, user, client_ip(request), "ocr_scan", "diag_results", str(item_id), {
+        "file_name": file.filename, "values_read": len(extracted["values"]),
+        "skipped": len(extracted.get("skipped") or []), "identity_warnings": extracted["identity_warnings"],
+    })
+    return extracted
 
 
 @router.post("/diag/lab/items/{item_id}/results")
@@ -381,17 +392,21 @@ def diag_imaging_status_update(exam_id: int, request: Request, payload: dict = B
 # --------------------------------------------------------- reports & approval --
 
 @router.post("/diag/items/{item_id}/report-draft")
-def diag_report_draft_get_or_create(item_id: int, payload: dict = Body(default={}), db: Session = Depends(get_db),
+def diag_report_draft_get_or_create(item_id: int, request: Request, payload: dict = Body(default={}), db: Session = Depends(get_db),
                                      user: dict = Depends(require_permissions("diag.report"))):
     payload = payload or {}
     report = lq.get_or_create_diag_report_draft(db, item_id, payload.get("report_type", "LAB"), user.get("username"), payload.get("template"))
+    if report.get("created"):
+        log_audit_event(db, user, client_ip(request), "create", "diag_reports", str(report["id"]), {"order_item_id": item_id})
     return report
 
 
 @router.put("/diag/reports/{report_id}")
-def diag_report_save(report_id: int, payload: dict = Body(...), db: Session = Depends(get_db),
+def diag_report_save(report_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                       user: dict = Depends(require_permissions("diag.report"))):
     lq.save_diag_report_draft(db, report_id, payload.get("content") or {}, user.get("username"), bool(payload.get("is_preliminary", False)))
+    log_audit_event(db, user, client_ip(request), "save_draft", "diag_reports", str(report_id),
+                    {"is_preliminary": bool(payload.get("is_preliminary", False))})
     return {"status": "ok"}
 
 

@@ -10585,15 +10585,40 @@ def update_diag_package(db, package_id, data):
 
 
 
-def _generate_diag_order_no():
+def _generate_diag_order_no(cursor=None):
     import random
-    return f"LABORD-{datetime.now().strftime('%y%m%d%H%M%S')}{random.randint(10, 99)}"
+    return _unused_code(cursor, "diag_orders", "order_no",
+                        lambda: f"LABORD-{datetime.now().strftime('%y%m%d%H%M%S')}{random.randint(10, 99)}")
 
 
 
-def _generate_specimen_no():
+def _generate_specimen_no(cursor=None):
     import random
-    return f"SPC-{datetime.now().strftime('%y%m%d')}-{random.randint(1000, 9999)}"
+    return _unused_code(cursor, "diag_specimens", "specimen_no",
+                        lambda: f"SPC-{datetime.now().strftime('%y%m%d')}-{random.randint(1000, 9999)}")
+
+
+def _unused_code(cursor, table, column, make_code, attempts=25):
+    """The random suffixes above are short (90 order numbers per second, 9000 specimen
+    numbers per day), so collisions with the UNIQUE constraint are routine on a busy
+    day -- and also within one order that has several tests. Re-draw until unused."""
+    code = make_code()
+    if cursor is None:
+        return code
+    for _ in range(attempts):
+        cursor.execute(f"SELECT 1 FROM {table} WHERE {column} = ?", (code,))
+        if not cursor.fetchone():
+            return code
+        code = make_code()
+    raise ValueError("Could not allocate a unique number. Please try again.")
+
+
+def _db_now(cursor):
+    """Database clock in the same (naive, session-timezone) basis as the CURRENT_TIMESTAMP
+    values stored in diag_* timestamps, so TAT is right even if the app server's timezone
+    differs from the database's."""
+    cursor.execute("SELECT LOCALTIMESTAMP AS now")
+    return cursor.fetchone()["now"]
 
 
 
@@ -10644,7 +10669,7 @@ def create_diag_order(db, data, username=None):
                 if not cursor.fetchone():
                     raise ValueError("Visit does not belong to this patient.")
 
-        order_no = _generate_diag_order_no()
+        order_no = _generate_diag_order_no(cursor)
         cursor.execute(
             """
             INSERT INTO diag_orders (
@@ -10838,7 +10863,7 @@ def confirm_diag_order(db, order_id, username=None):
             if item["department_type"] == "LAB":
                 cursor.execute(
                     "INSERT INTO diag_specimens (order_item_id, specimen_no, status) VALUES (?, ?, 'awaiting_collection')",
-                    (item["id"], _generate_specimen_no()),
+                    (item["id"], _generate_specimen_no(cursor)),
                 )
             elif item["department_type"] == "IMAGING":
                 cursor.execute("SELECT modality, preparation_requirements FROM diag_services WHERE id = ?", (item["service_id"],))
@@ -10878,7 +10903,31 @@ def cancel_diag_draft_order(db, order_id, username=None):
 
 
 
-def cancel_diag_order_item(db, item_id, reason, username=None):
+REFUND_PAYMENT_MODES = ('cash', 'card', 'upi', 'bank', 'razorpay', 'bank_transfer', 'net_banking', 'mixed_payment', 'cheque')
+
+
+def _invoice_balance_after_cancellation(total, paid, advance, refunded):
+    """Settles a LAB invoice after a service is cancelled. Whatever the patient has
+    paid beyond the new total is refunded (never left as a silent overpayment), and
+    due/payment_status are recomputed with the same formula record_invoice_payment uses.
+    Returns (refund_amount, refunded_total, due_amount, payment_status)."""
+    total = max(float(total or 0), 0.0)
+    net_paid = float(paid or 0) + float(advance or 0) - float(refunded or 0)
+    refund = round(max(net_paid - total, 0.0), 2)
+    refunded_total = round(float(refunded or 0) + refund, 2)
+    due = round(max(total - (net_paid - refund), 0.0), 2)
+    if refund > 0 and total <= 0:
+        status = "refunded"
+    elif due <= 0:
+        status = "paid"
+    elif net_paid - refund > 0:
+        status = "partial"
+    else:
+        status = "due"
+    return refund, refunded_total, due, status
+
+
+def cancel_diag_order_item(db, item_id, reason, username=None, refund_mode=None):
     if not (reason or "").strip():
         raise ValueError("A cancellation reason is required.")
     with get_connection(db) as conn:
@@ -10895,15 +10944,42 @@ def cancel_diag_order_item(db, item_id, reason, username=None):
             "UPDATE diag_order_items SET cancelled_at = CURRENT_TIMESTAMP, cancel_reason = ?, progress_status = 'cancelled' WHERE id = ?",
             (reason, item_id),
         )
-        cursor.execute("SELECT order_id, invoice_id FROM diag_orders o WHERE o.id = (SELECT order_id FROM diag_order_items WHERE id = ?)", (item_id,))
+        cursor.execute("SELECT invoice_id FROM diag_orders WHERE id = ?", (item["order_id"],))
         order_row = cursor.fetchone()
+        refund = 0.0
         if order_row and order_row["invoice_id"]:
-            cursor.execute(
-                "UPDATE invoices SET subtotal = subtotal - ?, total_amount = total_amount - ?, due_amount = GREATEST(due_amount - ?, 0) WHERE id = ?",
-                (item["amount"], item["amount"], item["amount"], order_row["invoice_id"]),
-            )
+            cursor.execute("SELECT * FROM invoices WHERE id = ?", (order_row["invoice_id"],))
+            inv = cursor.fetchone()
+            if inv:
+                amount = float(item["amount"] or 0)
+                new_total = max(float(inv["total_amount"] or 0) - amount, 0.0)
+                new_subtotal = max(float(inv["subtotal"] or 0) - amount, 0.0)
+                refund, refunded_total, due, status = _invoice_balance_after_cancellation(
+                    new_total, inv["paid_amount"], inv["advance_amount"], inv["refunded_amount"])
+                cursor.execute(
+                    """
+                    UPDATE invoices SET subtotal = ?, total_amount = ?, due_amount = ?, refunded_amount = ?,
+                        payment_status = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (new_subtotal, new_total, due, refunded_total, status, username, inv["id"]),
+                )
+                if refund > 0:
+                    mode = str(refund_mode or "").strip().lower().replace(" ", "_")
+                    if mode not in REFUND_PAYMENT_MODES:
+                        cursor.execute(
+                            "SELECT payment_mode FROM invoice_payments WHERE invoice_id = ? AND amount > 0 ORDER BY id DESC LIMIT 1",
+                            (inv["id"],),
+                        )
+                        last = cursor.fetchone()
+                        mode = last["payment_mode"] if last else "cash"
+                    # Negative payment row, same convention as pharmacy returns, so collections reconcile.
+                    cursor.execute(
+                        "INSERT INTO invoice_payments (invoice_id, amount, payment_mode, gateway_ref) VALUES (?, ?, ?, ?)",
+                        (inv["id"], -refund, mode, f"REFUND: cancelled {item['service_name']} (item #{item_id})"),
+                    )
         conn.commit()
-        return True
+        return {"refund_amount": refund}
 
 
 
@@ -10942,7 +11018,7 @@ def add_diag_order_items(db, order_id, new_items, username=None):
                 if svc["service_type"] == "LAB":
                     cursor.execute(
                         "INSERT INTO diag_specimens (order_item_id, specimen_no, status) VALUES (?, ?, 'awaiting_collection')",
-                        (new_item_id, _generate_specimen_no()),
+                        (new_item_id, _generate_specimen_no(cursor)),
                     )
                 elif svc["service_type"] == "IMAGING":
                     cursor.execute(
@@ -10979,6 +11055,10 @@ def get_diag_patient_running_charges(db, admission_id):
 # ==================== Lab & Diagnostics: Laboratory ====================
 
 
+# An item whose report was already released is only being amended -- its TAT was met (or missed) at first release.
+_HAS_RELEASED_REPORT_SQL = "EXISTS (SELECT 1 FROM diag_reports rr WHERE rr.order_item_id = oi.id AND rr.status IN ('released', 'amended'))"
+
+
 def list_diag_lab_worklist(db, stage=None, search=None, priority=None):
     """stage: awaiting_collection | collected | received | testing | results_entered | for_review | released"""
     with get_connection(db) as conn:
@@ -10998,7 +11078,8 @@ def list_diag_lab_worklist(db, stage=None, search=None, priority=None):
             SELECT oi.*, o.order_no, o.patient_id, o.encounter_type, o.admission_id, o.appointment_id, o.priority,
                    o.created_at AS order_created_at, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name,
                    sp.id AS specimen_id, sp.specimen_no, sp.status AS specimen_status, sp.collected_at, sp.received_at,
-                   sp.rejection_reason, sp.container_type, sp.collection_location, ds.turnaround_hours
+                   sp.rejection_reason, sp.container_type, sp.collection_location, ds.turnaround_hours,
+                   {_HAS_RELEASED_REPORT_SQL} AS has_released_report
             FROM diag_order_items oi
             JOIN diag_orders o ON o.id = oi.order_id
             LEFT JOIN patients p ON p.patient_id = o.patient_id
@@ -11010,12 +11091,13 @@ def list_diag_lab_worklist(db, stage=None, search=None, priority=None):
             tuple(params),
         )
         rows = [dict(r) for r in cursor.fetchall()]
+        now = _db_now(cursor)
         for r in rows:
-            if r["progress_status"] == "released":
+            if r["progress_status"] == "released" or r["has_released_report"]:
                 r.update({"elapsed_hours": None, "tat_target_hours": None, "tat_status": None})
             else:
                 tat_start = r.get("received_at") or r.get("collected_at") or r.get("order_created_at")
-                r.update(_tat_status(tat_start, r.get("turnaround_hours")))
+                r.update(_tat_status(tat_start, r.get("turnaround_hours"), now))
         if stage:
             stage_map = {
                 "awaiting_collection": lambda r: r["specimen_status"] == "awaiting_collection",
@@ -11037,7 +11119,7 @@ def get_diag_lab_item_detail(db, order_item_id):
         cursor.execute(
             """
             SELECT oi.*, o.order_no, o.patient_id, o.encounter_type, o.admission_id, o.appointment_id,
-                   o.priority, o.clinical_indication, o.referring_clinician
+                   o.priority, o.clinical_indication, o.referring_clinician, o.walkin_name
             FROM diag_order_items oi JOIN diag_orders o ON o.id = oi.order_id WHERE oi.id = ?
             """,
             (order_item_id,),
@@ -11055,6 +11137,15 @@ def get_diag_lab_item_detail(db, order_item_id):
         item_dict["parameters"] = [dict(r) for r in cursor.fetchall()]
         cursor.execute("SELECT * FROM diag_results WHERE order_item_id = ? ORDER BY id ASC", (order_item_id,))
         item_dict["results"] = [dict(r) for r in cursor.fetchall()]
+        cursor.execute(
+            """
+            SELECT r.*, v.vendor_name FROM diag_external_referrals r
+            LEFT JOIN lab_vendors v ON v.id = r.vendor_id
+            WHERE r.order_item_id = ? ORDER BY r.id DESC
+            """,
+            (order_item_id,),
+        )
+        item_dict["external_referrals"] = [dict(r) for r in cursor.fetchall()]
         latest_report = _latest_diag_report(cursor, order_item_id)
         item_dict["report_id"] = latest_report["id"] if latest_report else None
         item_dict["report_status"] = latest_report["status"] if latest_report else None
@@ -11111,7 +11202,7 @@ def receive_diag_specimen(db, specimen_id, data, username=None):
                 "UPDATE diag_specimens SET status = 'rejected', received_by = ?, received_at = CURRENT_TIMESTAMP, condition_on_receipt = ?, rejection_reason = ? WHERE id = ?",
                 (username, data.get("condition_on_receipt"), reason, specimen_id),
             )
-            new_specimen_no = _generate_specimen_no()
+            new_specimen_no = _generate_specimen_no(cursor)
             cursor.execute(
                 "INSERT INTO diag_specimens (order_item_id, specimen_no, status, replaces_specimen_id) VALUES (?, ?, 'awaiting_collection', ?)",
                 (specimen["order_item_id"], new_specimen_no, specimen_id),
@@ -11195,14 +11286,54 @@ def save_diag_results(db, order_item_id, results, username=None, is_draft=True):
                 "Return it for correction (or create an amendment if released) before changing results."
             )
         critical_hits = []
+        checked_equipment = set()
+        checked_lots = set()
         for r in results:
-            cursor.execute("SELECT * FROM diag_service_parameters WHERE id = ?", (r["parameter_id"],))
+            cursor.execute("SELECT * FROM diag_service_parameters WHERE id = ?", (r.get("parameter_id"),))
             param = cursor.fetchone()
             if not param:
                 raise ValueError(f"Unknown parameter {r.get('parameter_id')}.")
             if param["service_id"] != item["service_id"]:
                 raise ValueError(f"Parameter {param['name']} does not belong to this test.")
             equipment_id = r.get("equipment_id")
+            # Final results must name the analyzer, otherwise the QC-hold and
+            # equipment-status checks below could be bypassed by leaving it out.
+            if not is_draft and not equipment_id:
+                raise ValueError(f"Select the equipment/analyzer used for {param['name']} before finalizing results.")
+            if equipment_id and equipment_id not in checked_equipment:
+                cursor.execute(
+                    "SELECT name, operational_status, next_calibration_date, next_calibration_date < CURRENT_DATE AS calibration_overdue "
+                    "FROM diag_equipment WHERE id = ?",
+                    (equipment_id,),
+                )
+                equipment = cursor.fetchone()
+                if not equipment:
+                    raise ValueError("The selected equipment was not found.")
+                if equipment["operational_status"] in ("maintenance", "down"):
+                    raise ValueError(
+                        f"{equipment['name']} is {equipment['operational_status']} and cannot be used for results. "
+                        "Return it to service from Quality & Equipment first."
+                    )
+                if equipment["calibration_overdue"]:
+                    raise ValueError(
+                        f"{equipment['name']} was due for calibration on {equipment['next_calibration_date']}. "
+                        "Record the calibration (update the next calibration date) in Quality & Equipment first."
+                    )
+                checked_equipment.add(equipment_id)
+            reagent_lot_id = r.get("reagent_lot_id") or None
+            if reagent_lot_id and reagent_lot_id not in checked_lots:
+                cursor.execute(
+                    "SELECT item_name, lot_no, status, expiry_date, expiry_date < CURRENT_DATE AS expired FROM diag_reagent_lots WHERE id = ?",
+                    (reagent_lot_id,),
+                )
+                lot = cursor.fetchone()
+                if not lot:
+                    raise ValueError("The selected reagent lot was not found.")
+                if lot["expired"] or lot["status"] == "expired":
+                    raise ValueError(f"Reagent lot {lot['item_name']} {lot['lot_no']} expired on {lot['expiry_date']} and cannot be used.")
+                if lot["status"] != "available":
+                    raise ValueError(f"Reagent lot {lot['item_name']} {lot['lot_no']} is {lot['status']} and cannot be used.")
+                checked_lots.add(reagent_lot_id)
             if equipment_id:
                 cursor.execute(
                     """
@@ -11217,6 +11348,15 @@ def save_diag_results(db, order_item_id, results, username=None, is_draft=True):
                 if cursor.fetchone():
                     raise ValueError(f"Equipment has an open QC hold for {param['name']}. Results cannot be recorded until the hold is released.")
             value_numeric = r.get("value_numeric")
+            if value_numeric in ("", None):
+                value_numeric = None
+            else:
+                try:
+                    value_numeric = float(value_numeric)
+                except (TypeError, ValueError):
+                    raise ValueError(f"Enter a number for {param['name']}.")
+                if not math.isfinite(value_numeric):
+                    raise ValueError(f"Enter a number for {param['name']}.")
             flag = _compute_result_flag(value_numeric, param["ref_low"], param["ref_high"], param["critical_low"], param["critical_high"])
             if flag in ("critical_low", "critical_high"):
                 critical_hits.append((param["name"], flag))
@@ -11226,21 +11366,22 @@ def save_diag_results(db, order_item_id, results, username=None, is_draft=True):
                 cursor.execute(
                     """
                     UPDATE diag_results SET value_text = ?, value_numeric = ?, unit = ?, method = ?, ref_range_text = ?,
-                        ref_low = ?, ref_high = ?, flag = ?, is_draft = ?, equipment_id = ?, updated_by = ?
+                        ref_low = ?, ref_high = ?, flag = ?, is_draft = ?, equipment_id = ?, reagent_lot_id = ?, updated_by = ?,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
                     (r.get("value_text"), value_numeric, param["unit"], param["method"], param["ref_text"],
-                     param["ref_low"], param["ref_high"], flag, is_draft, equipment_id, username, existing["id"]),
+                     param["ref_low"], param["ref_high"], flag, is_draft, equipment_id, reagent_lot_id, username, existing["id"]),
                 )
             else:
                 cursor.execute(
                     """
                     INSERT INTO diag_results (
-                        order_item_id, parameter_id, parameter_name, equipment_id, value_text, value_numeric, unit, method,
+                        order_item_id, parameter_id, parameter_name, equipment_id, reagent_lot_id, value_text, value_numeric, unit, method,
                         ref_range_text, ref_low, ref_high, flag, is_draft, entered_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (order_item_id, r["parameter_id"], param["name"], equipment_id, r.get("value_text"), value_numeric,
+                    (order_item_id, r["parameter_id"], param["name"], equipment_id, reagent_lot_id, r.get("value_text"), value_numeric,
                      param["unit"], param["method"], param["ref_text"], param["ref_low"], param["ref_high"], flag, is_draft, username),
                 )
         raised = 0
@@ -11270,9 +11411,23 @@ def save_diag_results(db, order_item_id, results, username=None, is_draft=True):
 def create_diag_external_referral(db, order_item_id, data, username=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM diag_order_items WHERE id = ?", (order_item_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, cancelled_at FROM diag_order_items WHERE id = ?", (order_item_id,))
+        item = cursor.fetchone()
+        if not item:
             raise ValueError("Order item not found.")
+        if item["cancelled_at"]:
+            raise ValueError("This test has been cancelled.")
+        if not data.get("vendor_id"):
+            raise ValueError("Select the referral laboratory.")
+        cursor.execute("SELECT id FROM lab_vendors WHERE id = ?", (data["vendor_id"],))
+        if not cursor.fetchone():
+            raise ValueError("Referral laboratory not found.")
+        cursor.execute(
+            "SELECT id FROM diag_external_referrals WHERE order_item_id = ? AND received_report_at IS NULL LIMIT 1",
+            (order_item_id,),
+        )
+        if cursor.fetchone():
+            raise ValueError("This test is already with an external laboratory. Mark that report received before dispatching again.")
         cursor.execute(
             """
             INSERT INTO diag_external_referrals (order_item_id, vendor_id, dispatched_at, dispatched_by, expected_turnaround, notes)
@@ -11293,13 +11448,16 @@ def update_diag_external_referral(db, referral_id, data):
         existing = cursor.fetchone()
         if not existing:
             return False
+        received_at = data.get("received_report_at", existing["received_report_at"])
+        if data.get("report_received") and not existing["received_report_at"]:
+            received_at = datetime.now()
         cursor.execute(
             """
             UPDATE diag_external_referrals SET received_report_at = ?, report_document_id = ?, local_review_status = ?, notes = ?
             WHERE id = ?
             """,
             (
-                data.get("received_report_at", existing["received_report_at"]),
+                received_at,
                 data.get("report_document_id", existing["report_document_id"]),
                 data.get("local_review_status", existing["local_review_status"]),
                 data.get("notes", existing["notes"]),
@@ -11364,7 +11522,8 @@ def list_diag_imaging_worklist(db, stage=None, modality=None, room=None, search=
             SELECT oi.*, o.order_no, o.patient_id, o.encounter_type, o.admission_id, o.priority,
                    o.created_at AS order_created_at, COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name,
                    ex.id AS exam_id, ex.modality, ex.room, ex.scheduled_at, ex.expected_duration_min, ex.status AS exam_status,
-                   ex.assigned_staff, ex.prep_instructions, ex.image_available, ds.turnaround_hours
+                   ex.assigned_staff, ex.prep_instructions, ex.image_available, ds.turnaround_hours,
+                   {_HAS_RELEASED_REPORT_SQL} AS has_released_report
             FROM diag_order_items oi
             JOIN diag_orders o ON o.id = oi.order_id
             LEFT JOIN patients p ON p.patient_id = o.patient_id
@@ -11376,12 +11535,13 @@ def list_diag_imaging_worklist(db, stage=None, modality=None, room=None, search=
             tuple(params),
         )
         rows = [dict(r) for r in cursor.fetchall()]
+        now = _db_now(cursor)
         for r in rows:
-            if r["progress_status"] in ("released", "cancelled"):
+            if r["progress_status"] in ("released", "cancelled") or r["has_released_report"]:
                 r.update({"elapsed_hours": None, "tat_target_hours": None, "tat_status": None})
             else:
                 tat_start = r.get("scheduled_at") or r.get("order_created_at")
-                r.update(_tat_status(tat_start, r.get("turnaround_hours")))
+                r.update(_tat_status(tat_start, r.get("turnaround_hours"), now))
         if stage:
             stage_map = {
                 "to_schedule": lambda r: r["exam_status"] == "scheduled" and not r["scheduled_at"],
@@ -11561,6 +11721,45 @@ def _release_status(report):
     return "amended" if report["amendment_reason"] else "released"
 
 
+# LAB result values live in diag_results (one row per parameter) and are edited in place
+# when an amendment changes them, so each authorized LAB report version keeps a frozen
+# copy of the values it was signed with. Without it, printing/viewing an older released
+# version would show the amended values instead of what was actually reported.
+RESULTS_SNAPSHOT_KEY = "results_snapshot"
+FROZEN_REPORT_STATUSES = ("authorized", "released", "amended")
+_SNAPSHOT_RESULT_FIELDS = (
+    "id", "parameter_id", "parameter_name", "value_text", "value_numeric", "unit", "method",
+    "ref_range_text", "ref_low", "ref_high", "flag", "equipment_id", "reagent_lot_id", "entered_by", "updated_by",
+)
+
+
+def _report_content_dict(raw):
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _strip_results_snapshot(content):
+    """Snapshots are written only by authorization -- never accepted from a client draft."""
+    if isinstance(content, dict) and RESULTS_SNAPSHOT_KEY in content:
+        content = {k: v for k, v in content.items() if k != RESULTS_SNAPSHOT_KEY}
+    return content
+
+
+def _snapshot_lab_results(cursor, report):
+    cursor.execute("SELECT * FROM diag_results WHERE order_item_id = ? ORDER BY id ASC", (report["order_item_id"],))
+    rows = [{k: r[k] for k in _SNAPSHOT_RESULT_FIELDS} for r in cursor.fetchall()]
+    content = _report_content_dict(report["content"])
+    content[RESULTS_SNAPSHOT_KEY] = rows
+    cursor.execute("UPDATE diag_reports SET content = ? WHERE id = ?", (json.dumps(content, default=str), report["id"]))
+
+
 def get_or_create_diag_report_draft(db, order_item_id, report_type, username=None, template=None):
     """Returns the item's current (latest) report, creating version 1 only when none exists.
     New versions of a released report are created exclusively through create_diag_report_amendment."""
@@ -11578,7 +11777,7 @@ def get_or_create_diag_report_draft(db, order_item_id, report_type, username=Non
         report_id = _insert_diag_report_draft(cursor, order_item_id, item["department_type"] or report_type, username, template)
         conn.commit()
         cursor.execute("SELECT * FROM diag_reports WHERE id = ?", (report_id,))
-        return dict(cursor.fetchone())
+        return {**dict(cursor.fetchone()), "created": True}
 
 
 
@@ -11593,7 +11792,7 @@ def save_diag_report_draft(db, report_id, content, username=None, is_preliminary
             raise ValueError(f"Report cannot be edited while {report['status']}.")
         cursor.execute(
             "UPDATE diag_reports SET content = ?, is_preliminary = ?, drafted_by = ? WHERE id = ?",
-            (json.dumps(content), bool(is_preliminary), username, report_id),
+            (json.dumps(_strip_results_snapshot(content)), bool(is_preliminary), username, report_id),
         )
         conn.commit()
         return True
@@ -11643,6 +11842,24 @@ def return_diag_report_for_correction(db, report_id, reason, username=None):
 
 
 
+def _check_four_eyes(cursor, report, username):
+    """LAB sign-off needs a second person: the authorizer cannot be the user who entered
+    or last changed this test's results, or who drafted the report. (Imaging is exempt --
+    the radiologist who writes the read is the one who signs it.)"""
+    cursor.execute(
+        "SELECT entered_by, updated_by FROM diag_results WHERE order_item_id = ?", (report["order_item_id"],)
+    )
+    involved = {report["drafted_by"]}
+    for r in cursor.fetchall():
+        involved.update((r["entered_by"], r["updated_by"]))
+    involved.discard(None)
+    if not username or username in involved:
+        raise ValueError(
+            "You entered these results or drafted this report, so another authorized user must "
+            "review and authorize it (four-eyes rule)."
+        )
+
+
 def authorize_diag_report(db, report_id, username, also_release=False):
     with get_connection(db) as conn:
         cursor = conn.cursor()
@@ -11653,10 +11870,14 @@ def authorize_diag_report(db, report_id, username, also_release=False):
         cursor.execute("SELECT COUNT(*) AS c FROM diag_critical_alerts WHERE order_item_id = ? AND resolved_at IS NULL", (report["order_item_id"],))
         if cursor.fetchone()["c"] > 0:
             raise ValueError("This result has an unresolved critical value alert. Record who was contacted and resolve the alert (Reports > Critical Alerts) before authorizing this report.")
+        if report["report_type"] == "LAB":
+            _check_four_eyes(cursor, report, username)
         cursor.execute(
             "UPDATE diag_reports SET status = 'authorized', authorized_by = ?, authorized_at = CURRENT_TIMESTAMP WHERE id = ?",
             (username, report_id),
         )
+        if report["report_type"] == "LAB":
+            _snapshot_lab_results(cursor, report)
         if also_release:
             cursor.execute("UPDATE diag_reports SET status = ?, released_at = CURRENT_TIMESTAMP WHERE id = ?", (_release_status(report), report_id))
             cursor.execute("UPDATE diag_order_items SET progress_status = 'released' WHERE id = ?", (report["order_item_id"],))
@@ -11701,7 +11922,7 @@ def create_diag_report_amendment(db, report_id, reason, content, username=None):
             INSERT INTO diag_reports (order_item_id, report_type, version, status, content, template, drafted_by, previous_version_id, amendment_reason)
             VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)
             """,
-            (report["order_item_id"], report["report_type"], report["version"] + 1, json.dumps(content), report["template"], username, report["id"], reason),
+            (report["order_item_id"], report["report_type"], report["version"] + 1, json.dumps(_strip_results_snapshot(content)), report["template"], username, report["id"], reason),
         )
         new_id = cursor.lastrowid
         conn.commit()
@@ -11764,11 +11985,14 @@ def list_diag_reports_worklist(db, status=None, report_type=None, search=None, d
             tuple(params),
         )
         rows = [dict(r) for r in cursor.fetchall()]
+        now = _db_now(cursor)
         for r in rows:
-            if r["status"] == "released":
+            # A released amendment ("amended") is a final report too, and an amendment in progress
+            # belongs to a test whose original report was already released -- the TAT clock has stopped.
+            if r["status"] in ("released", "amended") or r.get("amendment_reason"):
                 r.update({"elapsed_hours": None, "tat_target_hours": None, "tat_status": None})
             else:
-                r.update(_tat_status(r.get("order_created_at"), r.get("turnaround_hours")))
+                r.update(_tat_status(r.get("order_created_at"), r.get("turnaround_hours"), now))
         return rows
 
 
@@ -11781,12 +12005,20 @@ def get_diag_report_detail(db, report_id):
         if not report:
             return None
         report_dict = dict(report)
+        snapshot = None
         if report_dict.get("content"):
             try:
                 report_dict["content"] = json.loads(report_dict["content"])
             except (TypeError, json.JSONDecodeError):
                 pass
+            if isinstance(report_dict["content"], dict):
+                snapshot = report_dict["content"].get(RESULTS_SNAPSHOT_KEY)
+                report_dict["content"] = _strip_results_snapshot(report_dict["content"])
         item = get_diag_lab_item_detail(db, report_dict["order_item_id"]) if report_dict["report_type"] == "LAB" else get_diag_imaging_detail(db, report_dict["order_item_id"])
+        # A signed LAB version shows the values it was authorized with, not later amendments.
+        report_dict["results_frozen"] = bool(item and isinstance(snapshot, list) and report_dict["status"] in FROZEN_REPORT_STATUSES)
+        if report_dict["results_frozen"]:
+            item["results"] = snapshot
         report_dict["order_item"] = item
         if item:
             report_dict["patient_id"] = item.get("patient_id")
@@ -11840,24 +12072,34 @@ def record_diag_critical_contact(db, alert_id, data, username=None):
 
 
 def escalate_diag_critical_alert(db, alert_id, escalated_to, username=None):
+    if not (escalated_to or "").strip():
+        raise ValueError("Record who the alert was escalated to.")
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT resolved_at FROM diag_critical_alerts WHERE id = ?", (alert_id,))
+        alert = cursor.fetchone()
+        if not alert:
+            raise ValueError("Critical alert not found.")
+        if alert["resolved_at"]:
+            raise ValueError("This critical alert is already resolved.")
         cursor.execute(
             "UPDATE diag_critical_alerts SET escalated = TRUE, escalated_at = CURRENT_TIMESTAMP, escalated_to = ? WHERE id = ?",
             (escalated_to, alert_id),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        return True
 
 
 
 def resolve_diag_critical_alert(db, alert_id, username=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT contacted_person, ack_at FROM diag_critical_alerts WHERE id = ?", (alert_id,))
+        cursor.execute("SELECT contacted_person, ack_at, resolved_at FROM diag_critical_alerts WHERE id = ?", (alert_id,))
         alert = cursor.fetchone()
         if not alert:
             raise ValueError("Critical alert not found.")
+        if alert["resolved_at"]:
+            raise ValueError("This critical alert is already resolved.")
         if not alert["contacted_person"]:
             raise ValueError("Record who was contacted before resolving this alert.")
         cursor.execute("UPDATE diag_critical_alerts SET resolved_at = CURRENT_TIMESTAMP WHERE id = ?", (alert_id,))
@@ -12015,6 +12257,36 @@ def record_diag_repeat_qc(db, hold_id, run_data, username=None):
 
 
 
+def _qc_hold_affected_items(cursor, hold):
+    """Tests whose results were finalized on the held analyzer (and assay, for an assay
+    hold) after its last passing QC run and before the failing one. The failure does not
+    prove those results wrong, but they were produced while the analyzer may already have
+    been out of control, so they must be reviewed before the hold is released."""
+    cursor.execute(
+        """
+        SELECT DISTINCT oi.id AS order_item_id, oi.service_name, o.order_no, o.patient_id,
+               COALESCE(p.name, o.walkin_name) AS patient_first_name, p.last_name AS patient_last_name,
+               (SELECT rr.status FROM diag_reports rr WHERE rr.order_item_id = oi.id ORDER BY rr.version DESC LIMIT 1) AS report_status
+        FROM diag_results r
+        JOIN diag_order_items oi ON oi.id = r.order_item_id
+        JOIN diag_orders o ON o.id = oi.order_id
+        LEFT JOIN patients p ON p.patient_id = o.patient_id
+        JOIN diag_qc_runs failed ON failed.id = ?
+        WHERE r.equipment_id = ? AND r.is_draft = FALSE AND oi.cancelled_at IS NULL
+          AND (? = 'equipment' OR oi.service_id = ?)
+          AND COALESCE(r.updated_at, r.entered_at) <= failed.run_at
+          AND COALESCE(r.updated_at, r.entered_at) > COALESCE((
+                SELECT MAX(ok.run_at) FROM diag_qc_runs ok
+                WHERE ok.equipment_id = failed.equipment_id AND ok.outcome = 'passed' AND ok.run_at < failed.run_at
+                  AND (ok.service_id IS NULL OR ok.service_id = failed.service_id)
+          ), '-infinity'::timestamp)
+        ORDER BY oi.id
+        """,
+        (hold["qc_run_id"], hold["equipment_id"], hold["scope"], hold["service_id"]),
+    )
+    return [dict(r) for r in cursor.fetchall()]
+
+
 def release_diag_qc_hold(db, hold_id, username, release_notes=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
@@ -12028,6 +12300,12 @@ def release_diag_qc_hold(db, hold_id, username, release_notes=None):
         repeat_run = cursor.fetchone()
         if not repeat_run or repeat_run["outcome"] != "passed":
             raise ValueError("The repeat QC run must pass before this hold can be released.")
+        affected = _qc_hold_affected_items(cursor, hold)
+        if affected and not (release_notes or "").strip():
+            raise ValueError(
+                f"{len(affected)} test(s) were reported on this analyzer since its last passing QC. "
+                "Record the outcome of reviewing them in the release notes."
+            )
         cursor.execute(
             "UPDATE diag_qc_holds SET status = 'released', released_by = ?, released_at = CURRENT_TIMESTAMP, release_notes = ? WHERE id = ?",
             (username, release_notes, hold_id),
@@ -12093,7 +12371,10 @@ def list_diag_qc_holds(db, status=None):
             """,
             tuple(params),
         )
-        return [dict(r) for r in cursor.fetchall()]
+        holds = [dict(r) for r in cursor.fetchall()]
+        for h in holds:
+            h["affected_items"] = _qc_hold_affected_items(cursor, h)
+        return holds
 
 
 
@@ -12119,7 +12400,10 @@ def log_diag_equipment_maintenance(db, data, username=None):
         )
         log_id = cursor.lastrowid
         if data.get("next_due_date"):
-            cursor.execute("UPDATE diag_equipment SET next_maintenance_date = ? WHERE id = ?", (data["next_due_date"], data["equipment_id"]))
+            # A calibration entry moves the calibration due date (which gates result entry),
+            # any other service entry the maintenance due date.
+            due_column = "next_calibration_date" if "calibrat" in (data.get("service_type") or "").lower() else "next_maintenance_date"
+            cursor.execute(f"UPDATE diag_equipment SET {due_column} = ? WHERE id = ?", (data["next_due_date"], data["equipment_id"]))
         if data.get("mark_unavailable"):
             cursor.execute("UPDATE diag_equipment SET operational_status = 'maintenance' WHERE id = ?", (data["equipment_id"],))
         conn.commit()
@@ -12168,7 +12452,30 @@ def list_diag_equipment_maintenance(db, equipment_id=None):
 
 
 
+REAGENT_LOT_STATUSES = ("available", "quarantined", "expired", "consumed")
+
+
+def _parse_lot_expiry(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        raise ValueError("Enter the expiry date as YYYY-MM-DD.")
+
+
+def _reagent_lot_is_expired(expiry_date, today=None):
+    expiry = _parse_lot_expiry(expiry_date)
+    return bool(expiry and expiry < (today or date.today()))
+
+
 def create_diag_reagent_lot(db, data, username=None):
+    if _reagent_lot_is_expired(data.get("expiry_date")):
+        raise ValueError("This lot is already past its expiry date and cannot be received into stock.")
     with get_connection(db) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id FROM diag_reagent_lots WHERE item_name = ? AND lot_no = ?", (data["item_name"], data["lot_no"]))
@@ -12205,17 +12512,25 @@ def list_diag_reagent_lots(db, status=None, expiring_within_days=None):
             params.append(expiring_within_days)
         where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         cursor.execute(f"SELECT * FROM diag_reagent_lots{where_clause} ORDER BY expiry_date ASC NULLS LAST", tuple(params))
-        return cursor.fetchall()
+        rows = [dict(r) for r in cursor.fetchall()]
+        # Lots are not auto-expired in the database; flag the ones still in use past expiry.
+        for r in rows:
+            r["is_expired"] = r["status"] in ("available", "quarantined") and _reagent_lot_is_expired(r.get("expiry_date"))
+        return rows
 
 
 
 def update_diag_reagent_lot_status(db, lot_id, status, username=None, notes=None):
+    if status not in REAGENT_LOT_STATUSES:
+        raise ValueError(f"Invalid reagent lot status '{status}'.")
     with get_connection(db) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM diag_reagent_lots WHERE id = ?", (lot_id,))
         lot = cursor.fetchone()
         if not lot:
             raise ValueError("Reagent lot not found.")
+        if status == "available" and _reagent_lot_is_expired(lot["expiry_date"]):
+            raise ValueError("This lot is past its expiry date and cannot be released for use. Mark it expired instead.")
         cursor.execute("UPDATE diag_reagent_lots SET status = ? WHERE id = ?", (status, lot_id))
         movement_type = {"quarantined": "quarantine", "available": "release", "consumed": "consume", "expired": "adjustment"}.get(status, "adjustment")
         cursor.execute(
@@ -12238,8 +12553,12 @@ def get_diag_quality_overview(db):
         total_equipment = cursor.fetchone()["c"]
         cursor.execute("SELECT COUNT(*) AS c FROM diag_equipment WHERE next_maintenance_date IS NOT NULL AND next_maintenance_date <= CURRENT_DATE + INTERVAL '14 days'")
         maintenance_due = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) AS c FROM diag_equipment WHERE next_calibration_date IS NOT NULL AND next_calibration_date < CURRENT_DATE")
+        calibration_overdue = cursor.fetchone()["c"]
         cursor.execute("SELECT COUNT(*) AS c FROM diag_reagent_lots WHERE status = 'available' AND expiry_date IS NOT NULL AND expiry_date <= CURRENT_DATE + INTERVAL '14 days'")
         expiring_lots = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) AS c FROM diag_reagent_lots WHERE status IN ('available', 'quarantined') AND expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE")
+        expired_lots = cursor.fetchone()["c"]
         cursor.execute("SELECT COUNT(*) AS c FROM diag_qc_holds WHERE status != 'released'")
         open_holds = cursor.fetchone()["c"]
         return {
@@ -12247,7 +12566,9 @@ def get_diag_quality_overview(db):
             "equipment_ready": ready,
             "equipment_total": total_equipment,
             "maintenance_due_soon": maintenance_due,
+            "calibration_overdue": calibration_overdue,
             "expiring_lots": expiring_lots,
+            "expired_lots": expired_lots,
             "open_release_holds": open_holds,
         }
 
@@ -12345,7 +12666,7 @@ def get_diag_overview(db):
 
         # Overdue: same TAT logic as the worklists, across every still-active lab + imaging item.
         cursor.execute(
-            """
+            f"""
             SELECT oi.id, oi.department_type, oi.progress_status, o.created_at AS order_created_at,
                    sp.collected_at, sp.received_at, ex.scheduled_at, ds.turnaround_hours
             FROM diag_order_items oi
@@ -12354,16 +12675,19 @@ def get_diag_overview(db):
             LEFT JOIN diag_imaging_exams ex ON ex.order_item_id = oi.id
             LEFT JOIN diag_services ds ON ds.id = oi.service_id
             WHERE o.status = 'confirmed' AND oi.cancelled_at IS NULL AND oi.progress_status NOT IN ('released', 'cancelled')
+              AND NOT {_HAS_RELEASED_REPORT_SQL}
             """
         )
         overdue_count = 0
-        for row in cursor.fetchall():
+        pending_rows = cursor.fetchall()
+        now = _db_now(cursor)
+        for row in pending_rows:
             row = dict(row)
             if row["department_type"] == "IMAGING":
                 start = row.get("scheduled_at") or row.get("order_created_at")
             else:
                 start = row.get("received_at") or row.get("collected_at") or row.get("order_created_at")
-            if _tat_status(start, row.get("turnaround_hours"))["tat_status"] == "overdue":
+            if _tat_status(start, row.get("turnaround_hours"), now)["tat_status"] == "overdue":
                 overdue_count += 1
 
         return {

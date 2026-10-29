@@ -21,6 +21,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
+from database import DEFER_COMMIT_KEY
+
 
 class RowProxy:
     __slots__ = ("_values", "_columns", "_index")
@@ -193,7 +195,11 @@ class _CompatConn:
         return _CompatCursor(self.db)
 
     def commit(self):
-        self.db.commit()
+        # Sessions from database.get_audited_db() commit once, together with the audit row.
+        if self.db.info.get(DEFER_COMMIT_KEY):
+            self.db.flush()
+        else:
+            self.db.commit()
 
     def rollback(self):
         self.db.rollback()

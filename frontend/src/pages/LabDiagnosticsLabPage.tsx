@@ -21,7 +21,7 @@ type WorklistRow = {
 };
 
 type ParamDef = { id: number; name: string; data_type: string; unit?: string; method?: string; ref_low?: number; ref_high?: number; ref_text?: string; critical_low?: number; critical_high?: number };
-type ResultRow = { id: number; parameter_id: number; parameter_name: string; value_text?: string; value_numeric?: number; unit?: string; ref_range_text?: string; ref_low?: number; ref_high?: number; flag?: string; is_draft: boolean; equipment_id?: number };
+type ResultRow = { id: number; parameter_id: number; parameter_name: string; value_text?: string; value_numeric?: number; unit?: string; ref_range_text?: string; ref_low?: number; ref_high?: number; flag?: string; is_draft: boolean; equipment_id?: number; reagent_lot_id?: number };
 type Specimen = { id: number; specimen_no: string; status: string; container_type?: string; collection_location?: string; collected_at?: string; received_at?: string; rejection_reason?: string };
 type ItemDetail = {
   id: number; service_id: number; service_name: string; order_no: string; patient_id: string; priority: string;
@@ -31,9 +31,12 @@ type ItemDetail = {
   parameters: ParamDef[];
   results: ResultRow[];
   report_id?: number | null; report_status?: string | null;
+  external_referrals?: ExternalReferral[];
 };
+type ExternalReferral = { id: number; vendor_name?: string; dispatched_at?: string; dispatched_by?: string; expected_turnaround?: string; received_report_at?: string | null; local_review_status: string };
 type Vendor = { id: number; vendor_name: string };
-type Equipment = { id: number; name: string; type?: string; operational_status?: string };
+type Equipment = { id: number; name: string; type?: string; operational_status?: string; next_calibration_date?: string };
+type ReagentLot = { id: number; item_name: string; lot_no: string; expiry_date?: string; is_expired?: boolean };
 type QcHold = { id: number; equipment_id: number; scope: string; service_id?: number; status: string };
 
 const STAGES: { key: string; label: string }[] = [
@@ -43,6 +46,15 @@ const STAGES: { key: string; label: string }[] = [
   { key: "for_review", label: "For review" },
   { key: "released", label: "Released" },
 ];
+
+// Mirrors the backend's equipment checks in save_diag_results: why this analyzer can't be used, or null.
+const UNAVAILABLE_EQUIPMENT_STATUSES = new Set(["maintenance", "down"]);
+function equipmentBlockReason(eq: Equipment): string | null {
+  if (UNAVAILABLE_EQUIPMENT_STATUSES.has(eq.operational_status || "")) return eq.operational_status || null;
+  const today = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local
+  if (eq.next_calibration_date && eq.next_calibration_date.slice(0, 10) < today) return `calibration overdue since ${eq.next_calibration_date.slice(0, 10)}`;
+  return null;
+}
 
 // Results can be changed only while the report has not gone to review (or after it is returned / amended).
 const RESULT_EDITABLE_REPORT_STATUSES = new Set(["draft", "returned_for_correction"]);
@@ -82,6 +94,8 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [qcHolds, setQcHolds] = useState<QcHold[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<number | "">("");
+  const [reagentLots, setReagentLots] = useState<ReagentLot[]>([]);
+  const [selectedLot, setSelectedLot] = useState<number | "">("");
   const [ocrScanning, setOcrScanning] = useState(false);
   const [ocrFileName, setOcrFileName] = useState("");
 
@@ -111,6 +125,11 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
   useEffect(() => { const t = window.setTimeout(() => void load(), 300); return () => window.clearTimeout(t); }, [search]);
   useEffect(() => { apiFetch<{ vendors: Vendor[] }>("/api/lab/vendors-list").then((d) => setVendors(d.vendors || [])).catch(() => {}); }, []);
   useEffect(() => { apiFetch<{ equipment: Equipment[] }>("/api/diag/equipment").then((d) => setEquipmentList(d.equipment || [])).catch(() => {}); }, []);
+  useEffect(() => {
+    apiFetch<{ lots: ReagentLot[] }>("/api/diag/reagent-lots?status=available")
+      .then((d) => setReagentLots((d.lots || []).filter((l) => !l.is_expired)))
+      .catch(() => {});
+  }, []);
   useEffect(() => { apiFetch<{ holds: QcHold[] }>("/api/diag/qc/holds").then((d) => setQcHolds(d.holds || [])).catch(() => {}); }, []);
 
   const openItem = async (row: WorklistRow) => {
@@ -130,6 +149,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       // than losing it every time the item reloads after a mutation.
       const existingEquipmentId = d.results.find((r) => r.equipment_id)?.equipment_id;
       setSelectedEquipment(existingEquipmentId ?? "");
+      setSelectedLot(d.results.find((r) => r.reagent_lot_id)?.reagent_lot_id ?? "");
     } catch (err: any) {
       reportError(setNotice, err, "Could not load test details.");
     }
@@ -150,6 +170,12 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
         (h.scope === "equipment" || (h.scope === "assay" && h.service_id === detail.service_id))
     ) || null;
   }, [selectedEquipment, qcHolds, detail]);
+  const unavailableEquipment = useMemo(() => {
+    const eq = equipmentList.find((e) => e.id === selectedEquipment);
+    const reason = eq ? equipmentBlockReason(eq) : null;
+    return eq && reason ? { name: eq.name, reason } : null;
+  }, [selectedEquipment, equipmentList]);
+  const openReferral = detail?.external_referrals?.find((r) => !r.received_report_at) || null;
 
   // Re-pulls the open item plus the worklist and KPI counts after a mutation on it.
   const refreshAfterMutation = async () => {
@@ -239,12 +265,13 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       }
     }
     const equipment_id = selectedEquipment || undefined;
+    const reagent_lot_id = selectedLot || undefined;
     const results = detail.parameters
       .map((p) => {
         const raw = (resultValues[p.id] || "").trim();
         return p.data_type === "numeric"
-          ? { parameter_id: p.id, value_numeric: raw !== "" ? Number(raw) : null, equipment_id }
-          : { parameter_id: p.id, value_text: raw, equipment_id };
+          ? { parameter_id: p.id, value_numeric: raw !== "" ? Number(raw) : null, equipment_id, reagent_lot_id }
+          : { parameter_id: p.id, value_text: raw, equipment_id, reagent_lot_id };
       })
       .filter((r: any) => (r.value_numeric !== null && r.value_numeric !== undefined) || r.value_text);
     if (results.length === 0) { setNotice({ type: "warning", message: "Enter at least one result value." }); return; }
@@ -294,7 +321,10 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       if (!response.ok) {
         throw Object.assign(new Error(data?.detail || data?.error || "OCR failed."), { status: response.status });
       }
-      const { values, equipment } = data as { values: { parameter_id: number; value: string }[]; equipment: string };
+      const { values, equipment, identity_warnings, skipped } = data as {
+        values: { parameter_id: number; value: string }[]; equipment: string; identity_warnings?: string[];
+        skipped?: { parameter_name: string; value: string }[];
+      };
       const filled = resultsLocked ? [] : values;
       if (filled.length) {
         setResultValues((prev) => ({ ...prev, ...Object.fromEntries(filled.map((v) => [v.parameter_id, v.value])) }));
@@ -304,6 +334,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
         const name = equipment.toLowerCase();
         const match = equipmentList.find((eq) => {
           const n = eq.name.toLowerCase();
+          if (equipmentBlockReason(eq)) return false;
           return n === name || n.includes(name) || name.includes(n);
         });
         if (match) {
@@ -311,10 +342,12 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
           equipmentNote = ` Analyzer set to ${match.name}.`;
         }
       }
+      const identityNote = identity_warnings?.length ? ` CHECK IDENTITY: ${identity_warnings.join(" ")}` : "";
+      const skippedNote = skipped?.length ? ` Enter manually: ${skipped.map((s) => `${s.parameter_name} (printed "${s.value}")`).join(", ")}.` : "";
       setNotice(
         filled.length
-          ? { type: "success", message: `OCR filled ${filled.length} of ${detail.parameters.length} parameter(s).${equipmentNote} Verify every value before saving.` }
-          : { type: "warning", message: "No values for this test's parameters could be read from the image. Try a clearer photo." }
+          ? { type: identityNote || skippedNote ? "warning" : "success", message: `OCR filled ${filled.length} of ${detail.parameters.length} parameter(s).${equipmentNote} Verify every value before saving.${skippedNote}${identityNote}` }
+          : { type: "warning", message: `No values for this test's parameters could be filled from the image.${skippedNote || " Try a clearer photo."}${identityNote}` }
       );
     } catch (err: any) {
       reportError(setNotice, err, "Lab result OCR failed.");
@@ -328,12 +361,23 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
     void openReportForItem(detail.id, "LAB", onNavigate);
   };
 
+  const markReferralReceived = async (referralId: number) => {
+    try {
+      await apiFetch(`/api/diag/lab/external-referral/${referralId}`, { method: "PUT", body: JSON.stringify({ report_received: true, local_review_status: "reviewed" }) });
+      setNotice({ type: "success", message: "External report marked received. Enter (or OCR) its values below and finalize." });
+      await refreshAfterMutation();
+    } catch (err: any) {
+      reportError(setNotice, err, "Could not update external referral.");
+    }
+  };
+
   const sendExternalReferral = async () => {
     if (!referralVendor || !detail) return;
     try {
       await apiFetch(`/api/diag/lab/items/${detail.id}/external-referral`, { method: "POST", body: JSON.stringify({ vendor_id: referralVendor, expected_turnaround: referralTat }) });
       setNotice({ type: "success", message: "Sent to external laboratory." });
       setReferralOpen(false);
+      await refreshAfterMutation();
     } catch (err: any) {
       reportError(setNotice, err, "Could not create external referral.");
     }
@@ -480,7 +524,17 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                       <Label>Equipment / Analyzer used</Label>
                       <Select value={selectedEquipment} disabled={resultsLocked} onChange={(e) => setSelectedEquipment(e.target.value ? Number(e.target.value) : "")}>
                         <option value="">-- Select equipment --</option>
-                        {equipmentList.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}{eq.type ? ` (${eq.type})` : ""}</option>)}
+                        {equipmentList.map((eq) => {
+                          const blocked = equipmentBlockReason(eq);
+                          return <option key={eq.id} value={eq.id} disabled={!!blocked && eq.id !== selectedEquipment}>{eq.name}{eq.type ? ` (${eq.type})` : ""}{blocked ? ` -- ${blocked}` : ""}</option>;
+                        })}
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Reagent lot (optional)</Label>
+                      <Select value={selectedLot} disabled={resultsLocked} onChange={(e) => setSelectedLot(e.target.value ? Number(e.target.value) : "")}>
+                        <option value="">-- Not recorded --</option>
+                        {reagentLots.map((l) => <option key={l.id} value={l.id}>{l.item_name} / {l.lot_no}{l.expiry_date ? ` (exp ${l.expiry_date})` : ""}</option>)}
                       </Select>
                     </div>
                   </div>
@@ -524,6 +578,11 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                       This equipment has an open QC hold and cannot be used to finalize results until the hold is released from Quality &amp; Equipment.
                     </div>
                   )}
+                  {unavailableEquipment && (
+                    <div className="diag-note-box diag-note-critical">
+                      {unavailableEquipment.name} cannot be used for results ({unavailableEquipment.reason}). Fix it in Quality &amp; Equipment or select another analyzer.
+                    </div>
+                  )}
                   <table className="diag-data-table">
                     <thead><tr><th>Parameter</th><th>Value</th><th>Unit</th><th>Reference range</th><th>Flag</th></tr></thead>
                     <tbody>
@@ -544,14 +603,33 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                     </tbody>
                   </table>
                   <div className="diag-form-actions">
-                    <Button variant="secondary" disabled={saving || resultsLocked} onClick={() => void saveResults(true)}>Save draft</Button>
-                    <Button variant="primary" disabled={saving || resultsLocked || !!equipmentHold} onClick={() => void saveResults(false)}>
+                    <Button variant="secondary" disabled={saving || resultsLocked || !!unavailableEquipment} onClick={() => void saveResults(true)}>Save draft</Button>
+                    <Button variant="primary" disabled={saving || resultsLocked || !!equipmentHold || !!unavailableEquipment} onClick={() => void saveResults(false)}>
                       {detail.results.some((r) => !r.is_draft) ? "Re-finalize results" : "Finalize results"}
                     </Button>
                     <Button variant="ghost" onClick={() => setReferralOpen((v) => !v)}>External lab tracking</Button>
                     {onNavigate && detail.report_id && <Button variant="ghost" onClick={goToReport}>Go to report</Button>}
                   </div>
-                  {referralOpen && (
+                  {!!detail.external_referrals?.length && (
+                    <table className="diag-data-table" style={{ marginTop: "0.75rem" }}>
+                      <thead><tr><th>External lab</th><th>Dispatched</th><th>Expected TAT</th><th>Report</th><th></th></tr></thead>
+                      <tbody>
+                        {detail.external_referrals.map((r) => (
+                          <tr key={r.id}>
+                            <td>{r.vendor_name || "-"}</td>
+                            <td>{r.dispatched_at ? new Date(r.dispatched_at).toLocaleString() : "-"}{r.dispatched_by ? ` by ${r.dispatched_by}` : ""}</td>
+                            <td>{r.expected_turnaround || "-"}</td>
+                            <td>{r.received_report_at ? `Received ${new Date(r.received_report_at).toLocaleString()}` : "Awaiting report"}</td>
+                            <td>{!r.received_report_at && <Button size="sm" variant="ghost" onClick={() => void markReferralReceived(r.id)}>Mark report received</Button>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {referralOpen && openReferral && (
+                    <div className="diag-note-box">Already dispatched to {openReferral.vendor_name || "an external lab"} -- mark that report received before sending again.</div>
+                  )}
+                  {referralOpen && !openReferral && (
                     <div className="diag-form-grid">
                       <div><Label>Referral laboratory</Label>
                         <Select value={referralVendor} onChange={(e) => setReferralVendor(e.target.value ? Number(e.target.value) : "")}>

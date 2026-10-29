@@ -277,6 +277,37 @@ Rules:
 - No code fences, no commentary, only the JSON object."""
 
 
+def _lab_numeric(value):
+    """First number in an OCR'd result. Commas are thousands separators ("2,50,000"),
+    except a single comma followed by one or two digits, which is a decimal comma ("13,4")."""
+    text = _s(value)
+    if re.fullmatch(r"\D*-?\d+,\d{1,2}\D*", text):
+        text = text.replace(",", ".")
+    match = re.search(r"-?\d+(?:\.\d+)?", text.replace(",", ""))
+    return match.group(0) if match else None
+
+
+def _name_tokens(name):
+    return {t for t in re.findall(r"[a-z]+", (name or "").lower()) if len(t) >= 2}
+
+
+def lab_identity_warnings(extracted, patient_name="", specimen_nos=()):
+    """Cross-checks the patient name / sample id printed on the scanned sheet against the
+    test being resulted, so a printout for a different patient is not entered silently.
+    Sample ids are only compared when they use this hospital's own SPC- numbering, since
+    external laboratories print their own accession numbers."""
+    warnings = []
+    printed_name = _s((extracted or {}).get("patient_name"))
+    expected = _name_tokens(patient_name)
+    if printed_name and expected and not (_name_tokens(printed_name) & expected):
+        warnings.append(f'The sheet is for "{printed_name}", not {patient_name}.')
+    printed_sample = re.sub(r"[^A-Z0-9]", "", _s((extracted or {}).get("sample_id")).upper())
+    ours = {re.sub(r"[^A-Z0-9]", "", str(n).upper()) for n in specimen_nos if n}
+    if printed_sample.startswith("SPC") and ours and printed_sample not in ours:
+        warnings.append(f'The sheet\'s sample id {_s(extracted.get("sample_id"))} does not match this test\'s specimen.')
+    return warnings
+
+
 def extract_lab_results(file_bytes, parameters, service_name=""):
     """OCR a lab result image and map the printed values onto the test's configured parameters."""
     param_lines = "\n".join(
@@ -289,6 +320,7 @@ def extract_lab_results(file_bytes, parameters, service_name=""):
         raise RuntimeError("The OCR model did not return readable results. Try a clearer image.")
     by_id = {int(p["id"]): p for p in parameters}
     values = {}
+    skipped = []
     for r in parsed.get("results") if isinstance(parsed.get("results"), list) else []:
         if not isinstance(r, dict):
             continue
@@ -301,13 +333,19 @@ def extract_lab_results(file_bytes, parameters, service_name=""):
         if not param or not value:
             continue
         if (param.get("data_type") or "numeric") == "numeric":
-            match = re.search(r"-?\d+(?:\.\d+)?", value.replace(",", ""))
-            if not match:
+            # "<0.5" / ">1000" are censored results; filling just the number would
+            # report a definite value (and a wrong flag), so staff must enter these.
+            if re.match(r"\s*[<>\u2264\u2265]", value):
+                skipped.append({"parameter_id": pid, "parameter_name": param.get("name"), "value": value,
+                                "reason": "printed with a < / > qualifier"})
                 continue
-            value = match.group(0)
+            value = _lab_numeric(value)
+            if value is None:
+                continue
         values[pid] = value
     return {
         "values": [{"parameter_id": pid, "value": v} for pid, v in values.items()],
+        "skipped": skipped,
         "equipment": _s(parsed.get("equipment")),
         "patient_name": _s(parsed.get("patient_name")),
         "sample_id": _s(parsed.get("sample_id")),

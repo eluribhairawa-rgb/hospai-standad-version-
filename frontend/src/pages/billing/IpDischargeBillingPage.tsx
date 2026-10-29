@@ -168,10 +168,9 @@ export default function IpDischargeBillingPage({
           const firstKey = String(first.raw_id || first.admission_id || first.patient_id || 1);
           setSearchInput(firstKey);
           await fetchDischarge(firstKey);
-        } else {
-          // Default fallback search
-          fetchDischarge("155");
         }
+        // Nothing awaiting discharge review: stay empty until staff search -- never
+        // auto-load an arbitrary admission (it would show some other patient's bill).
       } catch {
         // ignore
       }
@@ -492,7 +491,7 @@ export default function IpDischargeBillingPage({
           </svg>
           <input
             type="text"
-            placeholder="Search admission ID (e.g. 169, 155), patient name, or UHID (e.g. PAT-20260926-0075)"
+            placeholder="Search admission ID, patient name, or UHID"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
           />
@@ -557,17 +556,6 @@ export default function IpDischargeBillingPage({
           }}
         >
           <span>⚠️ {error}</span>
-          <button
-            type="button"
-            className="billing-btn-outline"
-            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
-            onClick={() => {
-              setSearchInput("155");
-              fetchDischarge("155");
-            }}
-          >
-            Load Sample Patient (Susmitha #155)
-          </button>
         </div>
       )}
 

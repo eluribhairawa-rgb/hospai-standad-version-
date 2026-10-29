@@ -386,8 +386,11 @@ export default function LabDiagnosticsOrdersPage({ setNotice, onNavigate }: Prop
     const reason = window.prompt("Reason for cancelling this service:");
     if (!reason) return;
     try {
-      await apiFetch(`/api/diag/order-items/${itemId}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
-      setNotice({ type: "success", message: "Service cancelled." });
+      const res = await apiFetch<{ refund_amount?: number }>(`/api/diag/order-items/${itemId}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+      setNotice({
+        type: "success",
+        message: res.refund_amount ? `Service cancelled. Refund of ${money(res.refund_amount)} recorded against the invoice -- return it to the patient.` : "Service cancelled.",
+      });
       if (selectedOrder) await openOrder(selectedOrder.id);
       void loadOrders();
     } catch (err: any) {

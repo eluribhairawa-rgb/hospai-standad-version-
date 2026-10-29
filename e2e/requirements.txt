@@ -1,0 +1,4 @@
+# Test-only dependencies (installed into backend/.venv; not part of the Docker image)
+selenium>=4.51
+pytest>=9.2
+pytest-html>=4.2

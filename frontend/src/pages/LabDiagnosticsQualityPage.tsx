@@ -6,11 +6,12 @@ import type { Notice } from "../types";
 
 type Props = { setNotice: Dispatch<SetStateAction<Notice | null>> };
 
-type Overview = { open_qc_reviews: number; equipment_ready: number; equipment_total: number; maintenance_due_soon: number; expiring_lots: number; open_release_holds: number };
+type Overview = { open_qc_reviews: number; equipment_ready: number; equipment_total: number; maintenance_due_soon: number; calibration_overdue?: number; expiring_lots: number; expired_lots?: number; open_release_holds: number };
 type Equipment = { id: number; asset_id: string; name: string; type?: string; location?: string; operational_status: string; responsible_staff?: string; next_maintenance_date?: string; next_calibration_date?: string };
 type QcRun = { id: number; equipment_id: number; equipment_name: string; service_name?: string; outcome: string; run_at: string; operator?: string; reviewed_at?: string };
-type QcHold = { id: number; equipment_id: number; equipment_name: string; service_name?: string; scope: string; status: string; corrective_action?: string; repeat_qc_run_id?: number; repeat_qc_outcome?: string; created_at: string };
-type ReagentLot = { id: number; item_name: string; lot_no: string; quantity: number; unit?: string; expiry_date?: string; storage_location?: string; status: string };
+type QcHold = { id: number; equipment_id: number; equipment_name: string; service_name?: string; scope: string; status: string; corrective_action?: string; repeat_qc_run_id?: number; repeat_qc_outcome?: string; created_at: string;
+  affected_items?: { order_item_id: number; service_name: string; order_no: string; patient_id?: string; patient_first_name?: string; patient_last_name?: string; report_status?: string | null }[] };
+type ReagentLot = { id: number; item_name: string; lot_no: string; quantity: number; unit?: string; expiry_date?: string; storage_location?: string; status: string; is_expired?: boolean };
 type MaintenanceLog = { id: number; service_date?: string; service_type?: string; completion_status: string };
 
 const EXPIRY_WARNING_MS = 14 * 86400000;
@@ -109,7 +110,7 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
     }
   };
 
-  const setLotStatus = async (l: ReagentLot, status: "quarantined" | "available") => {
+  const setLotStatus = async (l: ReagentLot, status: "quarantined" | "available" | "expired") => {
     if (await submitAction(setNotice, () => apiFetch(`/api/diag/reagent-lots/${l.id}/status`, { method: "POST", body: JSON.stringify({ status }) }), "Could not update lot status.")) {
       void loadAll();
     }
@@ -123,6 +124,20 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
         <div className="diag-kpi-tile"><span>Maintenance due soon</span><strong>{overview?.maintenance_due_soon ?? "..."}</strong></div>
         <div className="diag-kpi-tile"><span>Expiring lots</span><strong>{overview?.expiring_lots ?? "..."}</strong></div>
       </div>
+
+      {!!overview?.calibration_overdue && (
+        <div className="diag-alert-banner">
+          <span>{overview.calibration_overdue} analyzer(s) are past their calibration date and are blocked for result entry</span>
+          <Button size="sm" variant="destructive" onClick={() => setTab("equipment")}>Review equipment</Button>
+        </div>
+      )}
+
+      {!!overview?.expired_lots && (
+        <div className="diag-alert-banner">
+          <span>{overview.expired_lots} reagent lot(s) are past expiry but still marked available/quarantined</span>
+          <Button size="sm" variant="destructive" onClick={() => setTab("reagents")}>Review lots</Button>
+        </div>
+      )}
 
       {!!overview?.open_release_holds && (
         <div className="diag-alert-banner">
@@ -196,7 +211,10 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
                   <tr key={h.id} className={selectedHold?.id === h.id ? "diag-row-active" : ""}>
                     <td>{h.equipment_name}</td>
                     <td>{h.scope}{h.service_name ? ` (${h.service_name})` : ""}</td>
-                    <td><span className="diag-badge diag-badge-critical">{h.status.replace(/_/g, " ")}</span></td>
+                    <td>
+                      <span className="diag-badge diag-badge-critical">{h.status.replace(/_/g, " ")}</span>
+                      {!!h.affected_items?.length && <span className="diag-badge diag-badge-critical" style={{ marginLeft: 4 }}>{h.affected_items.length} test(s) to review</span>}
+                    </td>
                     <td><Button size="sm" variant="secondary" onClick={() => setSelectedHold(h)}>Review</Button></td>
                   </tr>
                 ))}
@@ -224,7 +242,7 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
         <div className="diag-card">
           <div className="diag-card-header"><h3>Equipment</h3><Button size="sm" variant="primary" onClick={() => setEquipModalOpen(true)}>+ Add equipment</Button></div>
           <table className="diag-data-table">
-            <thead><tr><th>Asset ID</th><th>Name</th><th>Type</th><th>Status</th><th>Responsible</th><th></th></tr></thead>
+            <thead><tr><th>Asset ID</th><th>Name</th><th>Type</th><th>Status</th><th>Calibration due</th><th>Responsible</th><th></th></tr></thead>
             <tbody>
               {equipment.map((e) => (
                 <tr key={e.id}>
@@ -232,6 +250,12 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
                   <td>{e.name}</td>
                   <td>{e.type || "-"}</td>
                   <td><span className={`diag-badge ${equipmentStatusBadgeClass(e.operational_status)}`}>{e.operational_status.replace("_", " ")}</span></td>
+                  <td>
+                    {e.next_calibration_date ? e.next_calibration_date.slice(0, 10) : "-"}
+                    {e.next_calibration_date && e.next_calibration_date.slice(0, 10) < new Date().toLocaleDateString("en-CA") && (
+                      <span className="diag-badge diag-badge-critical" style={{ marginLeft: 4 }}>overdue</span>
+                    )}
+                  </td>
                   <td>{e.responsible_staff || "-"}</td>
                   <td style={{ display: "flex", gap: "0.4rem" }}>
                     <Button size="sm" variant="ghost" onClick={() => openMaintenanceLog(e)}>Log maintenance</Button>
@@ -239,7 +263,7 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
                   </td>
                 </tr>
               ))}
-              {equipment.length === 0 && <tr><td colSpan={6} className="diag-empty">No equipment registered yet.</td></tr>}
+              {equipment.length === 0 && <tr><td colSpan={7} className="diag-empty">No equipment registered yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -257,10 +281,14 @@ export default function LabDiagnosticsQualityPage({ setNotice }: Props) {
                   <td>{l.lot_no}</td>
                   <td>{l.quantity} {l.unit || ""}</td>
                   <td>{l.expiry_date || "-"}</td>
-                  <td><span className={`diag-badge ${lotStatusBadgeClass(l.status)}`}>{l.status}</span></td>
                   <td>
-                    {l.status === "available" && <Button size="sm" variant="ghost" onClick={() => setLotStatus(l, "quarantined")}>Quarantine</Button>}
-                    {l.status === "quarantined" && <Button size="sm" variant="ghost" onClick={() => setLotStatus(l, "available")}>Release</Button>}
+                    <span className={`diag-badge ${lotStatusBadgeClass(l.status)}`}>{l.status}</span>
+                    {l.is_expired && <span className="diag-badge diag-badge-critical" style={{ marginLeft: 4 }}>past expiry</span>}
+                  </td>
+                  <td>
+                    {l.status === "available" && !l.is_expired && <Button size="sm" variant="ghost" onClick={() => setLotStatus(l, "quarantined")}>Quarantine</Button>}
+                    {l.status === "quarantined" && !l.is_expired && <Button size="sm" variant="ghost" onClick={() => setLotStatus(l, "available")}>Release</Button>}
+                    {l.is_expired && <Button size="sm" variant="ghost" onClick={() => setLotStatus(l, "expired")}>Mark expired</Button>}
                   </td>
                 </tr>
               ))}
@@ -317,11 +345,18 @@ function HoldReview({ hold, setNotice, onChanged }: { hold: QcHold; setNotice: D
     }
   };
 
+  const [releaseNotes, setReleaseNotes] = useState("");
+  const affected = hold.affected_items || [];
+
   const releaseHold = async () => {
+    if (affected.length && !releaseNotes.trim()) {
+      setNotice({ type: "warning", message: "Record the outcome of reviewing the affected tests before releasing this hold." });
+      return;
+    }
     if (
       await submitAction(
         setNotice,
-        () => apiFetch(`/api/diag/qc/holds/${hold.id}/release`, { method: "POST" }),
+        () => apiFetch(`/api/diag/qc/holds/${hold.id}/release`, { method: "POST", body: JSON.stringify({ release_notes: releaseNotes }) }),
         "The repeat QC must pass before releasing this hold.",
         "Hold released -- equipment back in service."
       )
@@ -344,6 +379,19 @@ function HoldReview({ hold, setNotice, onChanged }: { hold: QcHold; setNotice: D
           <div className="diag-detail-meta"><span>{hold.scope}</span><span>Status: {hold.status.replace(/_/g, " ")}</span></div>
         </div>
       </div>
+      {affected.length > 0 && (
+        <div className="diag-note-box diag-note-critical">
+          <strong>{affected.length} test(s) were reported on this analyzer since its last passing QC.</strong> Review them (return for correction or amend if needed) before releasing:
+          <ul style={{ margin: "0.4rem 0 0 1rem" }}>
+            {affected.map((a) => (
+              <li key={a.order_item_id}>
+                {a.order_no} -- {a.service_name} -- {[a.patient_first_name, a.patient_last_name].filter(Boolean).join(" ") || a.patient_id || "walk-in"}
+                {a.report_status ? ` (report ${a.report_status.replace(/_/g, " ")})` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {repeatFailed && (
         <div className="diag-note-box diag-note-critical">
           The repeat QC run failed -- this hold cannot be released. Record a new corrective action and run QC again.
@@ -369,8 +417,12 @@ function HoldReview({ hold, setNotice, onChanged }: { hold: QcHold; setNotice: D
         </div>
       )}
       {hold.status === "repeat_qc_pending" && !repeatFailed && (
-        <div className="diag-form-actions">
-          <Button variant="primary" onClick={releaseHold}>Release hold</Button>
+        <div className="diag-form-grid">
+          <div className="diag-form-full">
+            <Label>Release notes{affected.length ? " (required: outcome of the affected-test review)" : ""}</Label>
+            <Textarea rows={2} value={releaseNotes} onChange={(e) => setReleaseNotes(e.target.value)} />
+          </div>
+          <div className="diag-form-full"><Button variant="primary" onClick={releaseHold}>Release hold</Button></div>
         </div>
       )}
     </div>
@@ -495,7 +547,7 @@ function MaintenanceForm({ equipmentId, logs, setNotice, onSaved }: { equipmentI
       )}
       <div className="diag-form-grid">
         <div><Label>Service type</Label><Input value={serviceType} onChange={(e) => setServiceType(e.target.value)} placeholder="Preventive / Repair / Calibration" /></div>
-        <div><Label>Next due date</Label><Input type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} /></div>
+        <div><Label>{/calibrat/i.test(serviceType) ? "Next calibration due" : "Next due date"}</Label><Input type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} /></div>
         <div className="diag-form-full"><Label>Findings</Label><Textarea rows={2} value={findings} onChange={(e) => setFindings(e.target.value)} /></div>
         <div className="diag-form-full"><Label>Work performed</Label><Textarea rows={2} value={workPerformed} onChange={(e) => setWorkPerformed(e.target.value)} /></div>
         <div className="diag-checkbox-field">

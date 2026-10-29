@@ -40,6 +40,23 @@ def get_db():
         db.close()
 
 
+# Set on a session by get_audited_db(): legacy_sql's conn.commit() then only flushes, and
+# common.log_audit_event() commits the action and its audit row in one transaction.
+DEFER_COMMIT_KEY = "defer_commit_until_audit"
+
+
+def get_audited_db():
+    """FastAPI dependency for routes that log every write to audit_logs. A write whose
+    audit row cannot be stored is rolled back instead of being saved unaudited, and a
+    request that fails part-way leaves nothing half-committed."""
+    db = SessionLocal()
+    db.info[DEFER_COMMIT_KEY] = True
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @contextmanager
 def db_session():
     """Context-manager form for use outside request handlers (startup, scripts)."""

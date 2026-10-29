@@ -2643,6 +2643,7 @@ class DiagResults(Base):
     specimen_id: Mapped[Optional[int]] = mapped_column(Integer)
     parameter_id: Mapped[Optional[int]] = mapped_column(Integer)
     equipment_id: Mapped[Optional[int]] = mapped_column(Integer)
+    reagent_lot_id: Mapped[Optional[int]] = mapped_column(Integer)
     value_text: Mapped[Optional[str]] = mapped_column(Text)
     value_numeric: Mapped[Optional[float]] = mapped_column(REAL)
     unit: Mapped[Optional[str]] = mapped_column(Text)

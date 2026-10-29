@@ -383,6 +383,7 @@ function SidebarIcon({ name }: { name: SidebarIconName }) {
 
 type SidebarTabProps = {
   label: string;
+  pageId?: string;
   icon: SidebarIconName;
   active: boolean;
   disabled?: boolean;
@@ -390,10 +391,11 @@ type SidebarTabProps = {
   onClick: () => void;
 };
 
-function SidebarTab({ label, icon, active, disabled = false, hint, onClick }: SidebarTabProps) {
+function SidebarTab({ label, pageId, icon, active, disabled = false, hint, onClick }: SidebarTabProps) {
   return (
     <button
       type="button"
+      data-page={pageId}
       className={active ? "sidebar-tab active" : "sidebar-tab"}
       disabled={disabled}
       title={hint || ""}
@@ -1475,6 +1477,7 @@ function App() {
                           <SidebarTab
                             key={item.id}
                             label={item.label}
+                            pageId={item.id}
                             icon={NAV_ICON_MAP[item.id] || "dashboard"}
                             active={isActive}
                             disabled={blocked}

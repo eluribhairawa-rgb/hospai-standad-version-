@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 import legacy_queries as lq
+from database import DEFER_COMMIT_KEY
 
 RAZORPAY_KEY_ID = (os.getenv("RAZORPAY_KEY_ID") or "").strip()
 RAZORPAY_KEY_SECRET = (os.getenv("RAZORPAY_KEY_SECRET") or "").strip()
@@ -57,6 +58,8 @@ def log_audit_event(db: Session, user: dict | None, request_ip: str | None, acti
         "payload": serialized_payload,
         "ip_address": request_ip,
     })
+    if db.info.get(DEFER_COMMIT_KEY):
+        db.commit()
 
 
 def is_razorpay_configured():
