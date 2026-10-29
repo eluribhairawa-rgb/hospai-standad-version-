@@ -278,9 +278,10 @@ def _diag_scope_rows(cursor, encounter_type, appointment_id, admission_id, patie
             cursor.execute(
                 """
                 SELECT oi.id AS item_id, oi.service_name, oi.department_type, oi.amount, o.invoice_id AS discharge_invoice_id,
-                       o.id AS order_id, o.confirmed_at
+                       o.id AS order_id, o.confirmed_at, o.created_at AS ordered_at, o.appointment_id
                 FROM diag_order_items oi JOIN diag_orders o ON o.id = oi.order_id
-                WHERE (o.appointment_id = ? OR (o.patient_id = ? AND o.admission_id IS NULL))
+                WHERE (o.appointment_id = ?
+                       OR (o.patient_id = ? AND o.appointment_id IS NULL AND o.admission_id IS NULL AND o.encounter_type = 'OP'))
                   AND o.status = 'confirmed' AND oi.cancelled_at IS NULL
                 """,
                 (appointment_id, patient_id),
@@ -289,9 +290,10 @@ def _diag_scope_rows(cursor, encounter_type, appointment_id, admission_id, patie
             cursor.execute(
                 """
                 SELECT oi.id AS item_id, oi.service_name, oi.department_type, oi.amount, o.invoice_id AS discharge_invoice_id,
-                       o.id AS order_id, o.confirmed_at
+                       o.id AS order_id, o.confirmed_at, o.created_at AS ordered_at, o.appointment_id
                 FROM diag_order_items oi JOIN diag_orders o ON o.id = oi.order_id
-                WHERE o.patient_id = ? AND o.admission_id IS NULL AND o.status = 'confirmed' AND oi.cancelled_at IS NULL
+                WHERE o.patient_id = ? AND o.admission_id IS NULL AND o.appointment_id IS NULL
+                  AND o.encounter_type <> 'EMERGENCY' AND o.status = 'confirmed' AND oi.cancelled_at IS NULL
                 """,
                 (patient_id,),
             )
@@ -498,11 +500,18 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
 
             consultation_fee = 0.0
             if appt_day:
-                cursor.execute(
-                    "SELECT * FROM invoices WHERE patient_id = ? AND module = 'OP' AND DATE(created_at) = ? ORDER BY created_at LIMIT 1",
-                    (patient_id, appt_day),
-                )
-                consultation_invoice = cursor.fetchone()
+                consultation_invoice = None
+                if appointment_id:
+                    cursor.execute("SELECT * FROM invoices WHERE patient_id = ? AND module = 'OP' AND appointment_id = ? ORDER BY created_at LIMIT 1",
+                                   (patient_id, appointment_id))
+                    consultation_invoice = cursor.fetchone()
+                if not consultation_invoice:
+                    cursor.execute(
+                        "SELECT * FROM invoices WHERE patient_id = ? AND module = 'OP' AND appointment_id IS NULL AND admission_id IS NULL "
+                        "AND DATE(created_at) = ? ORDER BY created_at LIMIT 1",
+                        (patient_id, appt_day),
+                    )
+                    consultation_invoice = cursor.fetchone()
                 consultation_fee = float(consultation_invoice["total_amount"] or 0) if consultation_invoice else float(appt.get("consultation_fee") or 0)
                 if consultation_invoice:
                     invoice_ids.add(consultation_invoice["id"])
@@ -538,7 +547,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
 
             items = [
                 it for it in _diag_scope_rows(cursor, "OP", appointment_id, None, patient_id=patient_id)
-                if in_visit(it["confirmed_at"])
+                if (appointment_id and it["appointment_id"] == appointment_id) or in_visit(it["confirmed_at"] or it["ordered_at"])
             ]
             events.extend(_lab_bill_events(cursor, items))
             for it in items:
@@ -583,14 +592,14 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                 """
                 SELECT id, invoice_no, total_amount, paid_amount, module, created_at
                 FROM invoices
-                WHERE patient_id = ? AND (
+                WHERE patient_id = ? AND admission_id IS NULL AND (appointment_id IS NULL OR appointment_id = ?) AND (
                     UPPER(COALESCE(module, '')) IN ('OP', 'LAB', 'DIAGNOSTICS', 'PHARMACY', 'RADIOLOGY')
                     OR invoice_no ILIKE 'INV-LAB-%'
                     OR invoice_no ILIKE 'INV-DIAG-%'
                     OR invoice_no ILIKE 'INV-PHARM-%'
                 )
                 """,
-                (patient_id,),
+                (patient_id, appointment_id or -1),
             )
             for inv in cursor.fetchall():
                 if not in_visit(inv.get("created_at")):

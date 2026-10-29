@@ -37,7 +37,31 @@ type EmarRow = {
   administered_by?: string;
   administered_at?: string;
   notes?: string;
+  frequency?: string;
+  is_prn?: boolean;
+  instructions?: string;
+  doctor_name?: string;
 };
+
+/** A doctor's order that pharmacy has not issued yet -- it has no eMAR doses until then. */
+type AwaitingOrder = {
+  id: number;
+  indent_no: string;
+  priority?: string;
+  doctor_name?: string;
+  ordered_by?: string;
+  medicine_name: string;
+  dose?: string;
+  frequency?: string;
+  route?: string;
+  quantity_ordered: number;
+  quantity_dispensed: number;
+  is_prn?: boolean;
+  instructions?: string;
+  created_at?: string;
+};
+
+type DoseAction = "given" | "held" | "refused" | "missed";
 
 type VitalRow = {
   id: number;
@@ -84,6 +108,24 @@ function badgeClass(status: string) {
   return "diag-badge-muted";
 }
 
+const EARLY_WINDOW_MS = 60 * 60 * 1000;
+
+function isPrn(row: EmarRow) {
+  return !!row.is_prn || /\b(PRN|SOS)\b/i.test(row.frequency || "") || (row.notes || "").startsWith("PRN");
+}
+
+/** Due state of a pending dose relative to the server clock (IST wall time). */
+function dueState(row: EmarRow, nowMs: number): { label: string; cls: string } | null {
+  if (row.status !== "pending") return null;
+  if (isPrn(row)) return { label: "PRN - as needed", cls: "diag-badge-info" };
+  const t = new Date(row.scheduled_time).getTime();
+  if (Number.isNaN(t)) return null;
+  const diff = t - nowMs;
+  if (diff < -EARLY_WINDOW_MS) return { label: "Overdue", cls: "diag-badge-critical" };
+  if (diff <= EARLY_WINDOW_MS) return { label: "Due now", cls: "diag-badge-warning" };
+  return { label: "Upcoming", cls: "diag-badge-muted" };
+}
+
 function formatTime(value?: string) {
   if (!value) return "-";
   const d = new Date(value);
@@ -100,6 +142,19 @@ export default function NurseEmarPage({ setNotice }: Props) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [discontinueTarget, setDiscontinueTarget] = useState<EmarRow | null>(null);
   const [discontinueReason, setDiscontinueReason] = useState("");
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [awaiting, setAwaiting] = useState<AwaitingOrder[]>([]);
+  // Offset between the server's IST clock and this browser, so due/overdue uses ward time.
+  const [clockOffset, setClockOffset] = useState(0);
+  const [tick, setTick] = useState(Date.now());
+  const [reasonTarget, setReasonTarget] = useState<{ row: EmarRow; action: DoseAction; early?: boolean } | null>(null);
+  const [reasonText, setReasonText] = useState("");
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick(Date.now()), 60000);
+    return () => window.clearInterval(id);
+  }, []);
+  const nowMs = tick + clockOffset;
 
   const [detailTab, setDetailTab] = useState<"emar" | "vitals" | "notes">("emar");
   const [vitals, setVitals] = useState<VitalRow[]>([]);
@@ -134,8 +189,17 @@ export default function NurseEmarPage({ setNotice }: Props) {
     try {
       const params = new URLSearchParams({ admission_id: String(patient.admission_id) });
       if (statusFilter) params.set("status", statusFilter);
-      const res = await apiFetch<{ emar: EmarRow[] }>(`/api/patients/${patient.patient_id}/emar?${params}`);
+      const res = await apiFetch<{ emar: EmarRow[]; counts?: Record<string, number>; awaiting_pharmacy?: AwaitingOrder[]; server_time?: string }>(
+        `/api/patients/${encodeURIComponent(patient.patient_id)}/emar?${params}`
+      );
       setRows(res.emar || []);
+      setCounts(res.counts || {});
+      setAwaiting(res.awaiting_pharmacy || []);
+      if (res.server_time) {
+        const server = new Date(res.server_time).getTime();
+        if (!Number.isNaN(server)) setClockOffset(server - Date.now());
+      }
+      setTick(Date.now());
     } catch (err: any) {
       reportError(setNotice, err, "Could not load the medication schedule.");
     } finally {
@@ -222,21 +286,36 @@ export default function NurseEmarPage({ setNotice }: Props) {
     );
   }, [inpatients, search]);
 
-  const act = async (row: EmarRow, action: "given" | "held" | "refused" | "missed") => {
+  const submitDose = async (row: EmarRow, action: DoseAction, notes?: string) => {
     setBusyId(row.id);
     try {
+      const body = JSON.stringify(notes ? { notes } : {});
       if (action === "given") {
-        await apiFetch(`/api/emar/${row.id}/administer`, { method: "POST", body: JSON.stringify({}) });
+        await apiFetch(`/api/emar/${row.id}/administer`, { method: "POST", body });
       } else {
-        await apiFetch(`/api/emar/${row.id}/status`, { method: "POST", body: JSON.stringify({ status: action }) });
+        await apiFetch(`/api/emar/${row.id}/status`, { method: "POST", body: JSON.stringify({ status: action, ...(notes ? { notes } : {}) }) });
       }
       setNotice({ type: "success", message: `${row.medicine_name} marked ${action}.` });
+      setReasonTarget(null);
+      setReasonText("");
       if (selected) await loadEmar(selected, status);
     } catch (err: any) {
       reportError(setNotice, err, "Could not update this dose.");
+      if (selected) await loadEmar(selected, status);
     } finally {
       setBusyId(null);
     }
+  };
+
+  const act = (row: EmarRow, action: DoseAction) => {
+    // Held/refused/missed always need a reason; giving a scheduled dose more than an hour early does too.
+    const early = action === "given" && !isPrn(row) && new Date(row.scheduled_time).getTime() - nowMs > EARLY_WINDOW_MS;
+    if (action !== "given" || early) {
+      setReasonTarget({ row, action, early });
+      setReasonText("");
+      return;
+    }
+    void submitDose(row, action);
   };
 
   const confirmDiscontinue = async () => {
@@ -364,20 +443,35 @@ export default function NurseEmarPage({ setNotice }: Props) {
               {detailTab === "emar" && (
               <>
               <Select value={status} onChange={(e) => setStatus(e.target.value)}>
-                {STATUS_OPTIONS.map((s) => <option key={s.key || "all"} value={s.key}>{s.label}</option>)}
+                {STATUS_OPTIONS.map((s) => {
+                  const n = s.key ? counts[s.key] || 0 : Object.values(counts).reduce((a, b) => a + b, 0);
+                  return <option key={s.key || "all"} value={s.key}>{s.label} ({n})</option>;
+                })}
               </Select>
 
               <div style={{ marginTop: "0.75rem" }}>
                 {loading && <p className="muted">Loading...</p>}
-                {!loading && rows.length === 0 && <p className="muted">No doses in this state.</p>}
+                {!loading && rows.length === 0 && (
+                  <p className="muted">
+                    {Object.keys(counts).length === 0
+                      ? awaiting.length > 0
+                        ? "No doses scheduled yet: the medication orders below are waiting for pharmacy to issue them."
+                        : "No medication has been ordered and issued for this admission yet."
+                      : `No ${STATUS_OPTIONS.find((o) => o.key === status)?.label.toLowerCase() || ""} doses. Choose "All" to see the ${Object.values(counts).reduce((a, b) => a + b, 0)} recorded dose(s).`}
+                  </p>
+                )}
                 {rows.map((r) => (
                   <div key={r.id} className="diag-worklist-row">
                     <div className="diag-worklist-row-top">
-                      <span>{r.medicine_name} {r.dose ? `- ${r.dose}` : ""} {r.route ? `(${r.route})` : ""}</span>
-                      <span className={`diag-badge ${badgeClass(r.status)}`}>{r.status}</span>
+                      <span>{r.medicine_name} {r.dose ? `- ${r.dose}` : ""} {r.route ? `(${r.route})` : ""}{r.frequency ? ` · ${r.frequency}` : ""}</span>
+                      <span style={{ display: "inline-flex", gap: "6px" }}>
+                        {(() => { const d = dueState(r, nowMs); return d ? <span className={`diag-badge ${d.cls}`}>{d.label}</span> : null; })()}
+                        <span className={`diag-badge ${badgeClass(r.status)}`}>{r.status}</span>
+                      </span>
                     </div>
                     <div className="diag-worklist-row-meta">
-                      <span>Scheduled: {formatTime(r.scheduled_time)}</span>
+                      <span>{isPrn(r) && r.status === "pending" ? "As needed" : `Scheduled: ${formatTime(r.scheduled_time)}`}</span>
+                      {r.instructions && <span>{r.instructions}</span>}
                       {r.status === "pending" ? null : (
                         <span>{r.administered_at ? `At ${formatTime(r.administered_at)} by ${r.administered_by || "-"}` : (r.notes || "")}</span>
                       )}
@@ -398,6 +492,46 @@ export default function NurseEmarPage({ setNotice }: Props) {
                   </div>
                 ))}
               </div>
+
+              {awaiting.length > 0 && (status === "pending" || status === "") && (
+                <div style={{ marginTop: "1rem" }}>
+                  <div className="diag-section-title">Ordered - awaiting pharmacy issue ({awaiting.length})</div>
+                  {awaiting.map((o) => (
+                    <div key={o.id} className="diag-worklist-row">
+                      <div className="diag-worklist-row-top">
+                        <span>{o.medicine_name} {o.dose ? `- ${o.dose}` : ""} {o.route ? `(${o.route})` : ""}{o.frequency ? ` · ${o.frequency}` : ""}</span>
+                        <span className="diag-badge diag-badge-muted">{o.quantity_dispensed > 0 ? `issued ${o.quantity_dispensed}/${o.quantity_ordered}` : "not issued"}</span>
+                      </div>
+                      <div className="diag-worklist-row-meta">
+                        <span>{o.indent_no}{o.priority && o.priority !== "normal" ? ` · ${o.priority.toUpperCase()}` : ""}</span>
+                        <span>Ordered {formatTime(o.created_at)}{o.doctor_name ? ` · Dr. ${o.doctor_name}` : o.ordered_by ? ` · ${o.ordered_by}` : ""}</span>
+                        {o.instructions && <span>{o.instructions}</span>}
+                      </div>
+                    </div>
+                  ))}
+                  <p className="muted" style={{ fontSize: "12px" }}>Doses appear in the schedule above once pharmacy issues the stock.</p>
+                </div>
+              )}
+
+              {reasonTarget && (
+                <div className="diag-form-grid" style={{ marginTop: "1rem" }}>
+                  <div className="diag-form-full">
+                    <Label>
+                      {reasonTarget.early
+                        ? `${reasonTarget.row.medicine_name} is scheduled for ${formatTime(reasonTarget.row.scheduled_time)} - reason for giving it early`
+                        : `Mark ${reasonTarget.row.medicine_name} (${formatTime(reasonTarget.row.scheduled_time)}) as ${reasonTarget.action} - reason`}
+                    </Label>
+                    <Textarea value={reasonText} onChange={(e) => setReasonText(e.target.value)}
+                      placeholder={reasonTarget.early ? "e.g. Doctor advised to give now" : reasonTarget.action === "held" ? "e.g. BP 90/60, held per doctor" : reasonTarget.action === "refused" ? "e.g. Patient refused, counselled" : "e.g. Patient away for scan"} />
+                  </div>
+                  <div className="diag-form-full">
+                    <Button variant="primary" disabled={busyId === reasonTarget.row.id || !reasonText.trim()} onClick={() => void submitDose(reasonTarget.row, reasonTarget.action, reasonText.trim())}>
+                      Confirm {reasonTarget.action === "given" ? "administered" : reasonTarget.action}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setReasonTarget(null)}>Cancel</Button>
+                  </div>
+                </div>
+              )}
 
               {discontinueTarget && (
                 <div className="diag-form-grid" style={{ marginTop: "1rem" }}>

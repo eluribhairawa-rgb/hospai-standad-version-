@@ -1318,8 +1318,8 @@ def record_vitals(db, patient_id, data, username, encounter_id=None, admission_i
         cursor.execute(
             """
             INSERT INTO patient_vitals (
-                patient_id, bp, pulse, temperature, spo2, weight, height, admission_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                patient_id, bp, pulse, temperature, spo2, weight, height, admission_id, encounter_id, recorded_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 patient_id,
@@ -1330,6 +1330,8 @@ def record_vitals(db, patient_id, data, username, encounter_id=None, admission_i
                 parse_float(data.get("weight")),
                 parse_float(data.get("height")),
                 admission_id,
+                parse_int(encounter_id),
+                username,
             ),
         )
         vital_id = cursor.lastrowid
@@ -2498,12 +2500,12 @@ def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
                 INSERT INTO invoices (
                     invoice_no, patient_id, module, doctor_name, clinic_name, referral_source,
                     subtotal, tax, discount, total_amount, paid_amount, due_amount, payment_status, created_by,
-                    advance_amount, refunded_amount
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    advance_amount, refunded_amount, appointment_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     invoice_no, patient_id, "OP", payload.get("doctor_name"), None, None,
-                    0, 0, 0, consultation_fee, 0, consultation_fee, "due", op_name, 0, 0
+                    0, 0, 0, consultation_fee, 0, consultation_fee, "due", op_name, 0, 0, appointment_id
                 )
             )
             invoice_id = cursor.lastrowid
@@ -6023,6 +6025,164 @@ def list_stock_adjustments(db):
 
 
 
+EMAR_MAX_DOSES_PER_ISSUE = 60
+EMAR_EARLY_WINDOW = timedelta(hours=1)
+
+
+def _emar_now():
+    # eMAR times are naive IST wall-clock times (what the ward sees), never server-local/UTC.
+    return current_ist_datetime().replace(tzinfo=None)
+
+
+def emar_frequency_plan(frequency, is_prn=False):
+    """Map a prescribed frequency to administration times. Returns
+    ("prn", None) for as-needed orders (no fixed schedule), ("stat", None) for a
+    single immediate dose, ("hours", [h, ...]) for fixed clock times, or
+    ("interval", n) for every-n-hours orders."""
+    f = re.sub(r"\s+", " ", str(frequency or "").strip().upper())
+    compact = f.replace(" ", "").replace(".", "")
+    if is_prn or re.search(r"\b(PRN|SOS|AS NEEDED|WHEN REQUIRED)\b", f):
+        return "prn", None
+    if re.search(r"\bSTAT\b|\bIMMEDIATE", f) or compact == "ONCE":
+        return "stat", None
+    m = re.fullmatch(r"([01])-([01])-([01])(?:-([01]))?", compact)
+    if m:
+        slots = [8, 14, 20, 22]
+        hours = [slots[i] for i, v in enumerate(m.groups()) if v == "1"]
+        return ("hours", hours) if hours else ("hours", [9])
+    m = re.search(r"\bQ(\d{1,2})H\b|EVERY (\d{1,2}) ?(?:HOURS?|HRS?)", f)
+    if m:
+        n = int(m.group(1) or m.group(2))
+        if 1 <= n <= 24:
+            return "interval", n
+    if re.search(r"\bQID\b|FOUR TIMES|4 TIMES", f):
+        return "hours", [6, 12, 18, 22]
+    if re.search(r"\bTDS\b|\bTID\b|THRICE|THREE TIMES|3 TIMES", f):
+        return "hours", [8, 14, 20]
+    if re.search(r"\bBD\b|\bBID\b|TWICE|TWO TIMES|2 TIMES|\bQ12H\b", f):
+        return "hours", [9, 21]
+    if re.search(r"\bHS\b|BED ?TIME|NIGHT", f):
+        return "hours", [21]
+    return "hours", [9]  # OD / once daily / unrecognised -> once daily
+
+
+def emar_schedule_times(frequency, count, start_at=None, end_at=None, after=None, is_prn=False, now=None):
+    """Upcoming administration times for `count` doses. The first dose is the
+    next slot at/after max(now, order start, `after`) -- never a slot that had
+    already passed when pharmacy issued the stock -- and no dose is scheduled
+    after the order's end time."""
+    now = now or _emar_now()
+    kind, value = emar_frequency_plan(frequency, is_prn)
+    if count <= 0 or kind == "prn":
+        return []
+    begin = now
+    for candidate in (start_at, after):
+        if isinstance(candidate, str):
+            try:
+                candidate = datetime.fromisoformat(candidate)
+            except ValueError:
+                candidate = None
+        if isinstance(candidate, datetime):
+            candidate = candidate.replace(tzinfo=None)
+            if candidate > begin:
+                begin = candidate
+    after = after.replace(tzinfo=None) if isinstance(after, datetime) else None
+    if isinstance(end_at, str):
+        try:
+            end_at = datetime.fromisoformat(end_at)
+        except ValueError:
+            end_at = None
+    end_at = end_at.replace(tzinfo=None) if isinstance(end_at, datetime) else None
+    # A slot is still "current" for up to 30 minutes after its clock time.
+    grace = timedelta(minutes=30)
+    times = []
+    if kind == "stat":
+        times = [begin.replace(second=0, microsecond=0)]
+    elif kind == "interval":
+        step = timedelta(hours=value)
+        if isinstance(after, datetime):
+            t = after.replace(tzinfo=None) + step
+            if t + grace < now:
+                t = now.replace(minute=0, second=0, microsecond=0)
+        else:
+            t = begin.replace(minute=0, second=0, microsecond=0)
+            if t + grace < begin:
+                t += timedelta(hours=1)
+        while len(times) < count:
+            times.append(t)
+            t += step
+    else:
+        day = begin.date()
+        while len(times) < count:
+            for h in value:
+                slot = datetime.combine(day, datetime.min.time()).replace(hour=h)
+                if slot + grace < begin or (isinstance(after, datetime) and slot <= after):
+                    continue
+                times.append(slot)
+                if len(times) >= count:
+                    break
+            day += timedelta(days=1)
+    if end_at:
+        times = [t for t in times if t <= end_at]
+    return times
+
+
+def _create_emar_doses(cursor, line, indent_id, admission_id, patient_id, medicine_name, dispensed_qty, sale_id):
+    """Turn an issued IP medication into scheduled eMAR doses. Dose, route and
+    frequency come from the doctor's order line (ward_indent_items) when there
+    is one -- the order is the source of truth, not the dispense payload."""
+    indent_item_id = line.get("indent_item_id")
+    order = None
+    if indent_item_id:
+        cursor.execute(
+            "SELECT dose, route, frequency, start_at, end_at, is_prn FROM ward_indent_items WHERE id = ?",
+            (indent_item_id,),
+        )
+        order = cursor.fetchone()
+    dose = (order["dose"] if order and order["dose"] else None) or line.get("dose") or "1 dose"
+    route = (order["route"] if order and order["route"] else None) or line.get("route") or "Oral"
+    freq = (order["frequency"] if order and order["frequency"] else None) or line.get("frequency") or "OD"
+    is_prn = bool(order["is_prn"]) if order else bool(line.get("is_prn"))
+    count = min(int(dispensed_qty or 0), EMAR_MAX_DOSES_PER_ISSUE)
+
+    if emar_frequency_plan(freq, is_prn)[0] == "prn":
+        # As-needed: each issued unit is one dose the nurse may give when indicated.
+        now = _emar_now().replace(second=0, microsecond=0)
+        for _ in range(count):
+            cursor.execute(
+                """
+                INSERT INTO emar_records (indent_id, indent_item_id, admission_id, patient_id, medicine_name, dose, route, scheduled_time, status, sale_id, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (indent_id, indent_item_id, admission_id, patient_id, medicine_name, dose, route, now, sale_id, "PRN - give only when indicated"),
+            )
+        return
+
+    # A second (partial) issue of the same order continues after the doses already scheduled.
+    last_scheduled = None
+    if indent_item_id:
+        cursor.execute(
+            "SELECT MAX(scheduled_time) AS last_time FROM emar_records WHERE indent_item_id = ? AND status <> 'discontinued'",
+            (indent_item_id,),
+        )
+        row = cursor.fetchone()
+        last_scheduled = row["last_time"] if row else None
+    times = emar_schedule_times(
+        freq, count,
+        start_at=order["start_at"] if order else None,
+        end_at=order["end_at"] if order else None,
+        after=last_scheduled,
+    )
+    for sched_time in times:
+        cursor.execute(
+            """
+            INSERT INTO emar_records (indent_id, indent_item_id, admission_id, patient_id, medicine_name, dose, route, scheduled_time, status, sale_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (indent_id, indent_item_id, admission_id, patient_id, medicine_name, dose, route, sched_time, sale_id),
+        )
+
+
 def create_pharmacy_dispense(db, data, username):
     """Atomic: FEFO batch selection + stock decrement + sale record(s) +
     linked invoice (+ draft insurance claim when billed via insurance), all
@@ -6208,23 +6368,7 @@ def create_pharmacy_dispense(db, data, username):
 
             # If IPD dispensing with admission_id, auto-populate eMAR dosage entries for nursing
             if admission_id and patient_id:
-                dose = line.get("dose") or "1 dose"
-                route = line.get("route") or "Oral"
-                freq = line.get("frequency") or "OD"
-                # Generate dose schedules
-                now = datetime.now()
-                doses_per_day = 2 if "BD" in freq.upper() else (3 if "TDS" in freq.upper() else (4 if "QID" in freq.upper() else 1))
-                intervals = [8, 14, 20][:doses_per_day] if doses_per_day > 1 else [9]
-                for d in range(min(dispensed_qty, 10)):
-                    hour = intervals[d % len(intervals)]
-                    sched_time = (now + timedelta(days=d // len(intervals))).replace(hour=hour, minute=0, second=0, microsecond=0)
-                    cursor.execute(
-                        """
-                        INSERT INTO emar_records (indent_id, indent_item_id, admission_id, patient_id, medicine_name, dose, route, scheduled_time, status, sale_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-                        """,
-                        (indent_id, line.get("indent_item_id"), admission_id, patient_id, medicine_name, dose, route, sched_time, sale_id),
-                    )
+                _create_emar_doses(cursor, line, indent_id, admission_id, patient_id, medicine_name, dispensed_qty, sale_id)
 
         if not sale_ids:
             cancelled_lines = [s["medicine_name"] for s in shortfalls if s.get("reason", "").startswith("This medication order was cancelled")]
@@ -7478,54 +7622,176 @@ def create_ward_indent(db, data, username):
 
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        ward = ""
-        bed_no = ""
-        if admission_id:
-            cursor.execute(
-                "SELECT ward, room_no, bed_no FROM bed_allocations WHERE admission_id = ? AND status = 'active' ORDER BY allocated_at DESC LIMIT 1",
-                (admission_id,),
-            )
-            bed_row = cursor.fetchone()
-            if not bed_row:
-                raise ValueError("This admission has no active bed allocation. Allocate a bed before raising a ward indent.")
-            ward = bed_row["ward"]
-            bed_no = bed_row["bed_no"]
-        else:
-            raise ValueError("An admission_id is required to raise a ward indent.")
-
-        cursor.execute(
-            """
-            INSERT INTO ward_indents (indent_no, patient_id, admission_id, ward, bed_no, doctor_name, priority, status, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-            """,
-            (indent_no, patient_id, admission_id, ward, bed_no, doctor_name, priority, username),
-        )
-        indent_id = cursor.lastrowid
-        for item in items:
-            cursor.execute(
-                """
-                INSERT INTO ward_indent_items (
-                    indent_id, medicine_id, medicine_name, dose, frequency, route, quantity_ordered, status,
-                    start_at, end_at, is_prn, instructions, ordered_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
-                """,
-                (
-                    indent_id,
-                    item.get("medicine_id"),
-                    item["medicine_name"],
-                    item["dose"],
-                    item["frequency"],
-                    item["route"],
-                    int(item["quantity_ordered"]),
-                    item.get("start_at") or datetime.now(),
-                    item.get("end_at"),
-                    bool(item.get("is_prn", False)),
-                    item.get("instructions"),
-                    username,
-                ),
-            )
+        indent_id = _insert_ward_indent(cursor, indent_no, patient_id, admission_id, doctor_name, priority, items, username)
         conn.commit()
         return indent_id, indent_no
+
+
+
+def _insert_ward_indent(cursor, indent_no, patient_id, admission_id, doctor_name, priority, items, username, prescription_id=None):
+    ward = ""
+    bed_no = ""
+    if admission_id:
+        cursor.execute(
+            "SELECT ward, room_no, bed_no FROM bed_allocations WHERE admission_id = ? AND status = 'active' ORDER BY allocated_at DESC LIMIT 1",
+            (admission_id,),
+        )
+        bed_row = cursor.fetchone()
+        if not bed_row:
+            raise ValueError("This admission has no active bed allocation. Allocate a bed before raising a ward indent.")
+        ward = bed_row["ward"]
+        bed_no = bed_row["bed_no"]
+    else:
+        raise ValueError("An admission_id is required to raise a ward indent.")
+
+    cursor.execute(
+        """
+        INSERT INTO ward_indents (indent_no, patient_id, admission_id, ward, bed_no, doctor_name, priority, status, created_by, prescription_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """,
+        (indent_no, patient_id, admission_id, ward, bed_no, doctor_name, priority, username, prescription_id),
+    )
+    indent_id = cursor.lastrowid
+    for item in items:
+        cursor.execute(
+            """
+            INSERT INTO ward_indent_items (
+                indent_id, medicine_id, medicine_name, dose, frequency, route, quantity_ordered, status,
+                start_at, end_at, is_prn, instructions, ordered_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+            """,
+            (
+                indent_id,
+                item.get("medicine_id"),
+                item["medicine_name"],
+                item["dose"],
+                item["frequency"],
+                item["route"],
+                int(item["quantity_ordered"]),
+                item.get("start_at") or datetime.now(),
+                item.get("end_at"),
+                bool(item.get("is_prn", False)),
+                item.get("instructions"),
+                username,
+            ),
+        )
+    return indent_id
+
+
+
+_ROUTE_HINTS = [
+    (r"\b(INJ|INJECTION|IV|I\.V\.|INFUSION|VIAL|AMPOULE|AMP)\b", "IV"),
+    (r"\b(IM)\b", "IM"),
+    (r"\b(SC|SUBCUT|INSULIN)\b", "Subcutaneous"),
+    (r"\b(INHALER|NEB|NEBUL|ROTACAP|RESPULE|PUFF)", "Inhalation"),
+    (r"\b(EYE|EAR) ?DROPS?\b", "Topical (drops)"),
+    (r"\b(CREAM|OINTMENT|GEL|LOTION|PATCH)\b", "Topical"),
+    (r"\b(SUPPOSITORY|SUPP)\b", "Rectal"),
+    (r"\b(SL|SUBLINGUAL)\b", "Sublingual"),
+]
+
+
+def _infer_route(*texts):
+    blob = " ".join(str(t or "") for t in texts).upper()
+    for pattern, route in _ROUTE_HINTS:
+        if re.search(pattern, blob):
+            return route
+    return "Oral"
+
+
+def _duration_days(duration):
+    m = re.search(r"(\d+)\s*(D|DAY|DAYS|W|WK|WEEK|WEEKS|M|MONTH|MONTHS)?\b", str(duration or "").upper())
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = (m.group(2) or "D")[0]
+    return n * (7 if unit == "W" else 30 if unit == "M" else 1)
+
+
+def ip_order_items_from_prescription(medicines, now=None):
+    """Convert Doctor Prescription medicine rows into IP medication order
+    lines. The prescription form has no route field, so the route is inferred
+    from the medicine name / instructions (default Oral) and flagged for
+    pharmacy to verify; quantity = doses per day x duration."""
+    now = now or current_ist_datetime().replace(tzinfo=None)
+    items = []
+    for med in medicines or []:
+        name = str(med.get("medicine_name") or med.get("medicine") or "").strip()
+        if not name:
+            continue
+        frequency = str(med.get("frequency") or med.get("freq_custom") or "").strip() or "OD"
+        kind, value = emar_frequency_plan(frequency)
+        per_day = len(value) if kind == "hours" else max(1, 24 // value) if kind == "interval" else 1
+        days = _duration_days(med.get("duration"))
+        quantity = min(per_day * (days or 1), 500)
+        route = str(med.get("route") or "").strip()
+        notes = [str(med.get("instructions") or "").strip()]
+        if med.get("duration"):
+            notes.append(f"Duration: {str(med.get('duration')).strip()}")
+        if not route:
+            route = _infer_route(name, med.get("dosage"), med.get("instructions"))
+            notes.append("Route taken from prescription text - verify")
+        items.append({
+            "medicine_name": name,
+            "dose": str(med.get("dosage") or "").strip() or "As directed",
+            "frequency": frequency,
+            "route": route,
+            "quantity_ordered": quantity,
+            "start_at": now,
+            "end_at": now + timedelta(days=days) if days else None,
+            "is_prn": kind == "prn",
+            "instructions": " · ".join(n for n in notes if n) or None,
+        })
+    return items
+
+
+
+def active_ip_admission(cursor, patient_id):
+    """The patient's current inpatient admission (an active bed allocation on an
+    admission that is not discharged), or None for an outpatient."""
+    cursor.execute(
+        """
+        SELECT b.admission_id FROM bed_allocations b
+        JOIN admissions a ON a.id = b.admission_id
+        WHERE b.patient_id = ? AND b.status = 'active' AND a.discharge_date IS NULL
+        ORDER BY b.allocated_at DESC LIMIT 1
+        """,
+        (patient_id,),
+    )
+    row = cursor.fetchone()
+    return row["admission_id"] if row else None
+
+
+
+def create_ip_order_from_prescription(cursor, prescription_id, patient_id, admission_id, doctor_name, medicines, username):
+    """Doctor Prescription for an admitted patient -> IP medication order
+    (ward indent) that appears in Pharmacy > IP Dispense. Re-saving the same
+    prescription cancels its not-yet-issued lines and raises them again;
+    anything already issued stays as recorded."""
+    cursor.execute(
+        """
+        UPDATE ward_indent_items SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP,
+               cancel_reason = 'Prescription revised (by ' || ? || ')'
+        WHERE indent_id IN (SELECT id FROM ward_indents WHERE prescription_id = ?)
+          AND COALESCE(quantity_dispensed, 0) = 0 AND COALESCE(status, 'pending') <> 'cancelled'
+        """,
+        (username or "system", prescription_id),
+    )
+    cursor.execute(
+        """
+        UPDATE ward_indents SET status = 'cancelled'
+        WHERE prescription_id = ? AND status = 'pending'
+          AND NOT EXISTS (SELECT 1 FROM ward_indent_items i WHERE i.indent_id = ward_indents.id AND COALESCE(i.status, 'pending') <> 'cancelled')
+        """,
+        (prescription_id,),
+    )
+    items = ip_order_items_from_prescription(medicines)
+    if not items:
+        return None
+    indent_no = f"IND-RX{prescription_id}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    indent_id = _insert_ward_indent(cursor, indent_no, patient_id, admission_id, doctor_name, "normal", items, username,
+                                    prescription_id=prescription_id)
+    return {"indent_id": indent_id, "indent_no": indent_no, "items": len(items)}
 
 
 
@@ -7622,10 +7888,12 @@ def list_emar_records(db, patient_id=None, admission_id=None, status=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
         query = """
-            SELECT e.*, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) AS patient_name, wi.ward, wi.bed_no
+            SELECT e.*, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) AS patient_name, wi.ward, wi.bed_no,
+                   wii.frequency, wii.is_prn, wii.instructions, wii.ordered_by, wi.doctor_name
             FROM emar_records e
             LEFT JOIN patients p ON p.patient_id = e.patient_id
             LEFT JOIN ward_indents wi ON wi.id = e.indent_id
+            LEFT JOIN ward_indent_items wii ON wii.id = e.indent_item_id
             WHERE 1=1
         """
         params = []
@@ -7644,28 +7912,88 @@ def list_emar_records(db, patient_id=None, admission_id=None, status=None):
 
 
 
+def count_emar_by_status(db, patient_id, admission_id=None):
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        query = "SELECT status, COUNT(*) AS n FROM emar_records WHERE patient_id = ?"
+        params = [patient_id]
+        if admission_id:
+            query += " AND admission_id = ?"
+            params.append(admission_id)
+        cursor.execute(query + " GROUP BY status", tuple(params))
+        return {r["status"]: r["n"] for r in cursor.fetchall()}
+
+
+
+def list_unissued_medication_orders(db, patient_id, admission_id=None):
+    """Doctor's medication orders for this admission that pharmacy has not
+    (fully) issued yet. They have no eMAR doses until stock is issued, so the
+    Nursing Station lists them separately instead of showing an empty chart."""
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        query = """
+            SELECT wii.id, wii.indent_id, wi.indent_no, wi.priority, wi.doctor_name, wii.medicine_name, wii.dose, wii.frequency,
+                   wii.route, wii.quantity_ordered, COALESCE(wii.quantity_dispensed, 0) AS quantity_dispensed, wii.status,
+                   wii.start_at, wii.end_at, wii.is_prn, wii.instructions, wii.ordered_by, wi.created_at
+            FROM ward_indent_items wii
+            JOIN ward_indents wi ON wi.id = wii.indent_id
+            WHERE wi.patient_id = ?
+              AND COALESCE(wii.status, 'pending') NOT IN ('cancelled', 'dispensed')
+              AND COALESCE(wii.quantity_dispensed, 0) < wii.quantity_ordered
+        """
+        params = [patient_id]
+        if admission_id:
+            query += " AND wi.admission_id = ?"
+            params.append(admission_id)
+        cursor.execute(query + " ORDER BY wi.created_at ASC, wii.id ASC", tuple(params))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+
 def record_emar_status(db, emar_id, status, username, notes=None):
     """Nurse-recorded outcome for a single scheduled dose. Only a still-pending
     dose can be recorded against -- this is what prevents double-administration
-    and what stops a typo'd/stale emar_id from silently 'succeeding'."""
+    and what stops a typo'd/stale emar_id from silently 'succeeding'. The
+    update itself is conditional on status = 'pending', so two simultaneous
+    submissions for the same dose can never both succeed."""
     if status not in ("given", "held", "refused", "missed"):
         raise ValueError(f"Unsupported eMAR status '{status}'.")
+    notes = (str(notes).strip() if notes is not None else "") or None
+    if status in ("held", "refused", "missed") and not notes:
+        raise ValueError(f"A reason is required to mark a dose as {status}.")
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM emar_records WHERE id = ?", (emar_id,))
+        cursor.execute(
+            """
+            SELECT e.*, wii.frequency, wii.is_prn FROM emar_records e
+            LEFT JOIN ward_indent_items wii ON wii.id = e.indent_item_id
+            WHERE e.id = ?
+            """,
+            (emar_id,),
+        )
         record = cursor.fetchone()
         if not record:
             raise ValueError("eMAR record not found.")
         if record["status"] != "pending":
             raise ValueError(f"This dose is already {record['status']}; it cannot be changed.")
+        now = _emar_now()
+        scheduled = record["scheduled_time"]
+        is_prn = emar_frequency_plan(record["frequency"], record["is_prn"])[0] == "prn" or str(record["notes"] or "").startswith("PRN")
+        if status == "given" and not is_prn and isinstance(scheduled, datetime) and scheduled - now > EMAR_EARLY_WINDOW and not notes:
+            raise ValueError(
+                f"This dose is scheduled for {scheduled.strftime('%d %b %Y %H:%M')}. "
+                "Giving it more than 1 hour early needs a reason (e.g. a doctor's instruction)."
+            )
         cursor.execute(
             """
             UPDATE emar_records
-            SET status = ?, administered_by = ?, administered_at = CURRENT_TIMESTAMP, notes = COALESCE(?, notes)
-            WHERE id = ?
+            SET status = ?, administered_by = ?, administered_at = ?, notes = CASE WHEN ? IS NULL THEN notes ELSE ? END
+            WHERE id = ? AND status = 'pending'
             """,
-            (status, username, notes, emar_id),
+            (status, username, now, notes, notes, emar_id),
         )
+        if cursor.rowcount != 1:
+            raise ValueError("This dose was just recorded by someone else; refresh to see its status.")
         conn.commit()
         return True
 

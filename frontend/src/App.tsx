@@ -1631,7 +1631,7 @@ function App() {
         )}
 
         {page === "discharge-summary" && hasPermission("patients.read") && (
-          <DischargeSummaryPage key={pageKeys[page] || 0} setNotice={setNotice} selectedPatient={selectedPatient} />
+          <DischargeSummaryPage key={pageKeys[page] || 0} setNotice={setNotice} selectedPatient={selectedPatient} canEdit={hasPermission("patients.write")} canApprove={hasPermission("clinical.author")} />
         )}
 
         {page === "patient-reach-ai" && hasPermission("patients.read") && (

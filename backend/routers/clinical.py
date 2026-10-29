@@ -331,10 +331,17 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
     has_medicines = any((m.get("medicine_name") or m.get("medicine") or "").strip() for m in medicines)
     sends_to_pharmacy = bool(payload.get("send_to_pharmacy")) and payload.get("complete_consultation", True) is not False and has_medicines
     dispense_status = "sent_to_pharmacy" if sends_to_pharmacy else "not_sent"
+    ip_order = None
 
     with legacy_sql.get_connection(db) as conn:
         try:
             cursor = conn.cursor()
+            # An admitted patient's prescription goes to IP Dispense as a medication
+            # order (and from there to the eMAR), not to the OP pharmacy queue.
+            active_admission_id = lq.active_ip_admission(cursor, patient_id)
+            ip_admission_id = active_admission_id if sends_to_pharmacy else None
+            if ip_admission_id:
+                dispense_status = "ip_order"
             prescription_id = None
             is_update = False
 
@@ -389,6 +396,14 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
                      med.get("instructions"), 1 if med.get("is_custom") else 0, med.get("freq_custom") or None),
                 )
 
+            if active_admission_id:
+                # Links the prescription to the stay (discharge summary, patient journey).
+                cursor.execute("UPDATE prescriptions SET admission_id = ? WHERE id = ?", (active_admission_id, prescription_id))
+            if ip_admission_id:
+                ip_order = lq.create_ip_order_from_prescription(
+                    cursor, prescription_id, patient_id, ip_admission_id, payload.get("doctor_name"), medicines, user.get("username"),
+                )
+
             if sends_to_pharmacy and appointment_id:
                 # Re-saving the same consultation replaces its earlier, not-yet-dispensed e-Rx
                 # instead of queueing a duplicate at the pharmacy.
@@ -401,7 +416,10 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
                 cursor.execute("UPDATE appointments SET status = 'completed' WHERE id = ?", (appointment_id,))
 
             conn.commit()
-            return {"success": True}
+            return {"success": True, "prescription_id": prescription_id, "ip_order": ip_order}
+        except ValueError as e:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             conn.rollback()
             raise HTTPException(status_code=500, detail=f"Failed to save prescription: {e}")

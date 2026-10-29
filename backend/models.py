@@ -2077,7 +2077,7 @@ class WardIndents(Base):
     __tablename__ = 'ward_indents'
     __table_args__ = (
         CheckConstraint("priority = ANY (ARRAY['normal'::text, 'urgent'::text, 'stat'::text])", name='ward_indents_priority_check'),
-        CheckConstraint("status = ANY (ARRAY['pending'::text, 'processing'::text, 'dispensed'::text, 'cancelled'::text])", name='ward_indents_status_check'),
+        CheckConstraint("status = ANY (ARRAY['pending'::text, 'processing'::text, 'partially_issued'::text, 'dispensed'::text, 'cancelled'::text])", name='ward_indents_status_check'),
         PrimaryKeyConstraint('id', name='ward_indents_pkey'),
         UniqueConstraint('indent_no', name='ward_indents_indent_no_key')
     )
@@ -2095,6 +2095,7 @@ class WardIndents(Base):
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     dispensed_by: Mapped[Optional[str]] = mapped_column(Text)
     dispensed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    prescription_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     ward_indent_items: Mapped[list['WardIndentItems']] = relationship('WardIndentItems', back_populates='indent')
 

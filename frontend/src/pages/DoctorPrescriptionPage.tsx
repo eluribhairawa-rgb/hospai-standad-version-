@@ -838,7 +838,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         complete_consultation: true,
       };
 
-      await apiFetch("/api/prescriptions", {
+      const saved = await apiFetch<{ ip_order?: { indent_no: string; items: number } | null }>("/api/prescriptions", {
         method: "POST",
         body: JSON.stringify(prescPayload),
       });
@@ -904,7 +904,9 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       // 4. Success Toast Notification
       setNotice({
         type: "success",
-        message: `Consultation completed for Token #${completedToken || "1"} (${completedName})! Prescription generated and status successfully reflected under Queue Management.`,
+        message: saved?.ip_order
+          ? `Prescription saved for admitted patient ${completedName}. ${saved.ip_order.items} medicine(s) sent to Pharmacy > IP Dispense as medication order ${saved.ip_order.indent_no}.`
+          : `Consultation completed for Token #${completedToken || "1"} (${completedName})! Prescription generated and status successfully reflected under Queue Management.`,
       });
 
       // 5. If print was requested, open print dialog

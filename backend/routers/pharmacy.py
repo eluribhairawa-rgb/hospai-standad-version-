@@ -533,7 +533,13 @@ emar_router = APIRouter(prefix="/api", tags=["emar"])
 @emar_router.get("/patients/{patient_id}/emar")
 def patient_emar_list(patient_id: str, admission_id: int | None = None, status: str | None = None,
                        db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read"))):
-    return {"emar": lq.list_emar_records(db, patient_id=patient_id, admission_id=admission_id, status=status)}
+    # awaiting_pharmacy: ordered medications not yet issued, so they have no doses yet.
+    return {
+        "emar": lq.list_emar_records(db, patient_id=patient_id, admission_id=admission_id, status=status),
+        "counts": lq.count_emar_by_status(db, patient_id, admission_id=admission_id),
+        "awaiting_pharmacy": lq.list_unissued_medication_orders(db, patient_id, admission_id=admission_id),
+        "server_time": lq.current_ist_datetime().replace(tzinfo=None).isoformat(timespec="seconds"),
+    }
 
 
 @emar_router.post("/emar/{emar_id}/administer")

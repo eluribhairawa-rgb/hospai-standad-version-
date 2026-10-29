@@ -49,6 +49,7 @@ type WardIndent = {
   ward: string;
   bed_no: string;
   doctor_name?: string;
+  prescription_id?: number | null;
   priority: "normal" | "urgent" | "stat";
   status: "pending" | "approved" | "processing" | "dispensed" | "cancelled" | "partially_issued";
   created_at: string;
@@ -103,6 +104,25 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
 
   // Full medicine master catalog, for the New Medication Order dropdown
   const [medicinesMaster, setMedicinesMaster] = useState<{ id: number; name: string }[]>([]);
+  const [orderMedSuggestOpen, setOrderMedSuggestOpen] = useState(false);
+
+  // Suggestions for the order's medicine field: in-stock medicines first (total
+  // available across batches), then catalogue medicines that are out of stock.
+  const orderMedicineOptions = useMemo(() => {
+    const byName = new Map<string, { name: string; qty: number; batches: number }>();
+    for (const b of stockBatches) {
+      const key = b.medicine_name.trim().toLowerCase();
+      const cur = byName.get(key) || { name: b.medicine_name.trim(), qty: 0, batches: 0 };
+      cur.qty += Number(b.qty_available || 0);
+      cur.batches += 1;
+      byName.set(key, cur);
+    }
+    const inStock = Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+    const outOfStock = medicinesMaster
+      .filter((m) => !byName.has(m.name.trim().toLowerCase()))
+      .map((m) => ({ name: m.name.trim(), qty: 0, batches: 0 }));
+    return [...inStock, ...outOfStock];
+  }, [stockBatches, medicinesMaster]);
 
   // -------------------------------------------------------------
   // TAB 1: Direct IP Dispense (Workflow like OP Dispense)
@@ -1753,9 +1773,15 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
                             STAT URGENT
                           </span>
                         )}
+                        {ind.prescription_id && (
+                          <span style={{ background: "#eff6ff", color: "#1d4ed8", padding: "2px 8px", borderRadius: "10px", fontSize: "0.7rem", fontWeight: 700 }}>
+                            FROM DOCTOR PRESCRIPTION
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: "0.825rem", color: "#64748b", marginTop: "3px" }}>
                         Patient: <strong>{ind.patient_name || ind.patient_id}</strong> &middot; Ward: <strong>{ind.ward}</strong> &middot; Bed: <strong>{ind.bed_no}</strong>
+                        {ind.doctor_name && <> &middot; <strong>{/^dr\.?\s/i.test(ind.doctor_name) ? ind.doctor_name : `Dr. ${ind.doctor_name}`}</strong></>}
                       </div>
                     </div>
                     <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
@@ -2337,22 +2363,63 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
                 <label style={{ display: "block", fontSize: "0.825rem", fontWeight: 700, marginBottom: "4px" }}>
                   Medicine Name {editingItem && "(cannot be changed once ordered)"} *
                 </label>
-                <select
-                  value={orderForm.medicine_name}
-                  disabled={!!editingItem}
-                  onChange={(e) => setOrderForm({ ...orderForm, medicine_name: e.target.value })}
-                  style={{ width: "100%", padding: "0.55rem", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                >
-                  <option value="">-- Select medicine --</option>
-                  {medicinesMaster.map((m) => (
-                    <option key={m.id} value={m.name}>{m.name}</option>
-                  ))}
-                  {/* Keep an already-ordered medicine selectable even if it's since been
-                      deactivated/removed from the master catalog. */}
-                  {editingItem && orderForm.medicine_name && !medicinesMaster.some((m) => m.name === orderForm.medicine_name) && (
-                    <option value={orderForm.medicine_name}>{orderForm.medicine_name}</option>
-                  )}
-                </select>
+                {(() => {
+                  const typed = orderForm.medicine_name.trim();
+                  const q = typed.toLowerCase();
+                  const matches = orderMedicineOptions.filter((m) => !q || m.name.toLowerCase().includes(q)).slice(0, 30);
+                  const exact = orderMedicineOptions.find((m) => m.name.toLowerCase() === q);
+                  return (
+                    <div style={{ position: "relative" }}>
+                      <Input
+                        value={orderForm.medicine_name}
+                        disabled={!!editingItem}
+                        placeholder="Type to search stock, or enter a medicine name"
+                        autoComplete="off"
+                        onChange={(e) => { setOrderForm({ ...orderForm, medicine_name: e.target.value }); setOrderMedSuggestOpen(true); }}
+                        onFocus={() => setOrderMedSuggestOpen(true)}
+                        onBlur={() => window.setTimeout(() => setOrderMedSuggestOpen(false), 150)}
+                        onKeyDown={(e) => { if (e.key === "Escape") setOrderMedSuggestOpen(false); }}
+                      />
+                      {!editingItem && orderMedSuggestOpen && (matches.length > 0 || typed) && (
+                        <div style={{ position: "absolute", zIndex: 30, top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: "240px", overflowY: "auto", background: "#fff", border: "1px solid #cbd5e1", borderRadius: "8px", boxShadow: "0 8px 20px rgba(15,23,42,0.12)" }}>
+                          {matches.map((m) => (
+                            <div
+                              key={m.name}
+                              onMouseDown={(e) => { e.preventDefault(); setOrderForm({ ...orderForm, medicine_name: m.name }); setOrderMedSuggestOpen(false); }}
+                              style={{ display: "flex", justifyContent: "space-between", gap: "8px", padding: "0.5rem 0.75rem", cursor: "pointer", borderBottom: "1px solid #f1f5f9", fontSize: "0.85rem" }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f0fdfa")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            >
+                              <span style={{ fontWeight: 600, color: "#0f172a" }}>{m.name}</span>
+                              {m.qty > 0 ? (
+                                <span style={{ color: "#047857", fontSize: "0.78rem", fontWeight: 700, whiteSpace: "nowrap" }}>In stock: {m.qty}</span>
+                              ) : (
+                                <span style={{ color: "#b45309", fontSize: "0.78rem", fontWeight: 700, whiteSpace: "nowrap" }}>Out of stock</span>
+                              )}
+                            </div>
+                          ))}
+                          {typed && !exact && (
+                            <div
+                              onMouseDown={(e) => { e.preventDefault(); setOrderMedSuggestOpen(false); }}
+                              style={{ padding: "0.5rem 0.75rem", cursor: "pointer", fontSize: "0.82rem", color: "#334155", background: "#f8fafc" }}
+                            >
+                              ✎ Use "<strong>{typed}</strong>" as typed (not in stock list)
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!editingItem && typed && (
+                        <div style={{ fontSize: "0.75rem", marginTop: "4px", color: exact && exact.qty > 0 ? "#047857" : "#b45309" }}>
+                          {exact && exact.qty > 0
+                            ? `${exact.qty} available in stock`
+                            : exact
+                              ? "In the medicine catalogue but currently out of stock. The order is saved and pharmacy can issue it after restocking."
+                              : "Not in the stock list. The order is saved with this name and pharmacy procures or substitutes it."}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>

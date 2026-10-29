@@ -304,31 +304,127 @@ def patients_journey(patient_id: str, encounter_type: str | None = None, encount
 def _discharge_records(db, patient_id, hospital_id, encounter_type, encounter_id):
     if not lq.get_patient_details(db, patient_id, hospital_id=hospital_id):
         raise HTTPException(status_code=404, detail="Patient not found")
-    records = discharge_summary.gather_patient_records(db, patient_id, encounter_type, encounter_id)
+    try:
+        records = discharge_summary.gather_patient_records(db, patient_id, encounter_type, encounter_id)
+    except discharge_summary.EncounterNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if records is None:
         raise HTTPException(status_code=404, detail="Patient not found")
     return records
+
+
+def _summary_error(exc):
+    if isinstance(exc, discharge_summary.ConflictError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, PermissionError):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/patients/{patient_id}/discharge-summary")
 def patients_discharge_summary_data(patient_id: str, encounter_type: str | None = None, encounter_id: int | None = None,
                                     db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
                                     hospital_id: int = Depends(current_hospital_id)):
-    return {"records": _discharge_records(db, patient_id, hospital_id, encounter_type, encounter_id)}
+    records = _discharge_records(db, patient_id, hospital_id, encounter_type, encounter_id)
+    enc = records.get("encounter")
+    meds, source = discharge_summary.build_discharge_medications(records)
+    saved = discharge_summary.get_summary_for_encounter(db, hospital_id, patient_id, enc["type"], enc["id"]) if enc else None
+    return {"records": records, "saved": saved, "prescribed_medications": meds, "medication_source": source}
 
 
 @router.post("/patients/{patient_id}/discharge-summary/generate")
-def patients_discharge_summary_generate(patient_id: str, payload: dict = Body(default={}), db: Session = Depends(get_db),
+def patients_discharge_summary_generate(patient_id: str, request: Request, payload: dict = Body(default={}), db: Session = Depends(get_db),
                                         user: dict = Depends(require_permissions("patients.read")),
                                         hospital_id: int = Depends(current_hospital_id)):
     records = _discharge_records(db, patient_id, hospital_id, payload.get("encounter_type"), payload.get("encounter_id"))
-    if not records.get("encounter"):
+    enc = records.get("encounter")
+    if not enc:
         raise HTTPException(status_code=400, detail="This patient has no OP, IP or emergency visit to summarise yet.")
     try:
-        result = discharge_summary.generate_discharge_summary(records)
+        result = discharge_summary.generate_discharge_summary(records, discharge_summary.catalogue_drug_words(db))
     except RuntimeError as exc:
+        log_audit_event(db, user, client_ip(request), "ai_generate_failed", "discharge_summaries", f"{patient_id}:{enc['type']}:{enc['id']}", {"error": str(exc)[:300]})
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"records": records, **result}
+    log_audit_event(db, user, client_ip(request), "ai_generate", "discharge_summaries", f"{patient_id}:{enc['type']}:{enc['id']}",
+                    {"model": result.get("model"), "removed_sentences": len(result.get("warnings") or [])})
+    saved = discharge_summary.get_summary_for_encounter(db, hospital_id, patient_id, enc["type"], enc["id"])
+    return {"records": records, **result, "saved": saved}
+
+
+@router.put("/patients/{patient_id}/discharge-summary")
+def patients_discharge_summary_save(patient_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                                    user: dict = Depends(require_permissions("patients.write")),
+                                    hospital_id: int = Depends(current_hospital_id)):
+    validate_required_fields(payload, ["encounter_type", "encounter_id", "content"])
+    records = _discharge_records(db, patient_id, hospital_id, payload.get("encounter_type"), payload.get("encounter_id"))
+    try:
+        saved = discharge_summary.save_draft(db, hospital_id, patient_id, records["encounter"], payload, user.get("username"))
+    except (ValueError, PermissionError, discharge_summary.ConflictError) as exc:
+        db.rollback()
+        raise _summary_error(exc)
+    log_audit_event(db, user, client_ip(request), "save_draft", "discharge_summaries", str(saved["id"]),
+                    {"version": saved["current_version"], "patient_id": patient_id, "encounter": f"{records['encounter']['type']}:{records['encounter']['id']}"})
+    return {"summary": saved}
+
+
+@router.get("/patients/{patient_id}/discharge-summaries")
+def patients_discharge_summaries_list(patient_id: str, db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
+                                      hospital_id: int = Depends(current_hospital_id)):
+    if not lq.get_patient_details(db, patient_id, hospital_id=hospital_id):
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return {"summaries": discharge_summary.list_summaries(db, hospital_id, patient_id)}
+
+
+@router.get("/discharge-summaries/{summary_id}")
+def discharge_summary_read(summary_id: int, db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
+                           hospital_id: int = Depends(current_hospital_id)):
+    summary = discharge_summary.get_summary(db, hospital_id, summary_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Discharge summary not found")
+    return {"summary": summary}
+
+
+@router.get("/discharge-summaries/{summary_id}/versions/{version}")
+def discharge_summary_version_read(summary_id: int, version: int, db: Session = Depends(get_db),
+                                   user: dict = Depends(require_permissions("patients.read")), hospital_id: int = Depends(current_hospital_id)):
+    row = discharge_summary.get_summary_version(db, hospital_id, summary_id, version)
+    if not row:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"version": row}
+
+
+# submit: any clinical staff; approve / return / finalize / amend: doctors (clinical.author)
+_SUMMARY_ACTION_PERMISSION = {"submit": "patients.write", "approve": "clinical.author", "return": "clinical.author",
+                              "finalize": "clinical.author", "amend": "clinical.author"}
+
+
+@router.post("/discharge-summaries/{summary_id}/{action}")
+def discharge_summary_action(summary_id: int, action: str, request: Request, payload: dict = Body(default={}), db: Session = Depends(get_db),
+                             user: dict = Depends(require_permissions("patients.read")), hospital_id: int = Depends(current_hospital_id)):
+    import security
+    permission = _SUMMARY_ACTION_PERMISSION.get(action)
+    if not permission:
+        raise HTTPException(status_code=404, detail="Unknown action")
+    if permission not in security.resolve_user_permissions(user):
+        raise HTTPException(status_code=403, detail={"error": "Forbidden", "required_permissions": [permission]})
+    current = discharge_summary.get_summary(db, hospital_id, summary_id, include_versions=False)
+    if not current:
+        raise HTTPException(status_code=404, detail="Discharge summary not found")
+    snapshot = None
+    if action == "finalize":
+        # Freeze exactly what the summary was written from.
+        snapshot = _discharge_records(db, current["patient_id"], hospital_id, current["encounter_type"], current["encounter_id"])
+    try:
+        summary = discharge_summary.transition(db, hospital_id, summary_id, action, user.get("username"), note=payload.get("note"),
+                                               expected_version=payload.get("expected_version"), records_snapshot=snapshot)
+    except (ValueError, PermissionError, discharge_summary.ConflictError) as exc:
+        db.rollback()
+        raise _summary_error(exc)
+    log_audit_event(db, user, client_ip(request), action, "discharge_summaries", str(summary_id),
+                    {"version": summary["current_version"], "status": summary["status"], "note": payload.get("note")})
+    return {"summary": summary}
 
 
 @router.put("/patients/{patient_id}")
