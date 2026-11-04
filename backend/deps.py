@@ -23,7 +23,15 @@ def _request_session_token(request: Request) -> Optional[str]:
 
 def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -> Optional[dict]:
     token = _request_session_token(request)
-    return security.get_session_user(db, token)
+    # Automatic polling (marked by the frontend) must not keep an idle
+    # session alive; only real user-driven requests slide the expiry.
+    extend = request.headers.get("X-Background-Refresh") != "1"
+    user = security.get_session_user(db, token, extend=extend)
+    if user and extend:
+        # main.py turns this into the X-Session-Refreshed response header, which
+        # tells the frontend the server-side idle timer was just reset.
+        request.state.session_refreshed = True
+    return user
 
 
 def get_current_user(user: Optional[dict] = Depends(get_current_user_optional)) -> dict:

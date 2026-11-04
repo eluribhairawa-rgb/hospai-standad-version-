@@ -1,6 +1,7 @@
 import { API_BASE } from "./constants";
 import type { Dispatch, SetStateAction } from "react";
 import type { Notice } from "../types";
+import { noteServerRefresh } from "./sessionActivity";
 
 const HOSPITAL_CODE_KEY = "hospai_hospital_code";
 const DEFAULT_HOSPITAL_CODE = "hosp-default";
@@ -21,9 +22,13 @@ export function setHospitalCode(hospitalCode: string): void {
   storage.setItem(HOSPITAL_CODE_KEY, normalized);
 }
 
-export async function apiFetch<T = any>(path: string, options: RequestInit & { cache?: RequestCache } = {}): Promise<T> {
+/**
+ * `background: true` marks automatic refreshes (polling). They don't count as
+ * user activity, so they don't extend the idle session on the server.
+ */
+export async function apiFetch<T = any>(path: string, options: RequestInit & { cache?: RequestCache; background?: boolean } = {}): Promise<T> {
   const method = (options.method || "GET").toUpperCase();
-  const { headers: optionHeaders, cache: optionCache, ...restOptions } = options;
+  const { headers: optionHeaders, cache: optionCache, background, ...restOptions } = options;
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   const baseUrl = (API_BASE || "").replace(/\/+$/, "");
   const targetUrl = baseUrl.endsWith("/api") && cleanPath.startsWith("/api/")
@@ -31,7 +36,12 @@ export async function apiFetch<T = any>(path: string, options: RequestInit & { c
     : `${baseUrl}${cleanPath}`;
   const fetchOptions: RequestInit = {
     ...restOptions,
-    headers: { "Content-Type": "application/json", "X-Hospital-Code": getHospitalCode(), ...(optionHeaders || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Hospital-Code": getHospitalCode(),
+      ...(background ? { "X-Background-Refresh": "1" } : {}),
+      ...(optionHeaders || {}),
+    },
     credentials: "include",
     cache: optionCache || (method === "GET" ? "no-store" : "default"),
   };
@@ -41,6 +51,7 @@ export async function apiFetch<T = any>(path: string, options: RequestInit & { c
   // must never be
   // resubmitted automatically, or it could create a duplicate record.
   let response: Response;
+  const sentAt = Date.now();
   try {
     response = await fetch(targetUrl, fetchOptions);
   } catch (networkErr) {
@@ -53,6 +64,9 @@ export async function apiFetch<T = any>(path: string, options: RequestInit & { c
       throw error;
     }
   }
+
+  // The server reset its inactivity timer for this request.
+  if (response.headers.get("X-Session-Refreshed") === "1") noteServerRefresh(sentAt);
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));

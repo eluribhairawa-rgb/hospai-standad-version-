@@ -92,10 +92,10 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
   // Re-renders every minute so wait times and overdue flags stay current between reloads.
   const [, setTick] = useState(0);
 
-  const load = async () => {
+  const load = async (background = false) => {
     setLoading(true);
     try {
-      const res = await apiFetch<{ encounters: Encounter[] }>("/api/encounters?encounter_type=EMERGENCY&active_only=true");
+      const res = await apiFetch<{ encounters: Encounter[] }>("/api/encounters?encounter_type=EMERGENCY&active_only=true", { background: background === true });
       const next = res.encounters || [];
       setEncounters(next);
       // Keep the open patient in sync with fresh data; drop it once it leaves the active list.
@@ -109,7 +109,7 @@ export default function EmergencyWorklistPage({ setNotice, onNavigate }: Props) 
 
   useEffect(() => { void load(); }, []);
   useEffect(() => {
-    const t = window.setInterval(() => void load(), 30000);
+    const t = window.setInterval(() => void load(true), 30000);
     const clock = window.setInterval(() => setTick((n) => n + 1), 60000);
     return () => { window.clearInterval(t); window.clearInterval(clock); };
   }, []);

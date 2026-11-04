@@ -47,6 +47,7 @@ export E2E_OCR_STUB_URL=http://127.0.0.1:$OCR_PORT
 export E2E_DATABASE_URL=$db_url
 export E2E_ADMIN_USERNAME=e2e_admin
 export E2E_ADMIN_PASSWORD=$admin_pass
+export E2E_SESSION_TTL_MINUTES=${E2E_SESSION_TTL_MINUTES:-20}
 EOF
 
   # Servers are exec'd (so the recorded PID is the server itself) and fully detached from
@@ -54,7 +55,7 @@ EOF
   ( cd "$ROOT/backend" && exec env DATABASE_URL="$db_url" SESSION_PEPPER=e2e-pepper \
       DEFAULT_ADMIN_USERNAME=e2e_admin DEFAULT_ADMIN_PASSWORD="$admin_pass" \
       CORS_ALLOWED_ORIGINS="http://127.0.0.1:$WEB_PORT" QWEN_OCR_URL="http://127.0.0.1:$OCR_PORT/v1" \
-      QWEN_OCR_MODEL=e2e-stub TZ=Asia/Kolkata \
+      QWEN_OCR_MODEL=e2e-stub TZ=Asia/Kolkata SESSION_TTL_MINUTES="${E2E_SESSION_TTL_MINUTES:-20}" \
       setsid "$PY" -m uvicorn main:app --host 127.0.0.1 --port "$API_PORT" ) < /dev/null > "$WORK/backend.log" 2>&1 &
   echo $! > "$WORK/backend.pid"
   setsid "$PY" "$ROOT/e2e/ocr_stub.py" "$OCR_PORT" < /dev/null > "$WORK/ocr_stub.log" 2>&1 &

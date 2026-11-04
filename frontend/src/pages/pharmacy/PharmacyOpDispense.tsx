@@ -284,10 +284,10 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     lines: { name: string; needed: number; batchIds: number[] }[];
   } | null>(null);
 
-  const loadIncomingRx = async () => {
+  const loadIncomingRx = async (background = false) => {
     setLoadingIncomingRx(true);
     try {
-      const res = await apiFetch<{ prescriptions: IncomingRx[] }>("/api/pharmacy/prescriptions?status=sent_to_pharmacy,partially_dispensed");
+      const res = await apiFetch<{ prescriptions: IncomingRx[] }>("/api/pharmacy/prescriptions?status=sent_to_pharmacy,partially_dispensed", { background: background === true });
       // Newest first; a consultation saved more than once keeps only its latest e-Rx.
       const seenAppointments = new Set<number>();
       setIncomingRx((res?.prescriptions || []).filter((rx) => {
@@ -306,7 +306,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
   useEffect(() => {
     if (activeTab !== "dispense") return;
     void loadIncomingRx();
-    const timer = window.setInterval(() => void loadIncomingRx(), 60000);
+    const timer = window.setInterval(() => void loadIncomingRx(true), 60000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);

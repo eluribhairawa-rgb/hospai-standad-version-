@@ -155,10 +155,10 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
 
   // Today's OP queue keyed by UHID, from the same endpoint OP Queue Management reads.
-  const loadTodayQueue = async () => {
+  const loadTodayQueue = async (background = false) => {
     try {
       const today = new Date().toLocaleDateString("en-CA");
-      const data = await apiFetch<{ appointments?: Array<any> }>(`/api/appointments?date=${today}`);
+      const data = await apiFetch<{ appointments?: Array<any> }>(`/api/appointments?date=${today}`, { background: background === true });
       const next: Record<string, QueueEntry> = {};
       (data.appointments || []).forEach((a) => {
         const visitType = String(a.visit_type || "").trim().toLowerCase();
@@ -186,7 +186,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
 
   useEffect(() => {
     void loadTodayQueue();
-    const timer = window.setInterval(() => void loadTodayQueue(), QUEUE_REFRESH_MS);
+    const timer = window.setInterval(() => void loadTodayQueue(true), QUEUE_REFRESH_MS);
     const onFocus = () => void loadTodayQueue();
     window.addEventListener("focus", onFocus);
     return () => {

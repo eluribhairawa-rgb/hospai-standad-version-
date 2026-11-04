@@ -41,8 +41,20 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-Hospital-Code",
-                   "X-Platform-Admin-Username", "X-Platform-Admin-Password"],
+                   "X-Platform-Admin-Username", "X-Platform-Admin-Password", "X-Background-Refresh"],
+    expose_headers=["X-Session-Refreshed"],
 )
+
+
+@app.middleware("http")
+async def session_refreshed_header(request: Request, call_next):
+    """Flag responses whose request slid the session expiry forward, so the
+    frontend knows when the server last saw user activity and only sends a
+    keep-alive when there is activity the server hasn't heard about."""
+    response = await call_next(request)
+    if getattr(request.state, "session_refreshed", False):
+        response.headers["X-Session-Refreshed"] = "1"
+    return response
 
 
 # --------------------------------------------------------------- startup --

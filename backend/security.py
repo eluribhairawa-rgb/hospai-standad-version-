@@ -22,8 +22,11 @@ from models import Hospitals, Sessions, Users
 from database import DEFAULT_HOSPITAL_CODE
 
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "hospai_session")
-SESSION_TTL_MINUTES = int(os.getenv("SESSION_TTL_MINUTES", "20"))
-SESSION_TTL_SECONDS = SESSION_TTL_MINUTES * 60
+# Inactivity timeout. Every user-driven request slides the expiry forward by
+# this much; the session ends after this long with no activity. Fractional
+# values are allowed (used by the automated tests to keep idle waits short).
+SESSION_TTL_MINUTES = float(os.getenv("SESSION_TTL_MINUTES", "20"))
+SESSION_TTL_SECONDS = int(round(SESSION_TTL_MINUTES * 60))
 SESSION_PEPPER = os.getenv("SESSION_PEPPER", "")
 
 
@@ -617,11 +620,15 @@ def purge_expired_sessions(db: Session):
 
 def create_session(db: Session, user_id: int, hospital_id: int, ip_address: Optional[str] = None, user_agent: Optional[str] = None):
     purge_expired_sessions(db)
-    # Ensure only one session per user per hospital
-    db.query(Sessions).filter(Sessions.user_id == user_id, Sessions.hospital_id == hospital_id).delete()
-    db.commit()
-    
-    expires_at = _now_utc() + timedelta(minutes=SESSION_TTL_MINUTES)
+    # Single login per employee: a new login revokes every other session for
+    # this user, so the previous browser/device is signed out on its next
+    # request. The user row lock serialises simultaneous logins so two can't
+    # both survive.
+    db.query(Users.id).filter(Users.id == user_id).with_for_update().first()
+    db.query(Sessions).filter(Sessions.user_id == user_id, Sessions.hospital_id == hospital_id).delete(
+        synchronize_session=False)
+
+    expires_at = _now_utc() + timedelta(seconds=SESSION_TTL_SECONDS)
 
     for _attempt in range(5):
         token = secrets.token_urlsafe(32)
@@ -640,36 +647,56 @@ def create_session(db: Session, user_id: int, hospital_id: int, ip_address: Opti
     raise RuntimeError("Failed to create session")
 
 
-def get_session_user(db: Session, token: Optional[str]):
+def _drop_session(db: Session, session_id: int) -> None:
+    # Bulk delete: a no-op (not a StaleDataError) when a concurrent request or
+    # a login on another device has already removed the row.
+    db.query(Sessions).filter(Sessions.id == session_id).delete(synchronize_session=False)
+    db.commit()
+
+
+def get_session_user(db: Session, token: Optional[str], extend: bool = True):
+    """Resolve the session cookie to a user profile, or None if the session is
+    missing, expired or revoked.
+
+    `extend=True` (any user-driven request) slides the expiry to now + TTL.
+    Background polling passes `extend=False` so it can never keep an idle
+    session alive. The expiry check and the slide are a single conditional
+    UPDATE, so concurrent requests can't revive a session that has expired
+    or been replaced by a newer login.
+    """
     if not token:
         return None
     token_hash = _hash_session_token(token)
     session_row = db.query(Sessions).filter(Sessions.token_hash == token_hash).first()
     if not session_row:
         return None
+    session_id, user_id, hospital_id = session_row.id, session_row.user_id, session_row.hospital_id
 
+    now = _now_utc()
     expires_at = _parse_ts(session_row.expires_at)
-    if expires_at <= _now_utc():
-        db.delete(session_row)
-        db.commit()
+    if expires_at <= now:
+        _drop_session(db, session_id)
         return None
 
-    # Sliding session: extend expiration by TTL minutes on each active request
-    new_expires_at = _now_utc() + timedelta(minutes=SESSION_TTL_MINUTES)
-    session_row.expires_at = new_expires_at.replace(tzinfo=None)
-    db.commit()
-
-    user = db.query(Users).filter(Users.id == session_row.user_id, Users.hospital_id == session_row.hospital_id).first()
-    hospital = db.query(Hospitals).filter(Hospitals.id == session_row.hospital_id).first()
-    if not user or not hospital:
-        db.delete(session_row)
-        db.commit()
+    user = db.query(Users).filter(Users.id == user_id, Users.hospital_id == hospital_id).first()
+    hospital = db.query(Hospitals).filter(Hospitals.id == hospital_id).first()
+    if not user or not hospital or user.status == "inactive" or hospital.status != "active":
+        _drop_session(db, session_id)
         return None
 
-    if user.status == "inactive" or hospital.status != "active":
-        db.delete(session_row)
+    new_expires_at = expires_at
+    if extend:
+        new_expires_at = now + timedelta(seconds=SESSION_TTL_SECONDS)
+        naive_now = now.replace(tzinfo=None)
+        updated = (
+            db.query(Sessions)
+            .filter(Sessions.id == session_id, Sessions.expires_at > naive_now)
+            .update({Sessions.expires_at: new_expires_at.replace(tzinfo=None), Sessions.last_seen: naive_now},
+                    synchronize_session=False)
+        )
         db.commit()
-        return None
+        if not updated:  # expired or revoked between the read and the update
+            return None
 
     profile = resolve_user_profile({
         "username": user.username, "role": user.role, "access_role": user.access_role,
@@ -678,9 +705,10 @@ def get_session_user(db: Session, token: Optional[str]):
         "employee_id": user.employee_id, "status": user.status,
         "job_role": user.job_role, "doctor_name": user.doctor_name,
     })
-    profile["hospital_id"] = session_row.hospital_id
+    profile["hospital_id"] = hospital_id
     profile["hospital_code"] = hospital.code
-    profile["session_expires_at"] = _format_ts(expires_at)
+    profile["session_expires_at"] = _format_ts(new_expires_at)
+    profile["session_ttl_seconds"] = SESSION_TTL_SECONDS
     return profile
 
 

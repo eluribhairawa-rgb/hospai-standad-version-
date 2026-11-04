@@ -60,6 +60,8 @@ export interface User {
   hospital_id?: number;
   hospital_code?: string;
   session_expires_at?: string;
+  /** Server idle timeout; the UI logs out after this long without user activity. */
+  session_ttl_seconds?: number;
   job_role?: string;
   /** Doctor this login is linked to (job title Doctor); OP queue is limited to their patients. */
   doctor_name?: string | null;

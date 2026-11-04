@@ -6,6 +6,8 @@ import SettingsModal from "./components/SettingsModal";
 import ShareModal from "./components/ShareModal";
 import ExportShareModal from "./components/ExportShareModal";
 import Toast from "./components/ui/Toast";
+import { useIdleLogout } from "./lib/useIdleLogout";
+import SessionTimeoutWarning from "./components/SessionTimeoutWarning";
 import ConfirmDialog from "./components/ui/ConfirmDialog";
 import { Button, Container } from "./components/ui";
 import AddPatientPage from "./pages/AddPatientPage";
@@ -453,42 +455,21 @@ const PAGE_SUBTITLES: Record<string, string> = {
   admin: "Clinic administration panel.",
 };
 
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 20 * 60;
+
+function formatMinutes(ms: number): string {
+  const minutes = Math.round((ms / 60000) * 10) / 10;
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function App() {
   const isAdminRoutePath = typeof window !== "undefined" && window.location.pathname === "/admin";
   const isPlatformAdminRoute = typeof window !== "undefined" && window.location.pathname === "/platform-admin";
   const [user, setUser] = useState<User | null>(null);
+  const userRef = useRef<User | null>(null);
+  userRef.current = user;
   // Doctor-linked logins only see their own patients (enforced by the API; the UI just locks the doctor pickers).
   const scopedDoctor = getScopedDoctor(user);
-  const sessionExpiryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const clearSessionExpiry = () => {
-    if (sessionExpiryTimeoutRef.current) {
-      clearTimeout(sessionExpiryTimeoutRef.current);
-      sessionExpiryTimeoutRef.current = null;
-    }
-  };
-
-  // Proactively logs the user out the moment their session reaches its
-  // server-side expiry, instead of waiting for them to trigger a stray API
-  // call that returns 401. Falls back to that same 401 handling if the
-  // session already expired before this fires.
-  const scheduleSessionExpiry = (expiresAt?: string) => {
-    clearSessionExpiry();
-    if (!expiresAt || typeof window === "undefined") return;
-    const msRemaining = new Date(expiresAt).getTime() - Date.now();
-    const handleExpired = () => {
-      setUser(null);
-      setPage(getDefaultPage(null));
-      setSelectedPatient(null);
-      setNotice({ type: "info", message: "Your session has expired. Please log in again." });
-      goToLogin();
-    };
-    if (msRemaining <= 0) {
-      handleExpired();
-      return;
-    }
-    sessionExpiryTimeoutRef.current = setTimeout(handleExpired, msRemaining);
-  };
     // Ensure required asterisks are visually prominent across the app
     useEffect(() => {
       try {
@@ -740,7 +721,6 @@ function App() {
         if (!active) return;
         if (data.user) {
           setUser(data.user);
-          scheduleSessionExpiry(data.user.session_expires_at);
           leaveLoginPath();
           if (!isAdminRoutePath) {
             setPage(getPageFromUrl());
@@ -761,12 +741,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // The server rejected the session (idle timeout reached server-side, or
+    // the employee signed in on another browser/device): drop all in-memory
+    // user state and return to the login screen.
     const handleUnauthorized = () => {
-      clearSessionExpiry();
+      const wasSignedIn = Boolean(userRef.current);
       setUser(null);
       setPage(getDefaultPage(null));
       setSelectedPatient(null);
-      setNotice(null);
+      setIsSidebarOpen(false);
+      setNotice(
+        wasSignedIn
+          ? { type: "info", message: "Your session has ended (inactivity or a sign-in on another device). Please log in again." }
+          : null
+      );
       goToLogin();
     };
     window.addEventListener("app:unauthorized", handleUnauthorized);
@@ -929,7 +917,6 @@ function App() {
     });
     setAuthChecked(true);
     setUser(data.user);
-    scheduleSessionExpiry(data.user.session_expires_at);
     const defaultPage = getDefaultPage(data.user);
     setPage(defaultPage);
     if (typeof window !== "undefined") {
@@ -1059,13 +1046,29 @@ function App() {
 
   const handleLogout = () => {
     void apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
-    clearSessionExpiry();
     setUser(null);
     setPage("dashboard");
     setSelectedPatient(null);
     setIsSidebarOpen(false);
     goToLogin();
   };
+
+  const idleTimeoutMs = (user?.session_ttl_seconds || DEFAULT_IDLE_TIMEOUT_SECONDS) * 1000;
+  const idleSession = useIdleLogout({
+    enabled: Boolean(user),
+    timeoutMs: idleTimeoutMs,
+    onIdle: () => {
+      handleLogout();
+      setNotice({ type: "info", message: `You were logged out after ${formatMinutes(idleTimeoutMs)} of inactivity.` });
+    },
+    // Tells the server about activity that didn't involve an API call (e.g.
+    // typing into a long form). A missing session means the server already
+    // expired or revoked it.
+    onKeepAlive: () =>
+      apiFetch<{ user?: User }>("/api/auth/session").then((data) => {
+        if (!data.user) window.dispatchEvent(new Event("app:unauthorized"));
+      }),
+  });
 
   const navigateToPage = (targetPage: string) => {
     const nextPage = normalizeRouteAlias(targetPage);
@@ -1848,6 +1851,12 @@ function App() {
         title="Log out?"
         description="You will be signed out of this account."
         confirmLabel="Log out"
+      />
+      <SessionTimeoutWarning
+        open={Boolean(user) && idleSession.warning}
+        secondsLeft={idleSession.secondsLeft}
+        onContinue={idleSession.continueSession}
+        onLogout={handleLogout}
       />
       {notice && <Toast notice={notice} onClose={() => setNotice(null)} />}
     </div>

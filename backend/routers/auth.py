@@ -21,7 +21,7 @@ def _session_cookie_kwargs(request: Request):
     same_site = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
     if same_site not in ("Lax", "Strict", "None"):
         same_site = "Lax"
-    return dict(httponly=True, secure=secure_cookie, samesite=same_site.lower(), path="/", max_age=security.SESSION_TTL_SECONDS)
+    return dict(httponly=True, secure=secure_cookie, samesite=same_site.lower(), path="/")
 
 
 @router.get("/health")
@@ -55,9 +55,11 @@ def login(request: Request, response: Response, payload: dict = Body(...), db: S
         user_agent=request.headers.get("User-Agent"),
     )
     response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Session-Refreshed"] = "1"
     response.set_cookie(security.SESSION_COOKIE_NAME, session_token, **_session_cookie_kwargs(request))
     user_payload = {k: v for k, v in user.items() if k != "id"}
     user_payload["session_expires_at"] = expires_at.isoformat()
+    user_payload["session_ttl_seconds"] = security.SESSION_TTL_SECONDS
     return {"user": user_payload}
 
 
