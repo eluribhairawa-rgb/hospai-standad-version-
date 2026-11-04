@@ -625,13 +625,13 @@ function App() {
   const sidebarGroups = useMemo(() => {
     const groups: Array<{ key: string; label: string; items: typeof sidebarNavItems }> = [
       { key: "overview", label: "Overview Module", items: [] },
-      { key: "patient-reach-ai", label: "Patient Reach AI", items: [] },
       { key: "op-management", label: "OP Management Module", items: [] },
       { key: "emergency", label: "Emergency / Casualty", items: [] },
       { key: "inpatient", label: "Inpatient (IPD) Module", items: [] },
-      { key: "pharmacy", label: "Pharmacy Module", items: [] },
       { key: "lab-diagnostics", label: "Lab & Diagnostics Department", items: [] },
+      { key: "pharmacy", label: "Pharmacy Module", items: [] },
       { key: "billing", label: "Billing & Accounts Department", items: [] },
+      { key: "patient-reach-ai", label: "Patient Reach AI", items: [] },
       { key: "admin", label: "Administration", items: [] },
     ];
     sidebarNavItems.forEach((item) => {

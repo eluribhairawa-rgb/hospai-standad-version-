@@ -33,13 +33,6 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Overview Dashboard", group: "overview", module: "dashboard", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "analytics", label: "Analysis", group: "overview", module: "analytics", permission: "reports.read", deniedHint: "You do not have permission to access this module." },
 
-  // Patient Reach AI
-  { id: "patient-reach-ai", label: "Patient Reach AI", group: "patient-reach-ai", module: "patient-reach-ai", permission: "patients.read", deniedHint: "You do not have permission to access Patient Reach AI." },
-  { id: "reach-survey-management", label: "Survey Management", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
-  { id: "reach-survey-templates", label: "Survey Templates", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
-  { id: "reach-whatsapp-templates", label: "WhatsApp Templates", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
-  { id: "reach-survey-reports", label: "Survey Reports", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
-
   // 2. OP Management
   { id: "patients", label: "Patients", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "add", label: "Patient Registration", group: "op-management", module: "patient-registration", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
@@ -60,17 +53,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "nurse-station", label: "Nursing Station", group: "inpatient", module: "ip-management", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
   { id: "discharge-summary", label: "Discharge Summary", group: "inpatient", module: "ip-management", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
 
-  // 5. Pharmacy Module
-  { id: "pharmacy-overview", label: "Overview", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-op-dispense", label: "OP Dispense", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-ip-dispense", label: "IP Dispense", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-inventory", label: "Inventory / Stock", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-purchases", label: "Purchase & GRN", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-suppliers", label: "Suppliers", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-reports", label: "Reports", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-  { id: "pharmacy-settings", label: "Settings", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
-
-  // 6. Lab & Diagnostics Department
+  // 5. Lab & Diagnostics Department
   { id: "diag-overview", label: "Overview", group: "lab-diagnostics", module: "lab-diagnostics", permission: "diag.read", deniedHint: "You do not have permission to access Lab & Diagnostics." },
   { id: "diag-orders-billing", label: "Orders & Billing", group: "lab-diagnostics", module: "lab-diagnostics", permission: "diag.read", deniedHint: "You do not have permission to access Lab & Diagnostics." },
   { id: "diag-laboratory", label: "Laboratory", group: "lab-diagnostics", module: "lab-diagnostics", permission: "diag.read", deniedHint: "You do not have permission to access Lab & Diagnostics." },
@@ -80,7 +63,17 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "diag-quality-equipment", label: "Quality & Equipment", group: "lab-diagnostics", module: "lab-diagnostics", permission: "diag.read", deniedHint: "You do not have permission to access Lab & Diagnostics." },
   { id: "diag-catalogue", label: "Test Catalogue", group: "lab-diagnostics", module: "lab-diagnostics", permission: "diag.read", deniedHint: "You do not have permission to access Lab & Diagnostics." },
 
-  // 7. Billing & Accounts Department (Just below Lab & Diagnostics)
+  // 6. Pharmacy Module
+  { id: "pharmacy-overview", label: "Overview", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-op-dispense", label: "OP Dispense", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-ip-dispense", label: "IP Dispense", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-inventory", label: "Inventory / Stock", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-purchases", label: "Purchase & GRN", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-suppliers", label: "Suppliers", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-reports", label: "Reports", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-settings", label: "Settings", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+
+  // 7. Billing & Accounts Department
   { id: "billing-overview", label: "Overview", group: "billing", module: "billing", permission: "billing.read", deniedHint: "You do not have permission to access Billing." },
   { id: "billing-patient-bills", label: "Patient Bills & Payments", group: "billing", module: "billing", permission: "billing.read", deniedHint: "You do not have permission to access Billing." },
   { id: "billing-ip-discharge", label: "IP Discharge Billing", group: "billing", module: "billing", permission: "billing.read", deniedHint: "You do not have permission to access Billing." },
@@ -94,7 +87,14 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "billing-create-invoice", label: "Create Invoice", group: "billing", module: "billing", permission: "billing.write", hidden: true },
   { id: "billing-insurance-claims", label: "Insurance Claims", group: "billing", module: "billing", permission: "billing.write", hidden: true },
 
-  // 8. Administration
+  // 8. Patient Reach AI
+  { id: "patient-reach-ai", label: "Patient Reach AI", group: "patient-reach-ai", module: "patient-reach-ai", permission: "patients.read", deniedHint: "You do not have permission to access Patient Reach AI." },
+  { id: "reach-survey-management", label: "Survey Management", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+  { id: "reach-survey-templates", label: "Survey Templates", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+  { id: "reach-whatsapp-templates", label: "WhatsApp Templates", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+  { id: "reach-survey-reports", label: "Survey Reports", group: "patient-reach-ai", module: "patient-reach-ai", permission: "reach.read", deniedHint: "You do not have permission to access Patient Reach AI surveys." },
+
+  // 9. Administration
   { id: "employees", label: "Employee Management", group: "admin", module: "employees", permission: "admin.users.read", deniedHint: "Only Super Admins can access Employee Management." },
   { id: "settings", label: "Settings", module: "settings" },
 ];
