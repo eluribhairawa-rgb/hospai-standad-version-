@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import require_permissions, current_hospital_id, get_current_user
+from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip, normalize_department_name
 import legacy_queries as lq
 import security
@@ -75,11 +76,11 @@ def lab_categories_delete(request: Request, payload: dict = Body(...), db: Sessi
 
 @router.get("/lab/diagnostics")
 def lab_diagnostics_list(patient_id: str | None = None, doctor_name: str | None = None, db: Session = Depends(get_db),
-                          user: dict = Depends(require_permissions("lab.read")), hospital_id: int = Depends(current_hospital_id)):
+                          user: dict = Depends(require_permissions("lab.read")), hospital_id: int = Depends(current_hospital_id), scope: set | None = Depends(patient_scope)):
     if patient_id:
         patient = lq.get_patient(db, patient_id, hospital_id=hospital_id)
         patient_id = patient["patient_id"] if patient else patient_id
-    return {"diagnostics": rows_to_dicts(lq.list_diagnostics(db, patient_id=patient_id, doctor_name=doctor_name))}
+    return {"diagnostics": filter_rows(rows_to_dicts(lq.list_diagnostics(db, patient_id=patient_id, doctor_name=doctor_name)), scope)}
 
 
 @router.post("/lab/diagnostics")
@@ -182,8 +183,8 @@ def ot_theatres_delete(theatre_id: int, request: Request, db: Session = Depends(
 
 @router.get("/ot/surgeries")
 def ot_surgeries_list(theatre_id: int | None = None, status: str | None = None, db: Session = Depends(get_db),
-                       user: dict = Depends(require_permissions("ot.read"))):
-    return {"surgeries": rows_to_dicts(lq.list_ot_surgeries(db, theatre_id=theatre_id, status=status))}
+                       user: dict = Depends(require_permissions("ot.read")), scope: set | None = Depends(patient_scope)):
+    return {"surgeries": filter_rows(rows_to_dicts(lq.list_ot_surgeries(db, theatre_id=theatre_id, status=status)), scope)}
 
 
 @router.post("/ot/surgeries")

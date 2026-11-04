@@ -41,7 +41,21 @@ type DiagInvoice = {
   due_amount: number; payment_status: string; created_at?: string; order_no?: string;
 };
 
+type RecentOrder = { service_id: number; service_name: string; order_no: string; ordered_at: string; progress_status: string };
+
 const money = (amount: number) => `Rs. ${amount}`;
+
+/** "today" / "yesterday" / "3 days ago", by calendar date. */
+function daysAgoLabel(iso: string): string {
+  const then = new Date(iso);
+  const now = new Date();
+  const days = Math.round(
+    (new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
+      new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime()) / 86400000
+  );
+  if (days <= 0) return "today";
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
 const lineAmount = (rate: number, quantity: number, discount: number) => Math.max(rate * quantity - discount, 0);
 
 function orderStatusBadgeClass(status: string): string {
@@ -83,6 +97,7 @@ export default function LabDiagnosticsOrdersPage({ setNotice, onNavigate }: Prop
   const [serviceDeptTab, setServiceDeptTab] = useState<ServiceDept>("LAB");
   const [basket, setBasket] = useState<OrderItemDraft[]>([]);
   const [duplicateIds, setDuplicateIds] = useState<number[]>([]);
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [savingOrder, setSavingOrder] = useState(false);
   const [currentDraftOrder, setCurrentDraftOrder] = useState<DiagOrder | null>(null);
   // Payload the current draft was saved with -- if the form changes afterwards, the draft is replaced rather than confirmed stale.
@@ -212,16 +227,21 @@ export default function LabDiagnosticsOrdersPage({ setNotice, onNavigate }: Prop
   }, [services, serviceDeptTab, serviceSearch]);
 
   // Re-checked whenever the basket, patient or visit changes, since "already ordered" is per encounter.
+  // Also returns the same tests done in other visits this week, shown as an advisory note only.
   const basketServiceKey = basket.map((b) => b.service_id).join(",");
   useEffect(() => {
-    if (!patient || !basketServiceKey) { setDuplicateIds([]); return; }
+    if (!patient || !basketServiceKey) { setDuplicateIds([]); setRecentOrders([]); return; }
     let cancelled = false;
     const params = new URLSearchParams({ patient_id: patient.patient_id });
     basketServiceKey.split(",").forEach((id) => params.append("service_id", id));
     if (selectedEncounter?.kind === "IP") params.set("admission_id", String(selectedEncounter.id));
     else if (selectedEncounter) params.set("appointment_id", String(selectedEncounter.id));
-    apiFetch<{ duplicate_service_ids: number[] }>(`/api/diag/orders/check-duplicates?${params.toString()}`)
-      .then((data) => { if (!cancelled) setDuplicateIds(data.duplicate_service_ids || []); })
+    apiFetch<{ duplicate_service_ids: number[]; recent?: RecentOrder[] }>(`/api/diag/orders/check-duplicates?${params.toString()}`)
+      .then((data) => {
+        if (cancelled) return;
+        setDuplicateIds(data.duplicate_service_ids || []);
+        setRecentOrders(data.recent || []);
+      })
       .catch(() => { /* non-blocking */ });
     return () => { cancelled = true; };
   }, [patient, selectedEncounter, basketServiceKey]);
@@ -257,7 +277,7 @@ export default function LabDiagnosticsOrdersPage({ setNotice, onNavigate }: Prop
   const resetNewOrderForm = useCallback(() => {
     setPatient(null); setEncounters([]); setEncounterKey(""); setExternalSource("");
     setReferringClinician(""); setPriority("Routine"); setClinicalIndication(""); setNotes("");
-    setBasket([]); setDuplicateIds([]); setCurrentDraftOrder(null); setDraftSignature("");
+    setBasket([]); setDuplicateIds([]); setRecentOrders([]); setCurrentDraftOrder(null); setDraftSignature("");
     setReferralDiscountType("percent"); setReferralDiscountVal(0);
   }, []);
 
@@ -584,6 +604,14 @@ export default function LabDiagnosticsOrdersPage({ setNotice, onNavigate }: Prop
                             Already active for this encounter. <Input placeholder="Reason to repeat" value={b.duplicate_reason || ""} onChange={(e) => updateBasketItem(b.service_id, { duplicate_reason: e.target.value })} />
                           </div>
                         )}
+                        {!duplicateIds.includes(b.service_id) && (() => {
+                          const recent = recentOrders.find((r) => r.service_id === b.service_id);
+                          return recent && (
+                            <div className="diag-note-box diag-note-warning" style={{ margin: "4px 0 0" }}>
+                              Already done {daysAgoLabel(recent.ordered_at)} ({recent.order_no}, {recent.progress_status.replace(/_/g, " ")}). Check that result before repeating.
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td><Input type="number" min={1} style={{ width: 60 }} value={b.quantity} onChange={(e) => updateBasketItem(b.service_id, { quantity: Number(e.target.value) || 1 })} /></td>
                       <td>{money(b.rate)}</td>

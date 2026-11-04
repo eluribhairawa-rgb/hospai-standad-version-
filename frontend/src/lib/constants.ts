@@ -373,6 +373,7 @@ export const EMPTY_SIGNUP_FORM: SignupForm = {
   user_type: "normal",
   module_access: [...DEFAULT_MODULE_ACCESS],
   job_role: "",
+  doctor_name: "",
   address: "",
   emergency_contact: "",
 };

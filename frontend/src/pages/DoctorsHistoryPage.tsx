@@ -38,11 +38,13 @@ type DepartmentRecord = {
 type Props = {
   setNotice: (notice: Notice | null) => void;
   onOpenPatient: (patientId: string) => void;
+  /** Doctor-linked login: history is limited to this doctor (the API enforces it). */
+  scopedDoctor?: string | null;
 };
 
-export default function DoctorsHistoryPage({ setNotice, onOpenPatient }: Props) {
-  // Filter states: empty by default (Don't add any default values)
-  const [selectedDoctor, setSelectedDoctor] = useState("");
+export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoctor }: Props) {
+  // Filter states: empty by default (Don't add any default values) -- except a doctor login, which is fixed to itself.
+  const [selectedDoctor, setSelectedDoctor] = useState(scopedDoctor || "");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("");
@@ -234,9 +236,10 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient }: Props) 
                   value={selectedDoctor}
                   onChange={(e) => handleDoctorChange(e.target.value)}
                   aria-label="Doctor filter"
+                  disabled={!!scopedDoctor}
                 >
-                  <option value="">Select Doctor</option>
-                  {doctorsList.map((doc) => (
+                  {scopedDoctor ? <option value={scopedDoctor}>{scopedDoctor}</option> : <option value="">Select Doctor</option>}
+                  {!scopedDoctor && doctorsList.map((doc) => (
                     <option key={doc} value={doc}>
                       {doc}
                     </option>

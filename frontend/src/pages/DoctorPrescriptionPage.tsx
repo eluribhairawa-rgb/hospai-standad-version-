@@ -10,6 +10,8 @@ type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
   onOpenPatient?: (patientId: string) => void;
   onNavigate?: (pageId: string) => void;
+  /** Doctor-linked login: prescriptions are always signed as this doctor (the API enforces it). */
+  scopedDoctor?: string | null;
 };
 
 export type QueueItem = {
@@ -44,6 +46,33 @@ export type MedicineItem = {
   duration: string;
   instructions: string;
 };
+
+type SavedMedicine = { medicine_name: string; dosage: string; frequency: string; duration: string; instructions: string };
+
+type RxSuggestions = {
+  source: "doctor" | "all" | null;
+  prescription_count: number;
+  medicines: (SavedMedicine & { count: number })[];
+  lab_tests: { name: string; count: number }[];
+};
+
+/** Editor row for a medicine read from OCR or past prescriptions; an "M-A-N" frequency opens in the 3-box view. */
+function toMedicineItem(m: SavedMedicine, id: string): MedicineItem {
+  const parts = (m.frequency || "").split("-").map((p) => p.trim());
+  const is3Box = parts.length === 3 && parts.every((p) => /^[0-9½¼.\/]*$/.test(p));
+  return {
+    id,
+    medicine_name: m.medicine_name,
+    dosage: m.dosage || "",
+    frequency: m.frequency || "",
+    is_custom: Boolean(m.frequency) && !is3Box,
+    freq_m: is3Box ? parts[0] : "",
+    freq_a: is3Box ? parts[1] : "",
+    freq_n: is3Box ? parts[2] : "",
+    duration: m.duration || "",
+    instructions: m.instructions || "",
+  };
+}
 
 type OcrPrescriptionFields = {
   patient_name: string;
@@ -111,7 +140,7 @@ const COMMON_LAB_TESTS = [
   "Ultrasound Whole Abdomen",
 ];
 
-export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNavigate }: Props) {
+export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNavigate, scopedDoctor }: Props) {
   // Today's date
   const [selectedDate, setSelectedDate] = useState(() => new Date().toLocaleDateString("en-CA"));
 
@@ -133,7 +162,8 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   const [patientAge, setPatientAge] = useState("");
   const [patientGender, setPatientGender] = useState("Male");
   const [patientPhone, setPatientPhone] = useState("");
-  const [doctorName, setDoctorName] = useState("Dr. Rajesh Sharma, MD");
+  const [doctorName, setDoctorNameState] = useState(scopedDoctor || "Dr. Rajesh Sharma, MD");
+  const setDoctorName = (name: string) => setDoctorNameState(scopedDoctor || name);
   const [department, setDepartment] = useState("General Medicine");
   const [appointmentId, setAppointmentId] = useState<number | null>(null);
   const [appointmentToken, setAppointmentToken] = useState("");
@@ -249,22 +279,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     put(f.follow_up_date, setFollowUpDate, "Follow-up date");
     if (f.medicines.length) {
       const stamp = Date.now();
-      const scanned: MedicineItem[] = f.medicines.map((m, i) => {
-        const parts = m.frequency.split("-").map((p) => p.trim());
-        const is3Box = parts.length === 3 && parts.every((p) => /^[0-9½¼.\/]*$/.test(p));
-        return {
-          id: `med-ocr-${stamp}-${i}`,
-          medicine_name: m.medicine_name,
-          dosage: m.dosage,
-          frequency: m.frequency,
-          is_custom: Boolean(m.frequency) && !is3Box,
-          freq_m: is3Box ? parts[0] : "",
-          freq_a: is3Box ? parts[1] : "",
-          freq_n: is3Box ? parts[2] : "",
-          duration: m.duration,
-          instructions: m.instructions,
-        };
-      });
+      const scanned: MedicineItem[] = f.medicines.map((m, i) => toMedicineItem(m, `med-ocr-${stamp}-${i}`));
       // Replace blank placeholder rows, keep any medicines the doctor already entered.
       setMedicines((prev) => [...prev.filter((m) => m.medicine_name.trim()), ...scanned]);
       filled.push(`${scanned.length} medicine${scanned.length > 1 ? "s" : ""}`);
@@ -393,6 +408,48 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       })
       .catch(() => {});
   }, []);
+
+  // Medicines / tests usually prescribed for this diagnosis, from saved prescriptions (the doctor's own first).
+  const [rxSuggestions, setRxSuggestions] = useState<RxSuggestions | null>(null);
+  useEffect(() => {
+    const term = diagnosis.trim();
+    if (term.length < 3) {
+      setRxSuggestions(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ diagnosis: term });
+      if (doctorName.trim()) params.set("doctor_name", doctorName.trim());
+      apiFetch<RxSuggestions>(`/api/prescriptions/suggestions?${params.toString()}`)
+        .then((res) => { if (!cancelled) setRxSuggestions(res); })
+        .catch(() => { if (!cancelled) setRxSuggestions(null); });
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [diagnosis, doctorName]);
+
+  const suggestedMedicines = useMemo(() => {
+    const present = new Set(medicines.map((m) => m.medicine_name.trim().toLowerCase()).filter(Boolean));
+    return (rxSuggestions?.medicines || []).filter((m) => !present.has(m.medicine_name.trim().toLowerCase()));
+  }, [rxSuggestions, medicines]);
+
+  const suggestedLabTests = useMemo(() => {
+    const present = new Set(labTests.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean));
+    return (rxSuggestions?.lab_tests || []).filter((t) => !present.has(t.name.trim().toLowerCase()));
+  }, [rxSuggestions, labTests]);
+
+  const handleAddSuggestedMedicines = (list: SavedMedicine[]) => {
+    const stamp = Date.now();
+    // Replace blank placeholder rows, keep any medicines the doctor already entered.
+    setMedicines((prev) => [
+      ...prev.filter((m) => m.medicine_name.trim()),
+      ...list.map((m, i) => toMedicineItem(m, `med-sug-${stamp}-${i}`)),
+    ]);
+    setNotice({ type: "success", message: `Added ${list.length === 1 ? list[0].medicine_name : `${list.length} medicines`}. Review dosage before saving.` });
+  };
 
   // Fetch all registered patients from hospital database for UHID selection
   const fetchAllRegisteredPatients = async () => {
@@ -2244,6 +2301,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   className="doctor-rx-input"
                   value={doctorName}
                   onChange={(e) => setDoctorName(e.target.value)}
+                  readOnly={!!scopedDoctor}
                 />
               </div>
 
@@ -2645,6 +2703,42 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
               </div>
             </div>
 
+            {suggestedMedicines.length > 0 && rxSuggestions && (
+              <div style={{ marginBottom: "12px", background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: "8px", padding: "8px 10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#5b21b6" }}>
+                    ✨ Usually prescribed for "{diagnosis.trim()}" (from {rxSuggestions.source === "doctor" ? "your" : "all doctors'"} last{" "}
+                    {rxSuggestions.prescription_count} prescription{rxSuggestions.prescription_count === 1 ? "" : "s"}):
+                  </span>
+                  {suggestedMedicines.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleAddSuggestedMedicines(suggestedMedicines)}
+                      style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: "10px", padding: "2px 10px", fontSize: "11px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+                    >
+                      + Add all
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  {suggestedMedicines.map((m) => (
+                    <button
+                      key={m.medicine_name}
+                      type="button"
+                      title={`Used in ${m.count} of ${rxSuggestions.prescription_count} prescriptions`}
+                      onClick={() => handleAddSuggestedMedicines([m])}
+                      style={{ background: "#ffffff", color: "#5b21b6", border: "1px solid #c4b5fd", borderRadius: "12px", padding: "2px 8px", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}
+                    >
+                      + {m.medicine_name}
+                      {(m.frequency || m.duration) && (
+                        <span style={{ fontWeight: 400, color: "#6d28d9" }}> · {[m.frequency, m.duration].filter(Boolean).join(" · ")}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Medicines Table */}
             <div className="doctor-rx-table-wrap">
               <table className="doctor-rx-table">
@@ -2981,6 +3075,22 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   </button>
                 ))}
               </div>
+              {suggestedLabTests.length > 0 && (
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", marginTop: "6px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#5b21b6" }}>✨ Usually advised for this diagnosis:</span>
+                  {suggestedLabTests.map((t) => (
+                    <button
+                      key={t.name}
+                      type="button"
+                      title={`Advised in ${t.count} of ${rxSuggestions?.prescription_count ?? 0} prescriptions`}
+                      onClick={() => setLabTests((cur) => (cur.trim() ? `${cur.trim().replace(/,\s*$/, "")}, ${t.name}` : t.name))}
+                      style={{ background: "#f5f3ff", color: "#5b21b6", border: "1px solid #c4b5fd", borderRadius: "10px", padding: "2px 8px", fontSize: "11px", cursor: "pointer" }}
+                    >
+                      + {t.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="doctor-rx-field" style={{ marginBottom: "12px" }}>

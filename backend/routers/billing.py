@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import require_permissions, current_hospital_id
+from access_scope import patient_scope, filter_rows
 from common import (
     rows_to_dicts, validate_required_fields, log_audit_event, client_ip,
     normalize_payment_mode, normalize_billing_module, require_razorpay_configured,
@@ -18,8 +19,8 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 @router.get("/invoices")
 def billing_invoices(patient_id: str | None = None, module: str | None = None, db: Session = Depends(get_db),
-                      user: dict = Depends(require_permissions("billing.read"))):
-    return {"invoices": rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module=module))}
+                      user: dict = Depends(require_permissions("billing.read")), scope: set | None = Depends(patient_scope)):
+    return {"invoices": filter_rows(rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module=module)), scope)}
 
 
 @router.post("/invoices")

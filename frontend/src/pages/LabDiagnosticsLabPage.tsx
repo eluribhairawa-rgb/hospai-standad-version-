@@ -98,6 +98,8 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
   const [selectedLot, setSelectedLot] = useState<number | "">("");
   const [ocrScanning, setOcrScanning] = useState(false);
   const [ocrFileName, setOcrFileName] = useState("");
+  // Parameters whose value came from the last OCR scan and has not been touched since -- highlighted until verified.
+  const [ocrFilledIds, setOcrFilledIds] = useState<Set<number>>(new Set());
 
   const load = async () => {
     setLoading(true);
@@ -138,6 +140,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
     setCollectForm(EMPTY_COLLECT_FORM);
     setReceiveForm(EMPTY_RECEIVE_FORM);
     setOcrFileName("");
+    setOcrFilledIds(new Set());
     try {
       const d = await apiFetch<ItemDetail>(`/api/diag/lab/items/${row.id}`);
       setDetail(d);
@@ -329,6 +332,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       if (filled.length) {
         setResultValues((prev) => ({ ...prev, ...Object.fromEntries(filled.map((v) => [v.parameter_id, v.value])) }));
       }
+      setOcrFilledIds(new Set(filled.map((v) => v.parameter_id)));
       let equipmentNote = "";
       if (equipment && !selectedEquipment) {
         const name = equipment.toLowerCase();
@@ -346,7 +350,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       const skippedNote = skipped?.length ? ` Enter manually: ${skipped.map((s) => `${s.parameter_name} (printed "${s.value}")`).join(", ")}.` : "";
       setNotice(
         filled.length
-          ? { type: identityNote || skippedNote ? "warning" : "success", message: `OCR filled ${filled.length} of ${detail.parameters.length} parameter(s).${equipmentNote} Verify every value before saving.${skippedNote}${identityNote}` }
+          ? { type: identityNote || skippedNote ? "warning" : "success", message: `OCR filled ${filled.length} of ${detail.parameters.length} parameter(s).${equipmentNote} Verify the highlighted values before saving.${skippedNote}${identityNote}` }
           : { type: "warning", message: `No values for this test's parameters could be filled from the image.${skippedNote || " Try a clearer photo."}${identityNote}` }
       );
     } catch (err: any) {
@@ -590,9 +594,20 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                         const existing = detail.results.find((r) => r.parameter_id === p.id);
                         const flag = computeFlag(p, resultValues[p.id]) ?? (p.data_type === "numeric" ? null : existing?.flag);
                         return (
-                          <tr key={p.id}>
+                          <tr key={p.id} className={flag && flag !== "normal" ? `diag-row-${flag}` : undefined}>
                             <td>{p.name}</td>
-                            <td><Input value={resultValues[p.id] || ""} onChange={(e) => setResultValues({ ...resultValues, [p.id]: e.target.value })} disabled={resultsLocked} /></td>
+                            <td>
+                              <Input
+                                value={resultValues[p.id] || ""}
+                                className={ocrFilledIds.has(p.id) ? "diag-ocr-filled" : undefined}
+                                title={ocrFilledIds.has(p.id) ? "Filled by OCR -- check against the printout" : undefined}
+                                onChange={(e) => {
+                                  setResultValues({ ...resultValues, [p.id]: e.target.value });
+                                  if (ocrFilledIds.has(p.id)) setOcrFilledIds((prev) => { const next = new Set(prev); next.delete(p.id); return next; });
+                                }}
+                                disabled={resultsLocked}
+                              />
+                            </td>
                             <td>{p.unit || "-"}</td>
                             <td>{p.ref_text || (p.ref_low != null || p.ref_high != null ? `${p.ref_low ?? ""} - ${p.ref_high ?? ""}` : "-")}</td>
                             <td>{flag && <span className={`diag-flag-${flag}`}>{flag.replace("_", " ")}</span>}</td>

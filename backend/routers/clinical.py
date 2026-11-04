@@ -4,13 +4,16 @@ from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import require_permissions, current_hospital_id
+from access_scope import patient_scope, ensure_patient_allowed
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip, normalize_payment_mode, normalize_department_name
 import legacy_queries as lq
 import legacy_sql
+import prescription_suggestions
 import security
 from qwen_ocr import extract_prescription_fields
 
@@ -74,6 +77,8 @@ def dashboard_hospital_summary(date: str | None = None, db: Session = Depends(ge
 def appointments_list(date: str | None = None, status: str | None = None, visit_type: str | None = None,
                        doctor_name: str | None = None, patient_id: str | None = None,
                        db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read"))):
+    # A doctor login only ever sees their own queue, whatever filter the client sends.
+    doctor_name = security.scoped_doctor_name(user) or doctor_name
     rows = lq.list_appointments(db, appointment_date=date, status=status, visit_type=visit_type,
                                  doctor_name=doctor_name, patient_id=patient_id)
     return {"appointments": rows_to_dicts(rows)}
@@ -84,6 +89,7 @@ def doctors_history_list(doctor_name: str | None = None, from_date: str | None =
                           department: str | None = None, db: Session = Depends(get_db),
                           user: dict = Depends(require_permissions("patients.read")),
                           hospital_id: int = Depends(current_hospital_id)):
+    doctor_name = security.scoped_doctor_name(user) or doctor_name
     rows = lq.list_doctors_history(db, hospital_id=hospital_id, doctor_name=doctor_name, from_date=from_date, to_date=to_date, department=department)
     return {"history": rows_to_dicts(rows)}
 
@@ -92,6 +98,10 @@ def doctors_history_list(doctor_name: str | None = None, from_date: str | None =
 def appointments_create(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                          user: dict = Depends(require_permissions("patients.write"))):
     validate_required_fields(payload, ["patient_name", "visit_type", "appointment_date", "consultation_fee"])
+    own_doctor = security.scoped_doctor_name(user)
+    if own_doctor:
+        # A doctor login can only add patients to their own queue.
+        payload["doctor_name"] = own_doctor
     vitals_err = _validate_vitals_in_notes(payload.get("notes"))
     if vitals_err:
         raise HTTPException(status_code=400, detail=vitals_err)
@@ -141,6 +151,10 @@ def appointments_create(request: Request, payload: dict = Body(...), db: Session
 @router.put("/appointments/{appointment_id}")
 def appointments_update(appointment_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                          user: dict = Depends(require_permissions("patients.write"))):
+    # Ownership is checked by access_scope.patient_access_guard; here we only stop reassignment.
+    own_doctor = security.scoped_doctor_name(user)
+    if own_doctor and "doctor_name" in payload:
+        payload["doctor_name"] = own_doctor
     try:
         updated = lq.update_appointment(db, appointment_id, payload)
     except ValueError as exc:
@@ -310,7 +324,8 @@ def prescription_ocr_fields(file: UploadFile = File(...), user: dict = Depends(r
 
 @router.post("/prescriptions")
 def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db),
-                          user: dict = Depends(require_permissions("patients.write"))):
+                          user: dict = Depends(require_permissions("patients.write")),
+                          scope: set | None = Depends(patient_scope)):
     patient_id = payload.get("patient_id")
     appointment_id = payload.get("appointment_id")
     if appointment_id:
@@ -323,6 +338,15 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
 
     if not patient_id:
         raise HTTPException(status_code=400, detail="patient_id is required")
+    ensure_patient_allowed(scope, patient_id)
+    own_doctor = security.scoped_doctor_name(user)
+    if own_doctor:
+        # Prescriptions written from a doctor login are always signed as that doctor.
+        payload["doctor_name"] = own_doctor
+        if appointment_id:
+            appt = db.execute(text("SELECT doctor_name FROM appointments WHERE id = :v"), {"v": appointment_id}).fetchone()
+            if appt and (appt[0] or "").strip().lower() != own_doctor.lower():
+                raise HTTPException(status_code=404, detail="Appointment not found")
 
     medicines = payload.get("medicines", [])
     save_token = (payload.get("save_token") or "").strip() or None
@@ -423,6 +447,12 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
         except Exception as e:
             conn.rollback()
             raise HTTPException(status_code=500, detail=f"Failed to save prescription: {e}")
+
+
+@router.get("/prescriptions/suggestions")
+def prescriptions_suggestions(diagnosis: str | None = None, doctor_name: str | None = None, db: Session = Depends(get_db),
+                               user: dict = Depends(require_permissions("patients.read"))):
+    return prescription_suggestions.suggest_for_diagnosis(db, diagnosis, doctor_name)
 
 
 @router.get("/prescriptions")

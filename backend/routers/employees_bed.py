@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import require_permissions, current_hospital_id
+from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, row_to_dict, validate_required_fields, log_audit_event, client_ip
 import legacy_queries as lq
 import legacy_sql
@@ -101,8 +102,8 @@ def patient_vitals_create(patient_id: str, request: Request, payload: dict = Bod
 
 @router.get("/nursing/care-logs")
 def nursing_care_logs_list(patient_id: str | None = None, admission_id: int | None = None, db: Session = Depends(get_db),
-                            user: dict = Depends(require_permissions("patients.read"))):
-    return {"logs": rows_to_dicts(lq.list_nursing_care_logs(db, patient_id=patient_id, admission_id=admission_id))}
+                            user: dict = Depends(require_permissions("patients.read")), scope: set | None = Depends(patient_scope)):
+    return {"logs": filter_rows(rows_to_dicts(lq.list_nursing_care_logs(db, patient_id=patient_id, admission_id=admission_id)), scope)}
 
 
 @router.post("/nursing/care-logs")
@@ -139,8 +140,9 @@ def patient_encounter_create(patient_id: str, request: Request, payload: dict = 
 
 @router.get("/encounters")
 def encounters_list(encounter_type: str | None = None, active_only: bool = False, db: Session = Depends(get_db),
-                     user: dict = Depends(require_permissions("patients.read"))):
-    return {"encounters": rows_to_dicts(lq.list_encounters(db, encounter_type=encounter_type, active_only=active_only))}
+                     user: dict = Depends(require_permissions("patients.read")), scope: set | None = Depends(patient_scope)):
+    rows = lq.list_encounters(db, encounter_type=encounter_type, active_only=active_only)
+    return {"encounters": rows_to_dicts(filter_rows(rows, scope))}
 
 
 @router.post("/encounters/{encounter_id}/triage")
@@ -325,7 +327,7 @@ def update_bed_config(payload: dict = Body(...), db: Session = Depends(get_db), 
 
 @router.get("/bed/occupancy")
 def get_bed_occupancy(db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
-                       hospital_id: int = Depends(current_hospital_id)):
+                       hospital_id: int = Depends(current_hospital_id), scope: set | None = Depends(patient_scope)):
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -344,7 +346,7 @@ def get_bed_occupancy(db: Session = Depends(get_db), user: dict = Depends(requir
             "total_days": r[6], "total_amount": r[7], "allocated_at": r[8], "patient_name": f"{r[9]} {r[10]}".strip(),
             "admission_id": r[11],
         } for r in rows]
-    return {"occupied": occupied}
+    return {"occupied": filter_rows(occupied, scope)}
 
 
 @router.post("/bed/allot")
@@ -431,7 +433,8 @@ def release_bed_api(allocation_id: int, db: Session = Depends(get_db), user: dic
 
 
 @router.get("/bed/history")
-def get_bed_history_all(patient_id: str | None = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read"))):
+def get_bed_history_all(patient_id: str | None = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
+                         scope: set | None = Depends(patient_scope)):
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()
         query = """
@@ -451,22 +454,22 @@ def get_bed_history_all(patient_id: str | None = None, db: Session = Depends(get
             "total_days": r[6], "total_amount": r[7], "allocated_at": r[8], "released_at": r[9], "status": r[10],
             "patient_name": f"{r[11]} {r[12]}".strip(),
         } for r in rows]
-    return {"history": history}
+    return {"history": filter_rows(history, scope)}
 
 
 @router.get("/admissions/discharged")
 def admissions_discharged_list(from_date: str | None = None, to_date: str | None = None, q: str | None = None,
                                 db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
-                                hospital_id: int = Depends(current_hospital_id)):
+                                hospital_id: int = Depends(current_hospital_id), scope: set | None = Depends(patient_scope)):
     rows = lq.list_discharged_admissions(db, hospital_id=hospital_id, from_date=from_date, to_date=to_date, q=q)
-    return {"discharged": rows_to_dicts(rows)}
+    return {"discharged": rows_to_dicts(filter_rows(rows, scope))}
 
 
 # ------------------------------------------------------- bed requests --
 
 @router.get("/bed/requests")
 def get_bed_requests(db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
-                      hospital_id: int = Depends(current_hospital_id)):
+                      hospital_id: int = Depends(current_hospital_id), scope: set | None = Depends(patient_scope)):
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -503,7 +506,7 @@ def get_bed_requests(db: Session = Depends(get_db), user: dict = Depends(require
                 "preferred_ward": parsed.get("preferred_ward") or parsed.get("ward") or "General Ward",
                 "reason": parsed.get("reason") or notes_str,
             })
-    return {"requests": requests_list}
+    return {"requests": filter_rows(requests_list, scope)}
 
 
 # --------------------------------------------------- hospital_beds inventory --

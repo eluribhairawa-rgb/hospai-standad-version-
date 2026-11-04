@@ -12180,6 +12180,16 @@ label,
 }
 
 /* Filter Card */
+.opq-scoped-doctor {
+  background: hsl(var(--primary) / 0.08);
+  border: 1px solid hsl(var(--primary) / 0.3);
+  color: hsl(var(--primary));
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
 .opq-filter-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
@@ -14333,6 +14343,21 @@ label,
 .diag-flag-high, .diag-flag-low { color: hsl(30 80% 40%); font-weight: 700; }
 .diag-flag-critical_high, .diag-flag-critical_low { color: hsl(var(--destructive)); font-weight: 800; }
 .diag-flag-abnormal { color: hsl(30 80% 40%); font-weight: 700; }
+
+/* Out-of-range result rows, so abnormal values stand out without reading the flag column. */
+.diag-row-high td, .diag-row-low td, .diag-row-abnormal td { background: hsl(38 95% 55% / 0.1); }
+.diag-row-critical_high td, .diag-row-critical_low td { background: hsl(var(--destructive) / 0.1); }
+
+/* Value filled by OCR and not yet touched -- staff check it against the printout. */
+.ui-input.diag-ocr-filled { background: hsl(210 95% 60% / 0.12); border-color: hsl(210 80% 55%); }
+
+.diag-note-box.diag-note-warning {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.diag-ai-hint { font-size: 11.5px; color: hsl(var(--muted-foreground)); margin: 0.3rem 0 0; }
 
 .diag-timeline {
   display: flex;

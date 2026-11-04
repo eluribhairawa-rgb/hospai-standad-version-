@@ -2047,6 +2047,7 @@ class Users(Base):
     status: Mapped[Optional[str]] = mapped_column(Text, server_default=text("'active'::text"))
     address: Mapped[Optional[str]] = mapped_column(Text)
     emergency_contact: Mapped[Optional[str]] = mapped_column(Text)
+    doctor_name: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     hospital_id: Mapped[Optional[int]] = mapped_column(Integer)
 

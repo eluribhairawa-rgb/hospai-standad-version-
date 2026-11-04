@@ -49,7 +49,12 @@ export function buildPrintBody(report: ReportDetail, content: Record<string, str
       <p><strong>Impression:</strong> ${content.impression || "-"}</p>`;
   }
   const rows = (orderItem.results || [])
-    .map((r: any) => `<tr><td>${r.parameter_name}</td><td>${r.value_numeric ?? r.value_text ?? "-"}</td><td>${r.unit || "-"}</td><td>${r.ref_range_text || `${r.ref_low ?? ""}-${r.ref_high ?? ""}`}</td><td>${r.flag || "-"}</td></tr>`)
+    .map((r: any) => {
+      // Out-of-range rows print bold so they stand out on paper / PDF too.
+      const abnormal = r.flag && r.flag !== "normal";
+      const style = abnormal ? ` style="font-weight:700;${r.flag.startsWith("critical") ? "color:#b91c1c;" : ""}"` : "";
+      return `<tr${style}><td>${r.parameter_name}</td><td>${r.value_numeric ?? r.value_text ?? "-"}</td><td>${r.unit || "-"}</td><td>${r.ref_range_text || `${r.ref_low ?? ""}-${r.ref_high ?? ""}`}</td><td>${r.flag ? r.flag.replace("_", " ").toUpperCase() : "-"}</td></tr>`;
+    })
     .join("");
   return `<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%;">
       <thead><tr><th>Parameter</th><th>Result</th><th>Unit</th><th>Reference range</th><th>Flag</th></tr></thead>

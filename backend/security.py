@@ -250,7 +250,26 @@ def resolve_user_profile(user_row: dict) -> dict:
         "phone": user_row.get("phone"),
         "employee_id": user_row.get("employee_id"),
         "status": user_row.get("status"),
+        "job_role": user_row.get("job_role"),
+        "doctor_name": user_row.get("doctor_name"),
     }
+
+
+def linked_doctor_name(job_role, doctor_name) -> Optional[str]:
+    """Doctor link is kept only for employees whose job title is Doctor."""
+    if str(job_role or "").strip().lower() != "doctor":
+        return None
+    return str(doctor_name or "").strip() or None
+
+
+def scoped_doctor_name(user: dict) -> Optional[str]:
+    """Doctor whose patients this login is limited to, or None for unrestricted users.
+
+    Admins / super admins always see everything, even if linked to a doctor.
+    """
+    if not user or user.get("user_type") in ("admin", "super_admin"):
+        return None
+    return linked_doctor_name(user.get("job_role"), user.get("doctor_name"))
 
 
 def resolve_user_permissions(user: dict) -> set[str]:
@@ -364,6 +383,7 @@ def add_employee(db: Session, data: dict, hospital_id: Optional[int] = None) -> 
         status=data.get("status", "active"),
         address=data.get("address", ""),
         emergency_contact=data.get("emergency_contact", ""),
+        doctor_name=data.get("doctor_name"),
     )
     db.add(user)
     db.commit()
@@ -411,6 +431,7 @@ def signup_employee(db: Session, data: dict, allow_admin_creation: bool = True, 
         "status": "active",
         "address": data.get("address", ""),
         "emergency_contact": normalize_phone_number(data.get("emergency_contact") or "", "+91"),
+        "doctor_name": linked_doctor_name(data.get("job_role"), data.get("doctor_name")),
     }
 
     try:
@@ -577,6 +598,7 @@ def authenticate(db: Session, username: str, password: str, hospital_id: Optiona
         "user_type": user.user_type, "module_access": user.module_access,
         "full_name": user.full_name, "email": user.email, "phone": user.phone,
         "employee_id": user.employee_id, "status": user.status,
+        "job_role": user.job_role, "doctor_name": user.doctor_name,
     })
     profile["id"] = user.id
     profile["hospital_id"] = resolved_hospital_id
@@ -654,6 +676,7 @@ def get_session_user(db: Session, token: Optional[str]):
         "user_type": user.user_type, "module_access": user.module_access,
         "full_name": user.full_name, "email": user.email, "phone": user.phone,
         "employee_id": user.employee_id, "status": user.status,
+        "job_role": user.job_role, "doctor_name": user.doctor_name,
     })
     profile["hospital_id"] = session_row.hospital_id
     profile["hospital_code"] = hospital.code

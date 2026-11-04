@@ -22,6 +22,7 @@ type EditForm = {
   emergency_contact: string;
   status: string;
   job_role: string;
+  doctor_name: string;
   user_type: SignupForm["user_type"];
   module_access: ModuleId[];
 };
@@ -201,6 +202,32 @@ function PhoneInput({ value, onChange, required }: { value: string; onChange: (v
   );
 }
 
+type DoctorOption = { doctor_name: string; department?: string };
+
+const isDoctorRole = (jobRole?: string) => (jobRole || "").trim().toLowerCase() === "doctor";
+
+function DoctorNameField({ id, value, doctors, onChange }: { id: string; value: string; doctors: DoctorOption[]; onChange: (val: string) => void }) {
+  const listId = `${id}-options`;
+  return (
+    <Label>
+      Doctor Name
+      <Input
+        list={listId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={doctors.length ? "Start typing to pick a doctor" : "No doctors set up in OP schedules yet"}
+        required
+      />
+      <datalist id={listId}>
+        {doctors.map((d) => (
+          <option key={d.doctor_name} value={d.doctor_name}>{d.department || ""}</option>
+        ))}
+      </datalist>
+      <span className="muted" style={{ fontSize: "0.75rem" }}>This login will only see this doctor's patients.</span>
+    </Label>
+  );
+}
+
 export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [stats, setStats] = useState({ total: 0, active: 0, inactive: 0 });
@@ -211,6 +238,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
   const [editForm, setEditForm] = useState<Partial<EditForm>>({});
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState(false);
+  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
 
   const loadEmployees = async (search?: string) => {
     const path = search ? `/api/employees/search?q=${encodeURIComponent(search)}` : "/api/employees";
@@ -226,7 +254,14 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
   useEffect(() => {
     void loadEmployees();
     void loadStats();
+    apiFetch<{ doctors?: DoctorOption[] }>("/api/op/doctors")
+      .then((data) => setDoctors(data.doctors || []))
+      .catch(() => setDoctors([]));
   }, []);
+
+  // Picking a doctor fills Full Name if it is still empty.
+  const pickDoctorForAdd = (name: string) =>
+    setForm((p) => ({ ...p, doctor_name: name, full_name: p.full_name || (doctors.some((d) => d.doctor_name === name) ? name : p.full_name) }));
 
   const handleAdd = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -235,7 +270,8 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       return;
     }
     try {
-      const res = await apiFetch<{ success: boolean; message: string }>("/api/employees", { method: "POST", body: JSON.stringify(form) });
+      const payload = { ...form, doctor_name: isDoctorRole(form.job_role) ? form.doctor_name.trim() : "" };
+      const res = await apiFetch<{ success: boolean; message: string }>("/api/employees", { method: "POST", body: JSON.stringify(payload) });
       if (res.success) {
         setNotice({ type: "success", message: res.message });
         setForm(EMPTY_SIGNUP_FORM);
@@ -296,6 +332,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       emergency_contact: employee.emergency_contact || "",
       status: employee.status || "active",
       job_role: employee.job_role || "",
+      doctor_name: employee.doctor_name || "",
       user_type: employee.user_type || "normal",
       module_access: employee.module_access && employee.module_access.length > 0 ? employee.module_access.filter(mId => ALL_ASSIGNABLE_MODULES.includes(mId)) : DEFAULT_MODULE_ACCESS,
     });
@@ -307,7 +344,8 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       return;
     }
     try {
-      await apiFetch(`/api/employees/${employeeId}`, { method: "PUT", body: JSON.stringify(editForm) });
+      const payload = { ...editForm, doctor_name: isDoctorRole(editForm.job_role) ? (editForm.doctor_name || "").trim() : "" };
+      await apiFetch(`/api/employees/${employeeId}`, { method: "PUT", body: JSON.stringify(payload) });
       setNotice({ type: "success", message: "Employee updated successfully." });
       setEditingId(null);
       void loadEmployees(query);
@@ -378,6 +416,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                       <p>User Type: {USER_TYPE_LABELS[emp.user_type || ""] || USER_TYPE_LABELS.normal}</p>
                       <p>Modules: {(emp.module_access || DEFAULT_MODULE_ACCESS).filter(mId => ALL_ASSIGNABLE_MODULES.includes(mId)).map(mId => NAV_ITEMS.find(n => n.module === mId)?.label || mId).join(", ")}</p>
                       <p>Job Title: {emp.job_role || "-"}</p>
+                      {isDoctorRole(emp.job_role) && <p>Linked Doctor: {emp.doctor_name || "Not linked"}</p>}
                       <p>Department: {emp.department || "-"}</p>
                       <p>Status: <Badge variant={emp.status === "active" ? "default" : "destructive"}>{emp.status || "-"}</Badge></p>
                       <p>Date Joined: {formatDate(emp.date_joined)}</p>
@@ -424,6 +463,14 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                             <option value="Other">Other</option>
                           </Select>
                         </Label>
+                        {isDoctorRole(editForm.job_role) && (
+                          <DoctorNameField
+                            id={`edit-doctor-${emp.employee_id}`}
+                            value={editForm.doctor_name || ""}
+                            doctors={doctors}
+                            onChange={(val) => setEditForm((p) => ({ ...p, doctor_name: val }))}
+                          />
+                        )}
                         <Label>
                           Status
                           <Select value={editForm.status || "active"} onChange={(e) => setEditForm((p) => ({ ...p, status: e.target.value }))}>
@@ -509,6 +556,9 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                   <option value="Other">Other</option>
                 </Select>
               </Label>
+              {isDoctorRole(form.job_role) && (
+                <DoctorNameField id="add-doctor" value={form.doctor_name} doctors={doctors} onChange={pickDoctorForAdd} />
+              )}
               {form.user_type !== "admin" && (
                 <ModuleAccessPanel
                   selectedModules={form.module_access}

@@ -5,9 +5,11 @@ from typing import Optional
 # Every write below commits together with its audit_logs row (see database.get_audited_db).
 from database import get_audited_db as get_db
 from deps import require_permissions
+from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip
 import legacy_queries as lq
 from qwen_ocr import extract_lab_results, lab_identity_warnings
+from lab_interpretation import draft_lab_interpretation
 
 router = APIRouter(prefix="/api", tags=["diagnostics"])
 
@@ -141,19 +143,23 @@ def diag_orders_create(request: Request, payload: dict = Body(...), db: Session 
 def diag_orders_list(patient_id: Optional[str] = None, status: Optional[str] = None, department_type: Optional[str] = None,
                       priority: Optional[str] = None, encounter_type: Optional[str] = None, admission_id: Optional[int] = None,
                       sale_type: Optional[str] = None, q: Optional[str] = None,
-                      db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"orders": lq.list_diag_orders(db, patient_id=patient_id, status=status, department_type=department_type,
+                      db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"orders": filter_rows(lq.list_diag_orders(db, patient_id=patient_id, status=status, department_type=department_type,
                                            priority=priority, encounter_type=encounter_type, admission_id=admission_id,
-                                           sale_type=sale_type, search=q)}
+                                           sale_type=sale_type, search=q), scope)}
 
 
 @router.get("/diag/orders/check-duplicates")
 def diag_orders_check_duplicates(patient_id: Optional[str] = None, service_id: list[int] = Query(default=[]),
                                   admission_id: Optional[int] = None, appointment_id: Optional[int] = None,
+                                  recent_days: int = Query(default=7, ge=1, le=90),
                                   db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
     if not patient_id or not service_id:
-        return {"duplicate_service_ids": []}
-    return {"duplicate_service_ids": lq.check_diag_duplicate_active_services(db, patient_id, service_id, admission_id, appointment_id)}
+        return {"duplicate_service_ids": [], "recent": []}
+    return {
+        "duplicate_service_ids": lq.check_diag_duplicate_active_services(db, patient_id, service_id, admission_id, appointment_id),
+        "recent": rows_to_dicts(lq.find_recent_diag_services(db, patient_id, service_id, recent_days, admission_id, appointment_id)),
+    }
 
 
 @router.get("/diag/orders/{order_id}")
@@ -207,10 +213,10 @@ def diag_running_charges(admission_id: int, db: Session = Depends(get_db), user:
 
 @router.get("/diag/invoices")
 def diag_invoices_list(patient_id: Optional[str] = None, sale_type: Optional[str] = None,
-                       db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
+                       db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
     # Internal Sale (default) lists UHID-linked invoices only; walk-in invoices belong to External Sale.
     external = (sale_type or "").upper() == "EXTERNAL"
-    return {"invoices": rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module="LAB", external_sale=external))}
+    return {"invoices": filter_rows(rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module="LAB", external_sale=external)), scope)}
 
 
 @router.get("/diag/invoices/{invoice_id}")
@@ -249,8 +255,8 @@ def diag_invoice_record_payment(invoice_id: int, request: Request, payload: dict
 
 @router.get("/diag/lab/worklist")
 def diag_lab_worklist(stage: Optional[str] = None, q: Optional[str] = None, priority: Optional[str] = None,
-                       db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"items": lq.list_diag_lab_worklist(db, stage=stage, search=q, priority=priority)}
+                       db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"items": filter_rows(lq.list_diag_lab_worklist(db, stage=stage, search=q, priority=priority), scope)}
 
 
 @router.get("/diag/lab/items/{item_id}")
@@ -335,8 +341,8 @@ def diag_external_referral_update(referral_id: int, request: Request, payload: d
 
 
 @router.get("/diag/lab/external-referrals")
-def diag_external_referrals_list(status: Optional[str] = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"referrals": rows_to_dicts(lq.list_diag_external_referrals(db, status))}
+def diag_external_referrals_list(status: Optional[str] = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"referrals": filter_rows(rows_to_dicts(lq.list_diag_external_referrals(db, status)), scope)}
 
 
 @router.get("/lab/vendors-list")
@@ -349,9 +355,9 @@ def diag_lab_vendors_for_referral(db: Session = Depends(get_db), user: dict = De
 @router.get("/diag/imaging/worklist")
 def diag_imaging_worklist(stage: Optional[str] = None, modality: Optional[str] = None, room: Optional[str] = None,
                            q: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                           db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"items": lq.list_diag_imaging_worklist(db, stage=stage, modality=modality, room=room, search=q,
-                                                    date_from=date_from, date_to=date_to)}
+                           db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"items": filter_rows(lq.list_diag_imaging_worklist(db, stage=stage, modality=modality, room=room, search=q,
+                                                    date_from=date_from, date_to=date_to), scope)}
 
 
 @router.get("/diag/imaging/items/{item_id}")
@@ -410,6 +416,29 @@ def diag_report_save(report_id: int, request: Request, payload: dict = Body(...)
     return {"status": "ok"}
 
 
+@router.post("/diag/reports/{report_id}/ai-summary")
+def diag_report_ai_summary(report_id: int, request: Request, db: Session = Depends(get_db),
+                            user: dict = Depends(require_permissions("diag.report"))):
+    """Draft summary text for the pathologist to review; the report itself is not changed."""
+    report = lq.get_diag_report_detail(db, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report.get("report_type") != "LAB":
+        raise HTTPException(status_code=400, detail="AI summary is available for laboratory reports only.")
+    item = report.get("order_item") or {}
+    patient = item.get("patient") or {}
+    try:
+        drafted = draft_lab_interpretation(item.get("service_name"), item.get("results") or [],
+                                           patient.get("age") or item.get("walkin_age"),
+                                           patient.get("gender") or item.get("walkin_gender"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    log_audit_event(db, user, client_ip(request), "ai_summary", "diag_reports", str(report_id), {"source": drafted["source"]})
+    return drafted
+
+
 @router.post("/diag/reports/{report_id}/submit")
 def diag_report_submit(report_id: int, request: Request, db: Session = Depends(get_db),
                         user: dict = Depends(require_permissions("diag.report"))):
@@ -454,9 +483,9 @@ def diag_report_amend(report_id: int, request: Request, payload: dict = Body(...
 @router.get("/diag/reports")
 def diag_reports_worklist(status: Optional[str] = None, report_type: Optional[str] = None, q: Optional[str] = None,
                            date_from: Optional[str] = None, date_to: Optional[str] = None,
-                           db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"reports": lq.list_diag_reports_worklist(db, status=status, report_type=report_type, search=q,
-                                                       date_from=date_from, date_to=date_to)}
+                           db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"reports": filter_rows(lq.list_diag_reports_worklist(db, status=status, report_type=report_type, search=q,
+                                                       date_from=date_from, date_to=date_to), scope)}
 
 
 @router.get("/diag/reports/{report_id}")
@@ -468,8 +497,8 @@ def diag_report_detail(report_id: int, db: Session = Depends(get_db), user: dict
 
 
 @router.get("/diag/critical-alerts")
-def diag_critical_alerts_list(open_only: bool = True, db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read"))):
-    return {"alerts": lq.list_diag_critical_alerts(db, open_only)}
+def diag_critical_alerts_list(open_only: bool = True, db: Session = Depends(get_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"alerts": filter_rows(lq.list_diag_critical_alerts(db, open_only), scope)}
 
 
 @router.post("/diag/critical-alerts/{alert_id}/contact")

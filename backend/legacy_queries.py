@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from database import IST_TIMEZONE, DEFAULT_HOSPITAL_CODE
 from legacy_sql import get_connection
 from security import (
+    linked_doctor_name,
     resolve_hospital_id, get_hospital_by_code, create_hospital,
     generate_employee_id, add_employee, check_if_first_user,
     normalize_hospital_code,
@@ -1972,7 +1973,7 @@ def get_all_employees(db, hospital_id=None):
         cursor.execute(
             """
             SELECT id, username, role, job_role, full_name, email, phone, department,
-                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access
+                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
             FROM users
             WHERE hospital_id = ?
             ORDER BY date_joined DESC
@@ -1992,7 +1993,7 @@ def get_employee(db, employee_id=None, username=None, hospital_id=None):
             cursor.execute(
                 """
                 SELECT id, username, role, job_role, full_name, email, phone, department,
-                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access
+                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
                 FROM users WHERE employee_id = ? AND hospital_id = ?
             """,
                 (employee_id, scoped_hospital_id),
@@ -2001,7 +2002,7 @@ def get_employee(db, employee_id=None, username=None, hospital_id=None):
             cursor.execute(
                 """
                 SELECT id, username, role, job_role, full_name, email, phone, department,
-                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access
+                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
                 FROM users WHERE username = ? AND hospital_id = ?
             """,
                 (username, scoped_hospital_id),
@@ -2039,8 +2040,16 @@ def update_employee(db, employee_id, data, hospital_id=None):
                 scoped_hospital_id,
             ),
         )
+        updated = cursor.rowcount > 0
+        # Only touch the doctor link when the caller sent job_role/doctor_name, so partial
+        # updates (e.g. promote) keep the existing link.
+        if updated and ("job_role" in data or "doctor_name" in data):
+            cursor.execute(
+                "UPDATE users SET doctor_name=? WHERE employee_id=? AND hospital_id=?",
+                (linked_doctor_name(data.get("job_role"), data.get("doctor_name")), employee_id, scoped_hospital_id),
+            )
         conn.commit()
-        return cursor.rowcount > 0
+        return updated
 
 
 
@@ -2120,7 +2129,7 @@ def search_employees(db, query, hospital_id=None):
         cursor.execute(
             """
             SELECT id, username, role, job_role, full_name, email, phone, department,
-                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access
+                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
             FROM users WHERE
             hospital_id = ? AND (full_name LIKE ? OR email LIKE ? OR phone LIKE ? OR employee_id LIKE ?)
             ORDER BY date_joined DESC
@@ -2570,7 +2579,7 @@ def list_appointments(db, appointment_date=None, status=None, visit_type=None, d
                 clauses.append(f"visit_type IN ({placeholders})")
                 params.extend(visit_types)
         if doctor_name:
-            clauses.append("doctor_name = ?")
+            clauses.append("LOWER(TRIM(doctor_name)) = LOWER(TRIM(?))")
             params.append(doctor_name)
         if patient_id:
             clauses.append("a.patient_id = ?")
@@ -2609,7 +2618,7 @@ def list_doctors_history(db, hospital_id, doctor_name=None, from_date=None, to_d
         clauses = ["p.hospital_id = ?"]
         params = [scoped_hospital_id]
         if doctor_name and doctor_name != "All":
-            clauses.append("a.doctor_name = ?")
+            clauses.append("LOWER(TRIM(a.doctor_name)) = LOWER(TRIM(?))")
             params.append(doctor_name)
         if from_date:
             clauses.append("DATE(a.appointment_date) >= DATE(?)")
@@ -10744,6 +10753,37 @@ def check_diag_duplicate_active_services(db, patient_id, service_ids, admission_
             tuple(params),
         )
         return [row["service_id"] for row in cursor.fetchall()]
+
+
+
+def find_recent_diag_services(db, patient_id, service_ids, days=7, admission_id=None, appointment_id=None):
+    """Latest confirmed order of each service for this patient in the last `days` days, from
+    other visits. Advisory only ("CBC done 2 days ago"); same-visit repeats are blocked by
+    check_diag_duplicate_active_services instead."""
+    if not service_ids:
+        return []
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        clauses = ["o.patient_id = ?", "oi.service_id = ANY(?)", "oi.cancelled_at IS NULL", "o.status = 'confirmed'",
+                   "COALESCE(o.confirmed_at, o.created_at) >= CURRENT_TIMESTAMP - (? * INTERVAL '1 day')"]
+        params = [patient_id, service_ids, int(days)]
+        if admission_id:
+            clauses.append("(o.admission_id IS NULL OR o.admission_id <> ?)")
+            params.append(admission_id)
+        elif appointment_id:
+            clauses.append("(o.appointment_id IS NULL OR o.appointment_id <> ?)")
+            params.append(appointment_id)
+        cursor.execute(
+            f"""
+            SELECT DISTINCT ON (oi.service_id) oi.service_id, oi.service_name, oi.progress_status, o.order_no,
+                   COALESCE(o.confirmed_at, o.created_at) AS ordered_at
+            FROM diag_order_items oi JOIN diag_orders o ON o.id = oi.order_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY oi.service_id, COALESCE(o.confirmed_at, o.created_at) DESC
+            """,
+            tuple(params),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
 
 

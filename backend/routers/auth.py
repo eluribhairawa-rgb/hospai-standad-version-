@@ -171,6 +171,7 @@ def admin_users_update(employee_id: str, payload: dict = Body(...), db: Session 
         "address": payload.get("address", target.get("address")),
         "emergency_contact": payload.get("emergency_contact", target.get("emergency_contact")),
         "job_role": payload.get("job_role", target.get("job_role")),
+        "doctor_name": payload.get("doctor_name", target.get("doctor_name")),
         "access_role": "owner" if user_type == "super_admin" else payload.get("access_role", target.get("access_role")),
         "user_type": user_type,
         "module_access": module_access,

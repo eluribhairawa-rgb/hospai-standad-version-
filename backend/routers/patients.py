@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from deps import require_permissions, current_hospital_id, get_current_user
+from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, row_to_dict, validate_required_fields, log_audit_event, client_ip, normalize_payment_mode
 import legacy_queries as lq
 import patient_journey
@@ -107,11 +108,12 @@ def _get_patient_or_404(db, patient_id, hospital_id):
 
 @router.get("/patients")
 def patients_list(q: str | None = None, visit_status: str | None = None, db: Session = Depends(get_db),
-                   user: dict = Depends(require_permissions("patients.read")), hospital_id: int = Depends(current_hospital_id)):
+                   user: dict = Depends(require_permissions("patients.read")), hospital_id: int = Depends(current_hospital_id),
+                   scope: set | None = Depends(patient_scope)):
     query = (q or "").strip()
     vs = (visit_status or "").strip().lower()
     patients = lq.search_patients(db, query, hospital_id=hospital_id, visit_status=vs) if query else lq.get_all_patients(db, hospital_id=hospital_id, visit_status=vs)
-    return {"patients": rows_to_dicts(patients)}
+    return {"patients": rows_to_dicts(filter_rows(patients, scope))}
 
 
 @router.get("/insurance-providers")
@@ -605,9 +607,10 @@ def export_word(payload: dict = Body(...), user: dict = Depends(require_permissi
 
 @router.get("/export/patients/csv")
 def export_patients_csv(q: str | None = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("patients.read")),
-                         hospital_id: int = Depends(current_hospital_id)):
+                         hospital_id: int = Depends(current_hospital_id), scope: set | None = Depends(patient_scope)):
     query = (q or "").strip()
     patients = lq.search_patients(db, query, hospital_id=hospital_id) if query else lq.get_all_patients(db, hospital_id=hospital_id)
+    patients = filter_rows(patients, scope)
 
     csv_stream = io.StringIO()
     writer = csv.writer(csv_stream)

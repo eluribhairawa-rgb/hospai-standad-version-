@@ -60,6 +60,9 @@ export interface User {
   hospital_id?: number;
   hospital_code?: string;
   session_expires_at?: string;
+  job_role?: string;
+  /** Doctor this login is linked to (job title Doctor); OP queue is limited to their patients. */
+  doctor_name?: string | null;
 }
 
 export interface Stats {
@@ -528,6 +531,7 @@ export interface SignupForm {
   user_type: UserType;
   module_access: ModuleId[];
   job_role: string;
+  doctor_name: string;
   address: string;
   emergency_contact: string;
 }
@@ -582,6 +586,7 @@ export interface Employee {
   user_type?: UserType;
   module_access?: ModuleId[];
   date_joined?: string;
+  doctor_name?: string | null;
 }
 
 export interface Alert {

@@ -4,6 +4,7 @@ import re
 
 from database import get_db
 from deps import require_permissions
+from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip
 import legacy_queries as lq
 from qwen_ocr import extract_supplier_invoice_fields
@@ -220,8 +221,8 @@ def pharmacy_goods_receipts_verify(grn_id: int, request: Request, db: Session = 
 
 
 @router.get("/prescriptions")
-def pharmacy_prescriptions_list(status: str | None = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("pharmacy.read"))):
-    return {"prescriptions": lq.list_pharmacy_incoming_prescriptions(db, status=status)}
+def pharmacy_prescriptions_list(status: str | None = None, db: Session = Depends(get_db), user: dict = Depends(require_permissions("pharmacy.read")), scope: set | None = Depends(patient_scope)):
+    return {"prescriptions": filter_rows(lq.list_pharmacy_incoming_prescriptions(db, status=status), scope)}
 
 
 @router.post("/prescriptions/{prescription_id}/dismiss")
@@ -302,9 +303,8 @@ def pharmacy_invoices_list(
     search: str | None = None,
     limit: int = 100,
     db: Session = Depends(get_db),
-    user: dict = Depends(require_permissions("pharmacy.read"))
-):
-    return {"invoices": rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module="PHARMACY", payment_status=payment_status, search=search, limit=limit))}
+    user: dict = Depends(require_permissions("pharmacy.read")), scope: set | None = Depends(patient_scope)):
+    return {"invoices": filter_rows(rows_to_dicts(lq.list_invoices(db, patient_id=patient_id, module="PHARMACY", payment_status=payment_status, search=search, limit=limit)), scope)}
 
 
 @router.get("/invoices/{invoice_id}")
@@ -390,10 +390,10 @@ def pharmacy_sales_list(medicine_name: str | None = None, patient_id: str | None
                          admission_id: int | None = None, billing_type: str | None = None,
                          from_date: str | None = None, to_date: str | None = None, q: str | None = None,
                          db: Session = Depends(get_db),
-                         user: dict = Depends(require_permissions("pharmacy.read"))):
-    return {"sales": rows_to_dicts(lq.list_pharmacy_sales(db, medicine_name=medicine_name, patient_id=patient_id,
+                         user: dict = Depends(require_permissions("pharmacy.read")), scope: set | None = Depends(patient_scope)):
+    return {"sales": filter_rows(rows_to_dicts(lq.list_pharmacy_sales(db, medicine_name=medicine_name, patient_id=patient_id,
                                                            invoice_id=invoice_id, admission_id=admission_id, billing_type=billing_type,
-                                                           from_date=from_date, to_date=to_date, q=q))}
+                                                           from_date=from_date, to_date=to_date, q=q)), scope)}
 
 
 @router.get("/summary")
@@ -470,8 +470,8 @@ def pharmacy_supplier_ledger_get(supplier_id: int, db: Session = Depends(get_db)
 @router.get("/ward-indents")
 def pharmacy_ward_indents_list(status: str | None = None, ward: str | None = None, patient_id: str | None = None,
                                 admission_id: int | None = None, db: Session = Depends(get_db),
-                                user: dict = Depends(require_permissions("pharmacy.read"))):
-    return {"indents": lq.list_ward_indents(db, status=status, ward=ward, patient_id=patient_id, admission_id=admission_id)}
+                                user: dict = Depends(require_permissions("pharmacy.read")), scope: set | None = Depends(patient_scope)):
+    return {"indents": filter_rows(lq.list_ward_indents(db, status=status, ward=ward, patient_id=patient_id, admission_id=admission_id), scope)}
 
 
 @router.post("/ward-indents")

@@ -64,6 +64,7 @@ import DoctorPrescriptionPage from "./pages/DoctorPrescriptionPage";
 import HospitalBrand from "./components/HospitalBrand";
 import { API_BASE, EMPTY_PATIENT_FORM, EMPTY_STATS, LEGACY_MODULE_EXPANSIONS, NAV_ITEMS, PAGE_MODULE_MAP } from "./lib/constants";
 import { apiFetch, getHospitalCode, reportError, setHospitalCode } from "./lib/api";
+import { getScopedDoctor } from "./lib/access";
 import { resolvePermissions } from "./lib/format";
 import type { DashboardAnalytics, HospitalSummary, Notice, Patient, Stats, User } from "./types";
 import { downloadExportBlob } from "./lib/exportShare";
@@ -456,6 +457,8 @@ function App() {
   const isAdminRoutePath = typeof window !== "undefined" && window.location.pathname === "/admin";
   const isPlatformAdminRoute = typeof window !== "undefined" && window.location.pathname === "/platform-admin";
   const [user, setUser] = useState<User | null>(null);
+  // Doctor-linked logins only see their own patients (enforced by the API; the UI just locks the doctor pickers).
+  const scopedDoctor = getScopedDoctor(user);
   const sessionExpiryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearSessionExpiry = () => {
@@ -1606,6 +1609,7 @@ function App() {
             setNotice={setNotice}
             onOpenPatient={handleOpenPatientProfile}
             onNavigate={navigateToPage}
+            scopedDoctor={scopedDoctor}
           />
         )}
         {page === "op-desk" && hasPermission("patients.read") && <OpPage key={pageKeys[page] || 0} setNotice={setNotice} canEdit={hasPermission("patients.write")} />}
@@ -1615,6 +1619,7 @@ function App() {
             setNotice={setNotice}
             onOpenPatient={handleOpenPatientProfile}
             onNavigate={navigateToPage}
+            scopedDoctor={scopedDoctor}
           />
         )}
         {page === "ip-admission" && hasPermission("patients.write") && <InpatientAdmissionPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />}
@@ -1689,6 +1694,7 @@ function App() {
           <DoctorsHistoryPage
             key={pageKeys[page] || 0}
             setNotice={setNotice}
+            scopedDoctor={scopedDoctor}
             onOpenPatient={(patientId) => {
               const patient = patients.find((item) => item.patient_id === patientId) || null;
               handleSelectPatient(patient);

@@ -8,6 +8,8 @@ type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
   onOpenPatient?: (patientId: string) => void;
   onNavigate?: (pageId: string) => void;
+  /** Set when the logged-in employee is linked to a doctor; the API already limits the queue to them. */
+  scopedDoctor?: string | null;
 };
 
 export type QueueStatus = "Waiting" | "In Consultation" | "Completed";
@@ -34,7 +36,7 @@ export type QueueItem = {
 };
 
 
-export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate }: Props) {
+export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scopedDoctor }: Props) {
   // Queue list state -- starts empty and is populated from the real
   // /api/appointments fetch below; never seeded with fabricated patients.
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -531,13 +533,29 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate }: Pr
           <button
             type="button"
             className="opq-btn-add-queue"
-            onClick={() => setAddModalOpen(true)}
+            onClick={() => {
+              if (scopedDoctor) {
+                const own = realDoctors.find((d) => d.doctor_name.trim().toLowerCase() === scopedDoctor.trim().toLowerCase());
+                setNewDoctor(own?.doctor_name || scopedDoctor);
+                if (own) {
+                  setNewDepartment(own.department);
+                  setNewConsultationFee(String(own.consultation_fee ?? 0));
+                }
+              }
+              setAddModalOpen(true);
+            }}
           >
             <span className="opq-add-icon">+</span>
             <span>Add to Queue</span>
           </button>
         </div>
       </div>
+
+      {scopedDoctor && (
+        <div className="opq-scoped-doctor" role="status">
+          Showing only patients assigned to <strong>{scopedDoctor}</strong>
+        </div>
+      )}
 
       {/* Filter Bar Card */}
       <div className="opq-filter-card">
@@ -565,7 +583,9 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate }: Pr
           <label className="opq-filter-label">Doctor</label>
           <div className="opq-select-wrap">
             <select
-              value={selectedDoctor}
+              value={scopedDoctor || selectedDoctor}
+              disabled={!!scopedDoctor}
+              title={scopedDoctor ? "Your login only shows your own patients." : undefined}
               onChange={(e) => {
                 const newDoc = e.target.value;
                 setSelectedDoctor(newDoc);
@@ -581,7 +601,8 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate }: Pr
               <option value="All Doctors">
                 {selectedDepartment !== "All Departments" ? `All Doctors (${selectedDepartment})` : "All Doctors"}
               </option>
-              {availableDoctorsForFilter.map((d) => (
+              {scopedDoctor && <option value={scopedDoctor}>{scopedDoctor}</option>}
+              {!scopedDoctor && availableDoctorsForFilter.map((d) => (
                 <option key={d.name} value={d.name}>{d.name}</option>
               ))}
             </select>
@@ -966,6 +987,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate }: Pr
               <label>Doctor</label>
               <select
                 value={newDoctor}
+                disabled={!!scopedDoctor}
                 onChange={(e) => {
                   setNewDoctor(e.target.value);
                   const docObj = realDoctors.find((d) => d.doctor_name === e.target.value);

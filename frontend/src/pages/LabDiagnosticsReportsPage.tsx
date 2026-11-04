@@ -38,6 +38,7 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
   const [selected, setSelected] = useState<ReportDetail | null>(null);
   const [contentDraft, setContentDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [aiDrafting, setAiDrafting] = useState(false);
 
   const [alerts, setAlerts] = useState<CriticalAlert[]>([]);
   const [alertModal, setAlertModal] = useState<CriticalAlert | null>(null);
@@ -124,6 +125,24 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
 
   const updateDraftField = (field: string, value: string) => {
     setContentDraft((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Drafts the summary from the entered results; added below any existing text, never saved until the user saves.
+  const draftSummaryWithAi = async () => {
+    if (!selected) return;
+    setAiDrafting(true);
+    try {
+      const res = await apiFetch<{ summary: string; source: "ai" | "rule" }>(`/api/diag/reports/${selected.id}/ai-summary`, { method: "POST" });
+      setContentDraft((prev) => ({ ...prev, summary: prev.summary?.trim() ? `${prev.summary.trim()}\n${res.summary}` : res.summary }));
+      setNotice({
+        type: "info",
+        message: res.source === "ai" ? "AI draft added to the summary. Review and edit it before submitting." : "All values are within range -- summary filled.",
+      });
+    } catch (err: any) {
+      reportError(setNotice, err, "Could not draft the summary.");
+    } finally {
+      setAiDrafting(false);
+    }
   };
 
   const saveDraft = async () => {
@@ -397,7 +416,7 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
                     <thead><tr><th>Parameter</th><th>Result</th><th>Unit</th><th>Reference range</th><th>Flag</th></tr></thead>
                     <tbody>
                       {(selected.order_item?.results || []).map((r: any) => (
-                        <tr key={r.id}>
+                        <tr key={r.id} className={r.flag && r.flag !== "normal" ? `diag-row-${r.flag}` : undefined}>
                           <td>{r.parameter_name}</td>
                           <td>{r.value_numeric ?? r.value_text ?? "-"}</td>
                           <td>{r.unit || "-"}</td>
@@ -407,13 +426,21 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
                       ))}
                     </tbody>
                   </table>
-                  <div className="diag-section-title">Summary / interpretation</div>
+                  <div className="diag-section-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <span>Summary / interpretation</span>
+                    {isEditable && (selected.order_item?.results || []).length > 0 && (
+                      <Button size="sm" variant="secondary" disabled={aiDrafting} onClick={() => void draftSummaryWithAi()}>
+                        {aiDrafting ? "Drafting…" : "✨ AI draft"}
+                      </Button>
+                    )}
+                  </div>
                   <Textarea
                     rows={3}
                     value={contentDraft.summary || ""}
                     disabled={!isEditable}
                     onChange={(e) => updateDraftField("summary", e.target.value)}
                   />
+                  {isEditable && <p className="diag-ai-hint">The AI draft is only a suggestion. Check it against the results before submitting.</p>}
                 </>
               )}
 

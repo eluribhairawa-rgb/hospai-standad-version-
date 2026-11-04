@@ -2,7 +2,7 @@ import os
 import re
 import traceback
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -95,12 +95,17 @@ from routers.reports_exports import router as reports_exports_router
 from routers.diagnostics import router as diagnostics_router
 from routers.patient_reach import router as patient_reach_router
 
+from access_scope import patient_access_guard
+
+for r in (auth_router, platform_router):
+    app.include_router(r)
+# Data routers: a doctor-linked login can never reach another doctor's patient, even via direct API calls.
 for r in (
-    auth_router, platform_router, clinical_router, patients_router, employees_bed_router,
+    clinical_router, patients_router, employees_bed_router,
     billing_router, pharmacy_router, emar_router, lab_ot_accounts_hr_router, reports_exports_router,
     diagnostics_router, patient_reach_router,
 ):
-    app.include_router(r)
+    app.include_router(r, dependencies=[Depends(patient_access_guard)])
 
 
 @app.options("/api/{full_path:path}")
