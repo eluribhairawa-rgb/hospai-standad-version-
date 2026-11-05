@@ -1496,6 +1496,10 @@ class PatientAssignments(Base):
     department: Mapped[Optional[str]] = mapped_column(Text)
     priority: Mapped[Optional[str]] = mapped_column(Text)
     admission_date: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    # Added by migrations_nurse_assignments.sql
+    admission_id: Mapped[Optional[int]] = mapped_column(Integer)
+    ended_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    ended_by: Mapped[Optional[str]] = mapped_column(Text)
     shift: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[Optional[str]] = mapped_column(Text)
     created_by: Mapped[Optional[str]] = mapped_column(Text)

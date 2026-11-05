@@ -66,7 +66,7 @@ import DoctorPrescriptionPage from "./pages/DoctorPrescriptionPage";
 import HospitalBrand from "./components/HospitalBrand";
 import { API_BASE, EMPTY_PATIENT_FORM, EMPTY_STATS, LEGACY_MODULE_EXPANSIONS, NAV_ITEMS, PAGE_MODULE_MAP } from "./lib/constants";
 import { apiFetch, getHospitalCode, reportError, setHospitalCode } from "./lib/api";
-import { getScopedDoctor } from "./lib/access";
+import { canViewHospitalOverview, getScopedDoctor } from "./lib/access";
 import { resolvePermissions } from "./lib/format";
 import type { DashboardAnalytics, HospitalSummary, Notice, Patient, Stats, User } from "./types";
 import { downloadExportBlob } from "./lib/exportShare";
@@ -599,6 +599,12 @@ function App() {
     if (itemId === "employees") return hasPermission("admin.users.read");
     return hasModuleAccess(moduleId) && hasPermission(permission);
   };
+  // Mirrors the page-access check applied on navigation, so role dashboards only offer reachable pages.
+  const canOpenPage = (targetPage: string) => {
+    const nav = NAV_ITEMS.find((item) => item.id === targetPage);
+    if (!hasModuleAccess(nav?.module || PAGE_MODULE_MAP[targetPage])) return false;
+    return nav ? canAccessNavItem(nav.id, nav.permission, nav.module) : true;
+  };
   const sidebarNavItems = useMemo(
     () => NAV_ITEMS.filter((item) => item.id !== "settings" && !item.hidden && canAccessNavItem(item.id, item.permission, item.module)),
     [permissions, user?.module_access, isAdmin]
@@ -787,7 +793,12 @@ function App() {
     }
   };
 
-  const loadDashboardAnalytics = async (date?: string) => {
+  const loadDashboardAnalytics = async (date?: string, forUser: User | null = userRef.current) => {
+    // Hospital-wide analytics are only served to admins / reporting staff (enforced by the API).
+    if (!canViewHospitalOverview(forUser)) {
+      setDashboardAnalytics(null);
+      return true;
+    }
     setDashboardAnalyticsLoading(true);
     try {
       const targetDate = date || dashboardDate;
@@ -804,7 +815,11 @@ function App() {
     }
   };
 
-  const loadHospitalSummary = async (date?: string) => {
+  const loadHospitalSummary = async (date?: string, forUser: User | null = userRef.current) => {
+    if (!canViewHospitalOverview(forUser)) {
+      setHospitalSummary(null);
+      return true;
+    }
     try {
       const targetDate = date || dashboardDate;
       const url = targetDate
@@ -926,8 +941,8 @@ function App() {
     if (resolvePermissions(data.user).includes("patients.read")) {
       void loadStats();
       void loadPatients();
-      void loadDashboardAnalytics();
-      void loadHospitalSummary();
+      void loadDashboardAnalytics(undefined, data.user);
+      void loadHospitalSummary(undefined, data.user);
     }
   };
 
@@ -1572,6 +1587,7 @@ function App() {
             setNotice={setNotice}
             dashboardDate={dashboardDate}
             setDashboardDate={setDashboardDate}
+            canOpenPage={canOpenPage}
           />
         )}
 

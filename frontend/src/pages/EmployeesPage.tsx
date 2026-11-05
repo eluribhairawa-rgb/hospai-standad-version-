@@ -6,6 +6,7 @@ import { Badge, Button, Checkbox, ConfirmDialog, Input, Label, Select, Table, Ta
 import { ALL_ASSIGNABLE_MODULES, DEFAULT_MODULE_ACCESS, EMPTY_SIGNUP_FORM, MODULE_OPTIONS, NAV_ITEMS, USER_TYPE_LABELS, USER_TYPE_OPTIONS } from "../lib/constants";
 import { apiFetch, reportError } from "../lib/api";
 import { formatDate } from "../lib/format";
+import { JOB_TITLE_GROUPS, JOB_TITLES } from "../lib/jobRoles";
 import type { Employee, ModuleId, Notice, SignupForm } from "../types";
 
 type Props = {
@@ -203,6 +204,21 @@ function PhoneInput({ value, onChange, required }: { value: string; onChange: (v
 }
 
 type DoctorOption = { doctor_name: string; department?: string };
+
+/** Grouped job titles; a legacy free-text title already saved on an employee stays selectable. */
+function JobTitleOptions({ current }: { current?: string }) {
+  const legacy = (current || "").trim();
+  return (
+    <>
+      {legacy && !JOB_TITLES.includes(legacy) && <option value={legacy}>{legacy}</option>}
+      {JOB_TITLE_GROUPS.map((group) => (
+        <optgroup key={group.label} label={group.label}>
+          {group.titles.map((title) => <option key={title} value={title}>{title}</option>)}
+        </optgroup>
+      ))}
+    </>
+  );
+}
 
 const isDoctorRole = (jobRole?: string) => (jobRole || "").trim().toLowerCase() === "doctor";
 
@@ -455,12 +471,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                           Job Title
                           <Select value={editForm.job_role || ""} onChange={(e) => setEditForm((p) => ({ ...p, job_role: e.target.value }))}>
                             <option value="">Select a role</option>
-                            <option value="Doctor">Doctor</option>
-                            <option value="Nurse">Nurse</option>
-                            <option value="Admin">Admin</option>
-                            <option value="Receptionist">Receptionist</option>
-                            <option value="Technician">Technician</option>
-                            <option value="Other">Other</option>
+                            <JobTitleOptions current={editForm.job_role} />
                           </Select>
                         </Label>
                         {isDoctorRole(editForm.job_role) && (
@@ -548,12 +559,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                 Job Title
                 <Select value={form.job_role} onChange={(e) => setForm((p) => ({ ...p, job_role: e.target.value }))} required>
                   <option value="">Select a role</option>
-                  <option value="Doctor">Doctor</option>
-                  <option value="Nurse">Nurse</option>
-                  <option value="Admin">Admin</option>
-                  <option value="Receptionist">Receptionist</option>
-                  <option value="Technician">Technician</option>
-                  <option value="Other">Other</option>
+                  <JobTitleOptions current={form.job_role} />
                 </Select>
               </Label>
               {isDoctorRole(form.job_role) && (

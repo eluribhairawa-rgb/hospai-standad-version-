@@ -57,6 +57,36 @@ class require_permissions:
         return user
 
 
+HOSPITAL_OVERVIEW_USER_TYPES = ("admin", "super_admin")
+
+
+def can_view_hospital_overview(user: Optional[dict]) -> bool:
+    """Hospital-wide executive figures (all revenue, collections, beds, every patient's activity).
+
+    Explicitly limited to Admin and Super Admin. Module grants do not unlock it: the
+    "reports" module covers the billing Reports & Day Close workflow only, and the
+    Analysis page (module "analytics") is not assignable to normal employees.
+    """
+    return bool(user) and user.get("user_type") in HOSPITAL_OVERVIEW_USER_TYPES
+
+
+class require_hospital_overview:
+    """Dependency for executive-dashboard data: the given permissions plus hospital-overview access."""
+
+    def __init__(self, *required_permissions: str):
+        self.base = require_permissions(*required_permissions)
+
+    def __call__(self, user: dict = Depends(get_current_user)) -> dict:
+        user = self.base(user)
+        if not can_view_hospital_overview(user):
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "Forbidden", "message": "Hospital-wide dashboard data is limited to "
+                                                          "Admin and Super Admin logins."},
+            )
+        return user
+
+
 def validate_hospital_code(value: str) -> str:
     import re
     code = (value or "").strip().lower()

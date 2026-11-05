@@ -11,3 +11,12 @@ export function getScopedDoctor(user: User | null | undefined): string | null {
   const name = (user.doctor_name || "").trim();
   return name || null;
 }
+
+/**
+ * Hospital-wide executive figures (all revenue, collections, beds, every patient's activity).
+ * Mirrors deps.can_view_hospital_overview on the backend, which enforces it:
+ * Admin and Super Admin only; no module grant unlocks it.
+ */
+export function canViewHospitalOverview(user: User | null | undefined): boolean {
+  return !!user && (user.user_type === "admin" || user.user_type === "super_admin");
+}

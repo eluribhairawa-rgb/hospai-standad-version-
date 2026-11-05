@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from deps import require_permissions, get_current_user, current_hospital_id
+from deps import require_permissions, require_hospital_overview, get_current_user, current_hospital_id
 import legacy_queries as lq
 from export_utils import generate_pdf, generate_word, generate_standard_report_pdf
 from storage import ObjectStorage
@@ -154,7 +154,7 @@ def _dashboard_pdf_text(payload):
 
 
 @router.get("/dashboard/export/pdf")
-def dashboard_export_pdf(db: Session = Depends(get_db), user: dict = Depends(get_current_user), hospital_id: int = Depends(current_hospital_id)):
+def dashboard_export_pdf(db: Session = Depends(get_db), user: dict = Depends(require_hospital_overview()), hospital_id: int = Depends(current_hospital_id)):
     try:
         payload = _build_dashboard_export_payload(db, hospital_id)
         pdf_bytes = generate_pdf("Executive Dashboard", "executive_dashboard", _dashboard_pdf_text(payload), payload["generated_at"])
@@ -165,12 +165,12 @@ def dashboard_export_pdf(db: Session = Depends(get_db), user: dict = Depends(get
 
 
 @router.get("/dashboard/print/pdf")
-def dashboard_print_pdf(db: Session = Depends(get_db), user: dict = Depends(get_current_user), hospital_id: int = Depends(current_hospital_id)):
+def dashboard_print_pdf(db: Session = Depends(get_db), user: dict = Depends(require_hospital_overview()), hospital_id: int = Depends(current_hospital_id)):
     return dashboard_export_pdf(db=db, user=user, hospital_id=hospital_id)
 
 
 @router.get("/dashboard/export/csv")
-def dashboard_export_csv(db: Session = Depends(get_db), user: dict = Depends(get_current_user), hospital_id: int = Depends(current_hospital_id)):
+def dashboard_export_csv(db: Session = Depends(get_db), user: dict = Depends(require_hospital_overview()), hospital_id: int = Depends(current_hospital_id)):
     try:
         payload = _build_dashboard_export_payload(db, hospital_id)
         buffer = io.StringIO()
@@ -191,7 +191,7 @@ def dashboard_export_csv(db: Session = Depends(get_db), user: dict = Depends(get
 
 
 @router.get("/dashboard/export/excel")
-def dashboard_export_excel(db: Session = Depends(get_db), user: dict = Depends(get_current_user), hospital_id: int = Depends(current_hospital_id)):
+def dashboard_export_excel(db: Session = Depends(get_db), user: dict = Depends(require_hospital_overview()), hospital_id: int = Depends(current_hospital_id)):
     try:
         from openpyxl import Workbook
         payload = _build_dashboard_export_payload(db, hospital_id)

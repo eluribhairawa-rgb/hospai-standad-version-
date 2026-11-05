@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import StatCard from "../components/StatCard";
 import { Button, Input, Label, Select, Table, TableCell, TableHead, TableRow } from "../components/ui";
@@ -256,6 +256,10 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
   const [invoiceForm, setInvoiceForm] = useState<InvoiceForm>(DEFAULT_INVOICE_FORM);
   const [invoicePatientName, setInvoicePatientName] = useState("");
   const [paymentForm, setPaymentForm] = useState<PaymentForm>(DEFAULT_PAYMENT_FORM);
+  // Patient ID last filled in automatically from an invoice (not typed by the user). The
+  // "No patient found" warning is only for IDs the user entered, e.g. a walk-in invoice
+  // pre-selected on page load has no patient record and must not raise a warning toast.
+  const autoFilledPatientIdRef = useRef<string | null>(null);
   const [claimForm, setClaimForm] = useState<ClaimForm>(DEFAULT_CLAIM_FORM);
   const [filters, setFilters] = useState<BillingFilters>(DEFAULT_BILLING_FILTERS);
   const [savingInvoice, setSavingInvoice] = useState(false);
@@ -312,12 +316,17 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
     return dueInvoices.filter((invoice) => String(invoice.patient_id || "").trim().toLowerCase() === patientId);
   }, [dueInvoices, paymentForm.patient_id]);
 
+  const markAutoFilledPatient = (patientId?: string | null) => {
+    if (patientId) autoFilledPatientIdRef.current = String(patientId).trim();
+    return patientId;
+  };
+
   const applyInvoiceToPaymentForm = (invoice?: Invoice, options: { keepPatient?: boolean } = {}) => {
     if (!invoice) return;
     setPaymentForm((current) => ({
       ...current,
       invoice_id: String(invoice.id),
-      patient_id: options.keepPatient ? current.patient_id : invoice.patient_id || current.patient_id,
+      patient_id: options.keepPatient ? current.patient_id : markAutoFilledPatient(invoice.patient_id) || current.patient_id,
       patient_name: invoice.clinic_name || current.patient_name,
       payment_for: invoice.referral_source || invoice.module || current.payment_for,
       amount: Number(invoice.due_amount || 0) > 0 ? String(invoice.due_amount || 0) : current.amount,
@@ -401,7 +410,7 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
           ? {
               ...current,
               invoice_id: String(firstDueInvoice.id),
-              patient_id: current.patient_id || firstDueInvoice.patient_id || "",
+              patient_id: current.patient_id || markAutoFilledPatient(firstDueInvoice.patient_id) || "",
               patient_name: current.patient_name || firstDueInvoice.clinic_name || "",
               payment_for: current.payment_for || firstDueInvoice.referral_source || firstDueInvoice.module || "",
               amount: current.amount !== "0" ? current.amount : String(firstDueInvoice.due_amount || 0),
@@ -503,7 +512,9 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
       const patient = await lookupPatientByUhid(lookup);
       if (!patient) {
         setPaymentForm((current) => ({ ...current, patient_name: "", invoice_id: "" }));
-        setNotice({ type: "warning", message: "No patient found for that Patient ID / UHID." });
+        if (autoFilledPatientIdRef.current !== value.trim()) {
+          setNotice({ type: "warning", message: "No patient found for that Patient ID / UHID." });
+        }
         return;
       }
       const canonicalPatientId = patient.patient_id;

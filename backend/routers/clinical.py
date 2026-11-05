@@ -8,12 +8,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
-from deps import require_permissions, current_hospital_id
+from deps import require_permissions, require_hospital_overview, current_hospital_id
 from access_scope import patient_scope, ensure_patient_allowed
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip, normalize_payment_mode, normalize_department_name
 import legacy_queries as lq
 import legacy_sql
 import prescription_suggestions
+import role_dashboard
 import security
 from qwen_ocr import extract_prescription_fields
 
@@ -56,7 +57,7 @@ def stats(date: str | None = None, db: Session = Depends(get_db), user: dict = D
 
 @router.get("/dashboard/analytics")
 def dashboard_analytics(request: Request, days: int = 14, db: Session = Depends(get_db),
-                         user: dict = Depends(require_permissions("patients.read")),
+                         user: dict = Depends(require_hospital_overview("patients.read")),
                          hospital_id: int = Depends(current_hospital_id)):
     permissions = security.resolve_user_permissions(user)
     include_employee = "admin.use" in permissions
@@ -67,8 +68,19 @@ def dashboard_analytics(request: Request, days: int = 14, db: Session = Depends(
 @router.get("/dashboard/summary")
 @router.get("/hospital/summary")
 def dashboard_hospital_summary(date: str | None = None, db: Session = Depends(get_db),
-                                user: dict = Depends(require_permissions("patients.read"))):
+                                user: dict = Depends(require_hospital_overview("patients.read"))):
     return lq.get_hospital_dashboard_summary(db, selected_date=date)
+
+
+@router.get("/dashboard/my")
+def dashboard_my(date: str | None = None, db: Session = Depends(get_db),
+                 user: dict = Depends(require_permissions("patients.read")),
+                 hospital_id: int = Depends(current_hospital_id)):
+    """Personal dashboard for non-admin employees (persona and scope are decided server-side).
+
+    Admins / super admins get persona "admin" back and keep the executive dashboard.
+    """
+    return role_dashboard.build_role_dashboard(db, user, selected_date=date, hospital_id=hospital_id)
 
 
 # ------------------------------------------------------------ appointments --

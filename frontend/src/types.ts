@@ -268,6 +268,10 @@ export interface Patient {
   insurance_verified?: boolean;
   insurance_verified_by?: string | null;
   insurance_verified_at?: string | null;
+  /** Visit notes carried over when a dashboard visit record is shown as a patient. */
+  notes?: string | null;
+  /** Appointment created by the latest re-visit (set client-side after POST). */
+  appointment_id?: number | null;
 }
 
 export interface PatientVital {

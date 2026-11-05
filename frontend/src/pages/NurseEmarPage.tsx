@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import { filterInteger, filterDecimal } from "../lib/format";
 import type { Notice } from "../types";
+import NurseAssignmentsPanel from "../components/NurseAssignmentsPanel";
+import type { NurseAssignment } from "../components/NurseAssignmentsPanel";
 
 /** BP is entered as "120/80" -- digits and a single separating slash only. */
 const filterBP = (val: string): string => {
@@ -135,6 +137,19 @@ function formatTime(value?: string) {
 export default function NurseEmarPage({ setNotice }: Props) {
   const [inpatients, setInpatients] = useState<Inpatient[]>([]);
   const [search, setSearch] = useState("");
+  // admission_id -> nurse(s) assigned; used to label rows and for the "My patients" filter.
+  const [assignedNurses, setAssignedNurses] = useState<Record<number, { names: string[]; mine: boolean }>>({});
+  const [myPatientsOnly, setMyPatientsOnly] = useState(false);
+  const handleAssignments = useCallback((list: NurseAssignment[], me: string) => {
+    const map: Record<number, { names: string[]; mine: boolean }> = {};
+    for (const a of list) {
+      const entry = (map[a.admission_id] ||= { names: [], mine: false });
+      entry.names.push(`${a.nurse_name || a.assigned_nurse}${a.shift ? ` (${a.shift})` : ""}`);
+      if (a.assigned_nurse.toLowerCase() === (me || "").toLowerCase()) entry.mine = true;
+    }
+    setAssignedNurses(map);
+  }, []);
+  const hasMyPatients = Object.values(assignedNurses).some((v) => v.mine);
   const [selected, setSelected] = useState<Inpatient | null>(null);
   const [rows, setRows] = useState<EmarRow[]>([]);
   const [status, setStatus] = useState("pending");
@@ -276,15 +291,16 @@ export default function NurseEmarPage({ setNotice }: Props) {
 
   const filteredInpatients = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return inpatients;
-    return inpatients.filter((p) =>
+    const pool = myPatientsOnly ? inpatients.filter((p) => assignedNurses[p.admission_id]?.mine) : inpatients;
+    if (!q) return pool;
+    return pool.filter((p) =>
       p.patient_name.toLowerCase().includes(q) ||
       p.patient_id.toLowerCase().includes(q) ||
       (p.ip_number || "").toLowerCase().includes(q) ||
       (p.ward || "").toLowerCase().includes(q) ||
       (p.bed_no || "").toLowerCase().includes(q)
     );
-  }, [inpatients, search]);
+  }, [inpatients, search, myPatientsOnly, assignedNurses]);
 
   const submitDose = async (row: EmarRow, action: DoseAction, notes?: string) => {
     setBusyId(row.id);
@@ -340,16 +356,26 @@ export default function NurseEmarPage({ setNotice }: Props) {
 
   return (
     <div className="diag-page">
+      <NurseAssignmentsPanel setNotice={setNotice} onAssignmentsChange={handleAssignments} />
       <div className="diag-worklist-shell">
         <div className="diag-card">
           <div className="diag-card-header"><h3>Admitted patients</h3></div>
           <Input placeholder="Search patient, UHID, ward or bed" value={search} onChange={(e) => setSearch(e.target.value)} />
+          {hasMyPatients && (
+            <label style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "0.5rem", fontSize: "0.82rem" }}>
+              <input type="checkbox" checked={myPatientsOnly} onChange={(e) => setMyPatientsOnly(e.target.checked)} data-testid="my-patients-only" />
+              Show only my assigned patients
+            </label>
+          )}
           <div style={{ marginTop: "0.75rem" }}>
             {filteredInpatients.length === 0 && <p className="muted">No admitted patients found.</p>}
             {filteredInpatients.map((p) => (
               <div key={p.admission_id} className={`diag-worklist-row ${selected?.admission_id === p.admission_id ? "active" : ""}`} onClick={() => setSelected(p)}>
                 <div className="diag-worklist-row-top"><span>{p.patient_name}</span></div>
                 <div className="diag-worklist-row-meta"><span>{p.ward} / Bed {p.bed_no}</span><span>{p.ip_number}</span></div>
+                {assignedNurses[p.admission_id] && (
+                  <div className="diag-worklist-row-meta"><span>Nurse: {assignedNurses[p.admission_id].names.join(", ")}</span></div>
+                )}
               </div>
             ))}
           </div>
