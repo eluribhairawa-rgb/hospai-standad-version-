@@ -24,7 +24,13 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("postgresql+"):
     DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql://"):]
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+engine = create_engine(
+    DATABASE_URL, pool_pre_ping=True, future=True,
+    pool_size=int(os.getenv("DB_POOL_SIZE") or 10),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW") or 20),
+    pool_timeout=float(os.getenv("DB_POOL_TIMEOUT") or 10),
+    pool_recycle=1800,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))

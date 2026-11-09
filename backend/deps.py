@@ -27,6 +27,7 @@ def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -
     # session alive; only real user-driven requests slide the expiry.
     extend = request.headers.get("X-Background-Refresh") != "1"
     user = security.get_session_user(db, token, extend=extend)
+    db.close()  # release the pooled connection now; the route may open its own session
     if user and extend:
         # main.py turns this into the X-Session-Refreshed response header, which
         # tells the frontend the server-side idle timer was just reset.
