@@ -253,6 +253,27 @@ def extract_supplier_invoice_fields(file_bytes):
     return _clean_invoice(parsed)
 
 
+# Keeps prompt + output inside the model's context window (~4 chars per token).
+MAX_INVOICE_TEXT_CHARS = 16000
+
+
+def extract_supplier_invoice_from_text(text):
+    """Structure the text layer of a digital (non-scanned) PDF invoice into GRN fields.
+    Same prompt and cleaning as the image path, so both return identical shapes."""
+    body = (text or "").strip()[:MAX_INVOICE_TEXT_CHARS]
+    if not body:
+        raise ValueError("The PDF has no readable text.")
+    prompt = (
+        SUPPLIER_INVOICE_PROMPT.replace("You are reading", "You are reading the extracted text of", 1)
+        + "\n\nThe invoice text follows. It was extracted from a PDF, so table columns may be run together "
+          "or misaligned; use the column headings to work out which value is which.\n<<<\n" + body + "\n>>>"
+    )
+    parsed = _parse_json_object(_chat(prompt, None, max_tokens=6144))
+    if parsed is None:
+        raise RuntimeError("The OCR model did not return readable invoice data from the PDF text.")
+    return _clean_invoice(parsed)
+
+
 LAB_RESULTS_PROMPT = """You are reading a laboratory result printout (analyzer print, lab report or handwritten result sheet).
 
 The test being reported is: {service_name}
@@ -308,16 +329,40 @@ def lab_identity_warnings(extracted, patient_name="", specimen_nos=()):
     return warnings
 
 
-def extract_lab_results(file_bytes, parameters, service_name=""):
-    """OCR a lab result image and map the printed values onto the test's configured parameters."""
+def _lab_prompt(parameters, service_name):
     param_lines = "\n".join(
         f'- id {p["id"]}: {p["name"]} ({p.get("data_type") or "numeric"}{", " + p["unit"] if p.get("unit") else ""})'
         for p in parameters
     )
-    prompt = LAB_RESULTS_PROMPT.format(service_name=service_name or "Laboratory test", parameters=param_lines)
-    parsed = _parse_json_object(_chat(prompt, _image_to_data_url(file_bytes), max_tokens=3072))
+    return LAB_RESULTS_PROMPT.format(service_name=service_name or "Laboratory test", parameters=param_lines)
+
+
+def extract_lab_results(file_bytes, parameters, service_name=""):
+    """OCR a lab result image and map the printed values onto the test's configured parameters."""
+    parsed = _parse_json_object(_chat(_lab_prompt(parameters, service_name), _image_to_data_url(file_bytes), max_tokens=3072))
     if parsed is None:
         raise RuntimeError("The OCR model did not return readable results. Try a clearer image.")
+    return map_lab_results(parsed, parameters)
+
+
+def extract_lab_results_from_text(text, parameters, service_name=""):
+    """Same as extract_lab_results, for the text layer of a digital (non-scanned) PDF report."""
+    body = (text or "").strip()[:MAX_INVOICE_TEXT_CHARS]
+    if not body:
+        raise ValueError("The PDF has no readable text.")
+    prompt = (
+        _lab_prompt(parameters, service_name).replace("You are reading a laboratory result printout", "You are reading the extracted text of a laboratory report", 1)
+        + "\n\nThe report text follows. It was extracted from a PDF, so table columns may be run together; "
+          "use the column headings (Test / Result / Unit / Reference range) to tell values apart.\n<<<\n" + body + "\n>>>"
+    )
+    parsed = _parse_json_object(_chat(prompt, None, max_tokens=3072))
+    if parsed is None:
+        raise RuntimeError("The OCR model did not return readable results from the PDF text.")
+    return map_lab_results(parsed, parameters)
+
+
+def map_lab_results(parsed, parameters):
+    """Model output -> values for the test's configured parameters (shared by image and PDF text)."""
     by_id = {int(p["id"]): p for p in parameters}
     values = {}
     skipped = []

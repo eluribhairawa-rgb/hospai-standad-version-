@@ -10684,8 +10684,8 @@ def create_diag_order(db, data, username=None):
             INSERT INTO diag_orders (
                 order_no, patient_id, encounter_type, appointment_id, admission_id, external_source,
                 referring_clinician, priority, clinical_indication, notes, source_document_id, status, created_by,
-                sale_type, walkin_name, walkin_mobile, walkin_age, walkin_gender
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
+                sale_type, walkin_name, walkin_mobile, walkin_age, walkin_gender, service_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_no,
@@ -10702,6 +10702,8 @@ def create_diag_order(db, data, username=None):
                 username,
                 "EXTERNAL" if is_external_sale else "INTERNAL",
                 walkin_name, walkin_mobile, walkin_age, walkin_gender,
+                # Outsourcing / Home Visit orders set their own type (diag_service_types.create_service_order).
+                "EXTERNAL" if is_external_sale else "IN_HOUSE",
             ),
         )
         order_id = cursor.lastrowid
@@ -10874,7 +10876,8 @@ def confirm_diag_order(db, order_id, username=None):
         if not items:
             raise ValueError("Order has no active services to confirm.")
 
-        subtotal = sum(float(i["amount"]) for i in items)
+        # Home-visit convenience fee is billed once per order, on top of the tests.
+        subtotal = sum(float(i["amount"]) for i in items) + float(order.get("home_visit_fee") or 0)
         invoice_id = None
         if order["encounter_type"] in ("OP", "EMERGENCY", "EXTERNAL"):
             invoice_no = f"INV-LAB-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -10984,14 +10987,21 @@ def cancel_diag_order_item(db, item_id, reason, username=None, refund_mode=None)
             "UPDATE diag_order_items SET cancelled_at = CURRENT_TIMESTAMP, cancel_reason = ?, progress_status = 'cancelled' WHERE id = ?",
             (reason, item_id),
         )
-        cursor.execute("SELECT invoice_id FROM diag_orders WHERE id = ?", (item["order_id"],))
+        cursor.execute("SELECT invoice_id, service_type, home_visit_fee FROM diag_orders WHERE id = ?", (item["order_id"],))
         order_row = cursor.fetchone()
+        # Cancelling the last test of a home visit also drops the visit fee: no tests, no visit.
+        visit_fee_refund = 0.0
+        if order_row and order_row["service_type"] == "HOME_VISIT":
+            cursor.execute("SELECT COUNT(*) AS n FROM diag_order_items WHERE order_id = ? AND cancelled_at IS NULL", (item["order_id"],))
+            if cursor.fetchone()["n"] == 0:
+                visit_fee_refund = float(order_row["home_visit_fee"] or 0)
+                cursor.execute("UPDATE diag_orders SET visit_status = 'cancelled' WHERE id = ?", (item["order_id"],))
         refund = 0.0
         if order_row and order_row["invoice_id"]:
             cursor.execute("SELECT * FROM invoices WHERE id = ?", (order_row["invoice_id"],))
             inv = cursor.fetchone()
             if inv:
-                amount = float(item["amount"] or 0)
+                amount = float(item["amount"] or 0) + visit_fee_refund
                 new_total = max(float(inv["total_amount"] or 0) - amount, 0.0)
                 new_subtotal = max(float(inv["subtotal"] or 0) - amount, 0.0)
                 refund, refunded_total, due, status = _invoice_balance_after_cancellation(
@@ -11234,6 +11244,9 @@ def receive_diag_specimen(db, specimen_id, data, username=None):
                 (username, data.get("condition_on_receipt"), specimen_id),
             )
             cursor.execute("UPDATE diag_order_items SET progress_status = 'received' WHERE id = ?", (specimen["order_item_id"],))
+            # Outsourcing / Home Visit tests are routed (in-house or partner lab) once the sample is at the lab.
+            import diag_service_types
+            diag_service_types.route_item(cursor, specimen["order_item_id"], username)
         else:
             reason = (data.get("rejection_reason") or "").strip()
             if not reason:

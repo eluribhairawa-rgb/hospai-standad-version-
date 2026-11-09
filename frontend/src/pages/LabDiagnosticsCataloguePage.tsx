@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Checkbox, Input, Label, Modal, Select, Tabs, TabsTrigger } from "../components/ui";
+import { LabSettingsEditor, ServiceRoutingEditor } from "../components/lab/LabRoutingSettings";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
 
@@ -65,7 +66,7 @@ type ReportTemplate = {
   layout: string;
 };
 
-type EditTab = "details" | "parameters" | "pricing" | "history";
+type EditTab = "details" | "parameters" | "processing" | "pricing" | "history";
 
 const blankService = (): Partial<DiagService> => ({
   code: "", name: "", service_type: "LAB", department: "", active: true, rate: 0,
@@ -99,6 +100,7 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
 
   const [packagesOpen, setPackagesOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [labSettingsOpen, setLabSettingsOpen] = useState(false);
   const [packages, setPackages] = useState<DiagPackage[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
 
@@ -304,6 +306,9 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
             <button type="button" className="diag-settings-tile" onClick={() => { setTemplatesOpen(true); void loadTemplates(); }}>
               <strong>Report templates</strong><span>Maintain approved formats</span>
             </button>
+            <button type="button" className="diag-settings-tile" onClick={() => setLabSettingsOpen(true)}>
+              <strong>Home visits &amp; partner labs</strong><span>Visit fee and outsourcing costs</span>
+            </button>
           </div>
         </div>
 
@@ -318,6 +323,7 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
               <Tabs>
                 <TabsTrigger active={editTab === "details"} onClick={() => setEditTab("details")}>Details</TabsTrigger>
                 <TabsTrigger active={editTab === "parameters"} onClick={() => setEditTab("parameters")} disabled={isNew}>Parameters</TabsTrigger>
+                <TabsTrigger active={editTab === "processing"} onClick={() => setEditTab("processing")} disabled={isNew || form.service_type !== "LAB"}>Processing</TabsTrigger>
                 <TabsTrigger active={editTab === "pricing"} onClick={() => setEditTab("pricing")} disabled={isNew}>Pricing</TabsTrigger>
                 <TabsTrigger active={editTab === "history"} onClick={() => setEditTab("history")} disabled={isNew}>History</TabsTrigger>
               </Tabs>
@@ -424,6 +430,10 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
                 </div>
               )}
 
+              {editTab === "processing" && selected && (
+                <ServiceRoutingEditor key={selected.id} serviceId={selected.id} setNotice={setNotice} />
+              )}
+
               {editTab === "pricing" && selected && (
                 <table className="diag-data-table">
                   <thead><tr><th>Rate</th><th>Payer type</th><th>Changed by</th><th>Changed at</th></tr></thead>
@@ -445,6 +455,11 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
 
       <Modal open={packagesOpen} onClose={() => setPackagesOpen(false)} title="Panels & packages" description="Group services into a billable panel.">
         <PackagesEditor services={services} packages={packages} setNotice={setNotice} onChanged={loadPackages} />
+      </Modal>
+
+      <Modal open={labSettingsOpen} onClose={() => setLabSettingsOpen(false)} title="Home visits & partner labs"
+        description="Default home-visit fee and what each partner lab charges the hospital per test.">
+        <LabSettingsEditor services={services} setNotice={setNotice} />
       </Modal>
 
       <Modal open={templatesOpen} onClose={() => setTemplatesOpen(false)} title="Report templates" description="Approved report formats for laboratory and imaging.">

@@ -7,7 +7,7 @@ from deps import require_permissions
 from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip
 import legacy_queries as lq
-from qwen_ocr import extract_supplier_invoice_fields
+import grn_import
 
 router = APIRouter(prefix="/api/pharmacy", tags=["pharmacy"])
 
@@ -195,18 +195,17 @@ def pharmacy_goods_receipts_create(request: Request, payload: dict = Body(...), 
     return {"grn_id": grn_id, "grn_no": grn_no}
 
 
-@router.post("/goods-receipts/ocr")
-def pharmacy_goods_receipts_ocr(file: UploadFile = File(...), user: dict = Depends(require_permissions("pharmacy.receive"))):
-    content = file.file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+@router.post("/goods-receipts/import")
+@router.post("/goods-receipts/ocr")  # legacy path, same handler
+def pharmacy_goods_receipts_import(file: UploadFile = File(...), user: dict = Depends(require_permissions("pharmacy.receive"))):
+    """Unified GRN upload: CSV is parsed directly, PDFs and images go through OCR.
+    Returns the file type, detected columns/fields, a preview and GRN-ready `fields`."""
+    # Read one byte past the limit so oversized uploads are rejected without buffering them whole.
+    content = file.file.read(grn_import.MAX_UPLOAD_BYTES + 1)
     try:
-        fields = extract_supplier_invoice_fields(content)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-    return {"fields": fields}
+        return grn_import.import_goods_receipt_file(file.filename, content)
+    except grn_import.GrnImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
 
 
 @router.post("/goods-receipts/{grn_id}/verify")

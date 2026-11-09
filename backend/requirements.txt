@@ -10,3 +10,4 @@ Werkzeug==3.1.9
 boto3==1.43.108
 python-multipart==0.0.32
 openpyxl==3.1.5
+pypdf==5.1.0

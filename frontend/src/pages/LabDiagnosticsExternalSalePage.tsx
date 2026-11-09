@@ -18,6 +18,7 @@ type OrderItem = { id: number; service_name: string; department_type: string; qu
 type SaleOrder = {
   id: number; order_no: string; patient_name?: string; walkin_name?: string; walkin_mobile?: string; walkin_age?: string; walkin_gender?: string;
   referring_clinician?: string; status: string; invoice_id?: number | null; created_at: string; items: OrderItem[];
+  service_type?: string;
 };
 type Invoice = { id: number; invoice_no: string; total_amount: number; paid_amount: number; due_amount: number; payment_status: string };
 
@@ -69,7 +70,8 @@ export default function LabDiagnosticsExternalSalePage({ setNotice }: Props) {
       if (statusFilter) params.set("status", statusFilter);
       if (historySearch.trim()) params.set("q", historySearch.trim());
       const data = await apiFetch<{ orders: SaleOrder[] }>(`/api/diag/orders?${params.toString()}`);
-      setOrders(data.orders || []);
+      // Outsourcing / Home Visit orders have their own tabs; keep this list to EXTERNAL orders.
+      setOrders((data.orders || []).filter((o) => !o.service_type || o.service_type === "EXTERNAL"));
     } catch (err: any) {
       reportError(setNotice, err, "Could not load external sales.");
     } finally {

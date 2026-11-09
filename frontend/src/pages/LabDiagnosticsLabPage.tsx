@@ -18,6 +18,7 @@ type WorklistRow = {
   priority: string; patient_first_name?: string; patient_last_name?: string;
   specimen_id?: number; specimen_no?: string; specimen_status?: string; rejection_reason?: string;
   tat_status?: "on_time" | "near_due" | "overdue" | null; elapsed_hours?: number; tat_target_hours?: number;
+  routing?: "in_house" | "outsourced" | "pending_vendor" | null;
 };
 
 type ParamDef = { id: number; name: string; data_type: string; unit?: string; method?: string; ref_low?: number; ref_high?: number; ref_text?: string; critical_low?: number; critical_high?: number };
@@ -38,6 +39,21 @@ type Vendor = { id: number; vendor_name: string };
 type Equipment = { id: number; name: string; type?: string; operational_status?: string; next_calibration_date?: string };
 type ReagentLot = { id: number; item_name: string; lot_no: string; expiry_date?: string; is_expired?: boolean };
 type QcHold = { id: number; equipment_id: number; scope: string; service_id?: number; status: string };
+// Response of POST /api/diag/lab/items/{id}/results/import (CSV parsed directly, PDF/image via OCR).
+type ResultImport = {
+  file_type: "csv" | "pdf" | "image"; file_name: string; processing: string; layout?: "long" | "wide" | null;
+  values: { parameter_id: number; value: string }[]; skipped?: { parameter_name: string; value: string; reason?: string }[];
+  unmatched?: { name: string; value: string; reason: string }[]; equipment: string; identity_warnings?: string[];
+  detected_fields: string[]; field_mapping?: Record<string, string | null>; preview: Record<string, string>[]; row_count: number;
+  warnings?: string[];
+};
+
+const RESULT_IMPORT_ACCEPT = ".csv,text/csv,.pdf,application/pdf,image/*";
+const RESULT_IMPORT_EXTENSIONS = /\.(csv|pdf|jpe?g|png|webp|tiff?|bmp|gif|heic|heif)$/i;
+const RESULT_IMPORT_MAX_MB = 15;
+const RESULT_PROCESSING_LABELS: Record<string, string> = {
+  csv_direct: "CSV parsed directly", pdf_text: "PDF text read by AI", pdf_scan_ocr: "Scanned PDF read by OCR", ocr_image: "Image read by OCR",
+};
 
 const STAGES: { key: string; label: string }[] = [
   { key: "awaiting_collection", label: "To collect" },
@@ -100,6 +116,8 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
   const [ocrFileName, setOcrFileName] = useState("");
   // Parameters whose value came from the last OCR scan and has not been touched since -- highlighted until verified.
   const [ocrFilledIds, setOcrFilledIds] = useState<Set<number>>(new Set());
+  // What the last results upload detected (file type, column mapping, preview) -- shown under the upload box.
+  const [lastImport, setLastImport] = useState<ResultImport | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -141,6 +159,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
     setReceiveForm(EMPTY_RECEIVE_FORM);
     setOcrFileName("");
     setOcrFilledIds(new Set());
+    setLastImport(null);
     try {
       const d = await apiFetch<ItemDetail>(`/api/diag/lab/items/${row.id}`);
       setDetail(d);
@@ -300,21 +319,28 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
     }
   };
 
-  // OCR auto-fill: upload an analyzer printout / result sheet, Qwen OCR maps the
-  // printed values onto this test's parameters. Finalized values are never overwritten.
+  // Results upload: a CSV export is parsed directly; a PDF or image (analyzer printout,
+  // partner-lab report) goes through OCR. Values are mapped onto this test's parameters
+  // and filled as drafts. Finalized values are never overwritten.
   const handleOcrUpload = async (file: File | undefined) => {
     if (!file || !detail) return;
-    if (file.type && !file.type.startsWith("image/")) {
-      setNotice({ type: "warning", message: "Please upload an image file (JPG, PNG, WEBP, TIFF, BMP, GIF...)." });
+    const accepted = RESULT_IMPORT_EXTENSIONS.test(file.name) || file.type.startsWith("image/") || file.type === "application/pdf" || file.type === "text/csv";
+    if (!accepted) {
+      setNotice({ type: "warning", message: "Please upload a CSV, a PDF or an image (JPG, PNG, WEBP, TIFF...)." });
+      return;
+    }
+    if (file.size === 0 || file.size > RESULT_IMPORT_MAX_MB * 1024 * 1024) {
+      setNotice({ type: "warning", message: file.size === 0 ? `${file.name} is empty.` : `${file.name} is larger than ${RESULT_IMPORT_MAX_MB} MB.` });
       return;
     }
     setOcrFileName(file.name);
     setOcrScanning(true);
+    setLastImport(null);
     try {
       const body = new FormData();
       body.append("file", file);
       const baseUrl = (API_BASE || "").replace(/\/+$/, "").replace(/\/api$/, "");
-      const response = await fetch(`${baseUrl}/api/diag/lab/items/${detail.id}/ocr`, {
+      const response = await fetch(`${baseUrl}/api/diag/lab/items/${detail.id}/results/import`, {
         method: "POST",
         body,
         credentials: "include",
@@ -322,12 +348,11 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw Object.assign(new Error(data?.detail || data?.error || "OCR failed."), { status: response.status });
+        throw Object.assign(new Error(data?.detail || data?.error || "Results import failed."), { status: response.status });
       }
-      const { values, equipment, identity_warnings, skipped } = data as {
-        values: { parameter_id: number; value: string }[]; equipment: string; identity_warnings?: string[];
-        skipped?: { parameter_name: string; value: string }[];
-      };
+      const result = data as ResultImport;
+      setLastImport(result);
+      const { values, equipment, identity_warnings, skipped } = result;
       const filled = resultsLocked ? [] : values;
       if (filled.length) {
         setResultValues((prev) => ({ ...prev, ...Object.fromEntries(filled.map((v) => [v.parameter_id, v.value])) }));
@@ -348,13 +373,15 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
       }
       const identityNote = identity_warnings?.length ? ` CHECK IDENTITY: ${identity_warnings.join(" ")}` : "";
       const skippedNote = skipped?.length ? ` Enter manually: ${skipped.map((s) => `${s.parameter_name} (printed "${s.value}")`).join(", ")}.` : "";
+      const warningNote = result.warnings?.length ? ` ${result.warnings.join(" ")}` : "";
+      const source = result.file_type === "csv" ? "CSV" : "OCR";
       setNotice(
         filled.length
-          ? { type: identityNote || skippedNote ? "warning" : "success", message: `OCR filled ${filled.length} of ${detail.parameters.length} parameter(s).${equipmentNote} Verify the highlighted values before saving.${skippedNote}${identityNote}` }
-          : { type: "warning", message: `No values for this test's parameters could be filled from the image.${skippedNote || " Try a clearer photo."}${identityNote}` }
+          ? { type: identityNote || skippedNote || warningNote ? "warning" : "success", message: `${source} filled ${filled.length} of ${detail.parameters.length} parameter(s).${equipmentNote} Verify the highlighted values before saving.${skippedNote}${warningNote}${identityNote}` }
+          : { type: "warning", message: `No values for this test's parameters could be filled from the file.${skippedNote}${warningNote || (result.file_type === "csv" ? "" : " Try a clearer photo.")}${identityNote}` }
       );
     } catch (err: any) {
-      reportError(setNotice, err, "Lab result OCR failed.");
+      reportError(setNotice, err, "Results import failed.");
     } finally {
       setOcrScanning(false);
     }
@@ -435,6 +462,8 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                 <div className="diag-worklist-row-top">
                   <span>{[r.patient_first_name, r.patient_last_name].filter(Boolean).join(" ") || r.patient_id}</span>
                   {r.priority !== "Routine" && <span className="diag-badge diag-badge-critical">{r.priority}</span>}
+                  {r.routing === "outsourced" && <span className="diag-badge diag-badge-warning" title="Sent to a partner lab: enter or upload its results">Outsourced</span>}
+                  {r.routing === "pending_vendor" && <span className="diag-badge diag-badge-critical" title="No analyser available: choose a partner lab under Orders & Billing > Home Visits">Needs partner lab</span>}
                   {r.tat_status === "overdue" && <span className="diag-badge diag-badge-critical">Overdue</span>}
                   {r.tat_status === "near_due" && <span className="diag-badge diag-badge-warning">Near TAT</span>}
                 </div>
@@ -553,20 +582,20 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                       style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", border: "1.5px dashed #94a3b8", marginBottom: "0.75rem" }}
                     >
                       <div style={{ minWidth: 0 }}>
-                        <strong>Scan result printout to auto-fill</strong>
+                        <strong>Upload results to auto-fill</strong>
                         <div className="muted" style={{ fontSize: "0.8rem" }}>
                           {ocrScanning
-                            ? `Reading ${ocrFileName} with OCR…`
+                            ? /\.csv$/i.test(ocrFileName) ? `Reading ${ocrFileName}…` : `Reading ${ocrFileName} with OCR…`
                             : ocrFileName
-                              ? `Last scanned: ${ocrFileName}`
-                              : "Upload or drop an analyzer printout or lab report image (any image format) to fill the values below."}
+                              ? `Last imported: ${ocrFileName}`
+                              : "Upload or drop a CSV export, PDF report or printout photo (analyzer or partner lab) to fill the values below."}
                         </div>
                       </div>
                       <label className={`ui-button ${ocrScanning ? "secondary" : "primary"}`} style={{ cursor: ocrScanning ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
-                        {ocrScanning ? "Scanning…" : "⬆ Upload Image"}
+                        {ocrScanning ? "Reading…" : "⬆ Upload Results (CSV / PDF / Image)"}
                         <input
                           type="file"
-                          accept="image/*,.tif,.tiff,.bmp,.webp,.gif"
+                          accept={RESULT_IMPORT_ACCEPT}
                           disabled={ocrScanning}
                           style={{ display: "none" }}
                           onChange={(e) => {
@@ -577,6 +606,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                       </label>
                     </div>
                   )}
+                  {lastImport && !ocrScanning && <ResultImportSummary result={lastImport} />}
                   {equipmentHold && (
                     <div className="diag-note-box diag-note-critical">
                       This equipment has an open QC hold and cannot be used to finalize results until the hold is released from Quality &amp; Equipment.
@@ -663,5 +693,49 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
         </div>
       </div>
     </div>
+  );
+}
+
+
+/** What the last results upload detected: how it was read, column -> parameter mapping and a preview. */
+function ResultImportSummary({ result }: { result: ResultImport }) {
+  const columns = result.preview.length ? Object.keys(result.preview[0]) : [];
+  return (
+    <details className="diag-note-box" style={{ marginBottom: "0.75rem" }}>
+      <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+        {result.file_type.toUpperCase()} &middot; {RESULT_PROCESSING_LABELS[result.processing] || result.processing}
+        {result.layout ? ` (${result.layout === "long" ? "one row per test" : "one column per test"})` : ""}
+        {" "}&middot; {result.values.length} value(s) filled
+        {result.unmatched?.length ? ` · ${result.unmatched.length} not matched` : ""}
+      </summary>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "0.5rem 0" }}>
+        {result.detected_fields.map((f) => {
+          const target = result.field_mapping ? result.field_mapping[f] : f;
+          return (
+            <span key={f} className={`diag-badge ${target && target !== "ignore" ? "diag-badge-info" : "diag-badge-muted"}`}
+              title={target ? `Used as: ${target}` : "Not used"}>
+              {result.field_mapping && target && target !== f ? `${f} → ${target}` : f}
+            </span>
+          );
+        })}
+      </div>
+      {result.unmatched && result.unmatched.length > 0 && (
+        <div className="muted" style={{ fontSize: "0.8rem", marginBottom: "0.4rem" }}>
+          Not on this test: {result.unmatched.map((u) => `${u.name} (${u.value})`).join(", ")}
+        </div>
+      )}
+      {columns.length > 0 && (
+        <div style={{ overflowX: "auto", maxHeight: 200 }}>
+          <table className="diag-data-table">
+            <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+            <tbody>
+              {result.preview.slice(0, 10).map((row, i) => (
+                <tr key={i}>{columns.map((c) => <td key={c}>{row[c]}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </details>
   );
 }

@@ -142,6 +142,29 @@ type OcrInvoice = {
   }[];
 };
 
+// Response of POST /api/pharmacy/goods-receipts/import (CSV parsed directly, PDF/image via OCR).
+type GrnImportResult = {
+  file_type: "csv" | "pdf" | "image";
+  file_name: string;
+  processing: "csv_direct" | "pdf_text" | "pdf_scan_ocr" | "ocr_image";
+  detected_fields: string[];
+  field_mapping?: Record<string, string | null>;
+  row_count: number;
+  preview: Record<string, string>[];
+  fields: OcrInvoice;
+  warnings: string[];
+};
+
+const GRN_IMPORT_ACCEPT = ".csv,text/csv,.pdf,application/pdf,image/*";
+const GRN_IMPORT_EXTENSIONS = /\.(csv|pdf|jpe?g|png|webp|tiff?|bmp|gif|heic|heif)$/i;
+const GRN_IMPORT_MAX_MB = 15;
+const PROCESSING_LABELS: Record<GrnImportResult["processing"], string> = {
+  csv_direct: "CSV parsed directly",
+  pdf_text: "PDF text read by AI",
+  pdf_scan_ocr: "Scanned PDF read by OCR",
+  ocr_image: "Image read by OCR",
+};
+
 type GoodsReceipt = {
   id: number;
   grn_no: string;
@@ -261,9 +284,10 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
 
   const [submittingGrn, setSubmittingGrn] = useState(false);
 
-  // OCR auto-fill: upload a supplier invoice image, Qwen OCR reads it, GRN header and lines are filled in.
+  // Invoice import: one upload for CSV (parsed directly) or PDF / image (OCR). GRN header and lines are filled in.
   const [ocrScanning, setOcrScanning] = useState(false);
   const [ocrFileName, setOcrFileName] = useState("");
+  const [lastImport, setLastImport] = useState<GrnImportResult | null>(null);
 
   const applyOcrInvoice = (inv: OcrInvoice): string[] => {
     const filled: string[] = [];
@@ -321,17 +345,31 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
 
   const handleOcrUpload = async (file: File | undefined) => {
     if (!file) return;
-    if (file.type && !file.type.startsWith("image/")) {
-      setNotice({ type: "warning", message: "Please upload an image file (JPG, PNG, WEBP, TIFF, BMP, GIF...)." });
+    const isAccepted =
+      GRN_IMPORT_EXTENSIONS.test(file.name) ||
+      file.type.startsWith("image/") ||
+      file.type === "application/pdf" ||
+      file.type === "text/csv";
+    if (!isAccepted) {
+      setNotice({ type: "warning", message: "Please upload a CSV, a PDF or an image (JPG, PNG, WEBP, TIFF...)." });
+      return;
+    }
+    if (file.size === 0) {
+      setNotice({ type: "warning", message: `${file.name} is empty.` });
+      return;
+    }
+    if (file.size > GRN_IMPORT_MAX_MB * 1024 * 1024) {
+      setNotice({ type: "warning", message: `${file.name} is larger than ${GRN_IMPORT_MAX_MB} MB.` });
       return;
     }
     setOcrFileName(file.name);
     setOcrScanning(true);
+    setLastImport(null);
     try {
       const body = new FormData();
       body.append("file", file);
       const baseUrl = (API_BASE || "").replace(/\/+$/, "").replace(/\/api$/, "");
-      const response = await fetch(`${baseUrl}/api/pharmacy/goods-receipts/ocr`, {
+      const response = await fetch(`${baseUrl}/api/pharmacy/goods-receipts/import`, {
         method: "POST",
         body,
         credentials: "include",
@@ -339,16 +377,22 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw Object.assign(new Error(data?.detail || data?.error || "OCR failed."), { status: response.status });
+        throw Object.assign(new Error(data?.detail || data?.error || "Invoice import failed."), { status: response.status });
       }
-      const filled = applyOcrInvoice(data.fields as OcrInvoice);
+      const result = data as GrnImportResult;
+      setLastImport(result);
+      const filled = applyOcrInvoice(result.fields);
+      const warnings = (result.warnings || []).join(" ");
       setNotice(
         filled.length
-          ? { type: "success", message: `Invoice OCR filled: ${filled.join(", ")}. Please verify every line before saving.` }
-          : { type: "warning", message: "No invoice details could be read from this image. Try a clearer photo." }
+          ? {
+              type: warnings ? "warning" : "success",
+              message: `${PROCESSING_LABELS[result.processing] || "Invoice imported"}. Filled: ${filled.join(", ")}. ${warnings} Please verify every line before saving.`,
+            }
+          : { type: "warning", message: warnings || "No invoice details could be read from this file." }
       );
     } catch (err) {
-      reportError(setNotice, err as any, "Invoice OCR failed.");
+      reportError(setNotice, err as any, "Invoice import failed.");
     } finally {
       setOcrScanning(false);
     }
@@ -742,13 +786,15 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
             }}
           >
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#0f172a" }}>📄 Scan Supplier Invoice to Auto-fill</div>
+              <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#0f172a" }}>📄 Import Supplier Invoice to Auto-fill</div>
               <div style={{ fontSize: "0.78rem", color: "#64748b" }}>
                 {ocrScanning
-                  ? `Reading ${ocrFileName} with OCR… (large invoices can take up to a minute)`
+                  ? /\.csv$/i.test(ocrFileName)
+                    ? `Reading ${ocrFileName}…`
+                    : `Reading ${ocrFileName} with OCR… (large invoices can take up to a minute)`
                   : ocrFileName
-                    ? `Last scanned: ${ocrFileName}`
-                    : "Upload or drop an invoice image (any image format). Supplier, invoice no/date and every medicine batch line are filled in."}
+                    ? `Last imported: ${ocrFileName}`
+                    : "Upload or drop a CSV export, PDF or photo of the invoice. Supplier, invoice no/date and every medicine batch line are filled in."}
               </div>
             </div>
             <label
@@ -763,10 +809,10 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                 whiteSpace: "nowrap",
               }}
             >
-              {ocrScanning ? "Scanning…" : "⬆ Upload Invoice Image"}
+              {ocrScanning ? "Reading…" : "⬆ Upload Invoice (CSV / PDF / Image)"}
               <input
                 type="file"
-                accept="image/*,.tif,.tiff,.bmp,.webp,.gif"
+                accept={GRN_IMPORT_ACCEPT}
                 disabled={ocrScanning}
                 style={{ display: "none" }}
                 onChange={(e) => {
@@ -776,6 +822,64 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
               />
             </label>
           </div>
+
+          {/* What the last import detected: file type, column → GRN field mapping and a data preview */}
+          {lastImport && !ocrScanning && (
+            <details style={{ marginBottom: "1rem", padding: "0.6rem 0.9rem", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#ffffff" }}>
+              <summary style={{ cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, color: "#334155" }}>
+                {lastImport.file_type.toUpperCase()} · {PROCESSING_LABELS[lastImport.processing]} · {lastImport.row_count}{" "}
+                {lastImport.file_type === "csv" ? "row" : "line"}{lastImport.row_count === 1 ? "" : "s"} · {lastImport.detected_fields.length} field
+                {lastImport.detected_fields.length === 1 ? "" : "s"} detected
+              </summary>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", margin: "0.6rem 0" }}>
+                {lastImport.detected_fields.map((f) => {
+                  const target = lastImport.field_mapping ? lastImport.field_mapping[f] : f;
+                  return (
+                    <span
+                      key={f}
+                      title={target ? `Fills GRN field: ${target}` : "Not used for the GRN"}
+                      style={{
+                        fontSize: "0.72rem",
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        border: `1px solid ${target ? "#5eead4" : "#e2e8f0"}`,
+                        background: target ? "#f0fdfa" : "#f8fafc",
+                        color: target ? "#0f766e" : "#94a3b8",
+                      }}
+                    >
+                      {lastImport.field_mapping && target && target !== f ? `${f} → ${target.replace(/_/g, " ")}` : f.replace(/_/g, " ")}
+                    </span>
+                  );
+                })}
+              </div>
+              {lastImport.preview.length > 0 && (
+                <div style={{ overflowX: "auto", maxHeight: "220px" }}>
+                  <table style={{ borderCollapse: "collapse", fontSize: "0.72rem", width: "100%" }}>
+                    <thead>
+                      <tr>
+                        {Object.keys(lastImport.preview[0]).map((k) => (
+                          <th key={k} style={{ textAlign: "left", padding: "4px 6px", borderBottom: "1px solid #e2e8f0", color: "#475569", whiteSpace: "nowrap" }}>
+                            {k.replace(/_/g, " ")}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lastImport.preview.slice(0, 10).map((row, i) => (
+                        <tr key={i}>
+                          {Object.keys(lastImport.preview[0]).map((k) => (
+                            <td key={k} style={{ padding: "3px 6px", borderBottom: "1px solid #f1f5f9", whiteSpace: "nowrap" }}>
+                              {row[k]}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </details>
+          )}
 
           {/* Supplier & Invoice Header Details */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", marginBottom: "1.5rem", background: "#f8fafc", padding: "1rem", borderRadius: "8px", border: "1px solid #e2e8f0" }}>

@@ -34,6 +34,7 @@ type DiagOrder = {
   id: number; order_no: string; patient_id: string; patient_name?: string; encounter_type: string;
   appointment_id?: number; admission_id?: number; external_source?: string; referring_clinician?: string;
   priority: string; clinical_indication?: string; notes?: string; status: string; invoice_id?: number;
+  service_type?: string;
   created_at: string; items: DiagOrderItem[];
 };
 type DiagInvoice = {
@@ -129,7 +130,8 @@ export default function LabDiagnosticsOrdersPage({ setNotice, onNavigate }: Prop
       if (orderStatusFilter) params.status = orderStatusFilter;
       const qs = new URLSearchParams(params).toString();
       const data = await apiFetch<{ orders: DiagOrder[] }>(`/api/diag/orders?${qs}`);
-      setOrders(data.orders || []);
+      // Outsourcing / Home Visit orders have their own tabs; keep this list to IN_HOUSE orders.
+      setOrders((data.orders || []).filter((o) => !o.service_type || o.service_type === "IN_HOUSE"));
     } catch (err: any) {
       reportError(setNotice, err, "Could not load orders.");
     } finally {

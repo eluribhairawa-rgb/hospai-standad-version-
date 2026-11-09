@@ -286,6 +286,15 @@ class DiagOrders(Base):
     created_by: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     confirmed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    # Added by migrations_diag_service_types.sql
+    service_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'IN_HOUSE'::text"))
+    visit_address: Mapped[Optional[str]] = mapped_column(Text)
+    visit_scheduled_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    visit_status: Mapped[Optional[str]] = mapped_column(Text)
+    visit_collected_by: Mapped[Optional[str]] = mapped_column(Text)
+    visit_collected_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    home_visit_fee: Mapped[float] = mapped_column(REAL, nullable=False, server_default=text('0'))
+    outsource_vendor_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     diag_order_items: Mapped[list['DiagOrderItems']] = relationship('DiagOrderItems', back_populates='order')
 
@@ -377,6 +386,8 @@ class DiagServices(Base):
     created_by: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    # Added by migrations_diag_service_types.sql
+    preferred_vendor_id: Mapped[Optional[int]] = mapped_column(Integer)
 
     diag_order_items: Mapped[list['DiagOrderItems']] = relationship('DiagOrderItems', back_populates='service')
     diag_package_items: Mapped[list['DiagPackageItems']] = relationship('DiagPackageItems', back_populates='service')
@@ -2197,6 +2208,11 @@ class DiagOrderItems(Base):
     cancel_reason: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     discharge_invoice_id: Mapped[Optional[int]] = mapped_column(Integer)
+    # Added by migrations_diag_service_types.sql
+    routing: Mapped[Optional[str]] = mapped_column(Text)
+    routing_reason: Mapped[Optional[str]] = mapped_column(Text)
+    routing_vendor_id: Mapped[Optional[int]] = mapped_column(Integer)
+    routed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
 
     order: Mapped['DiagOrders'] = relationship('DiagOrders', back_populates='diag_order_items')
     service: Mapped['DiagServices'] = relationship('DiagServices', back_populates='diag_order_items')
