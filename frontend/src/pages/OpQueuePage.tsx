@@ -36,7 +36,7 @@ export type QueueItem = {
 };
 
 
-export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scopedDoctor }: Props) {
+export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: Props) {
   // Queue list state -- starts empty and is populated from the real
   // /api/appointments fetch below; never seeded with fabricated patients.
   const [queue, setQueue] = useState<QueueItem[]>([]);
@@ -444,7 +444,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
           <p className="opq-page-subtitle">Manage OP patient queue and consultation status.</p>
         </div>
 
-        {/* Top-Right: Date Picker & + Add to Queue Button */}
+        {/* Top-Right: Date Picker */}
         <div className="opq-top-right">
           <div className="opq-date-pill">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00828a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -467,22 +467,6 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
               className="opq-date-input"
             />
           </div>
-
-          <button
-            type="button"
-            className="opq-btn-add-queue"
-            title="Register patient and add to queue"
-            onClick={() => {
-              if (onNavigate) {
-                onNavigate("add");
-              } else {
-                window.location.href = "/add";
-              }
-            }}
-          >
-            <span className="opq-add-icon">+</span>
-            <span>Add to Queue</span>
-          </button>
         </div>
       </div>
 
