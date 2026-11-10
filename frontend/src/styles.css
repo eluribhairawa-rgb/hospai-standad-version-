@@ -11308,6 +11308,7 @@ body {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   overflow-x: auto;
+  min-height: 240px;
 }
 
 .doctor-rx-table {

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "../components/ui";
 import { DonutChart, PieChart, BarChart, HorizontalBar } from "../components/charts";
+import DateCalendarPicker, { toIsoDate, parseIsoDate } from "../components/DateCalendarPicker";
 import { printViaIframe } from "../lib/printViaIframe";
 import type { Notice, HospitalSummary, DashboardAnalytics, DistributionItem } from "../types";
 
@@ -11,6 +12,8 @@ type Props = {
   hospitalSummary?: HospitalSummary | null;
   analytics?: DashboardAnalytics | null;
   analyticsLoading?: boolean;
+  dashboardDate?: string;
+  setDashboardDate?: (date: string) => void;
 };
 
 type AnalysisTab = "operational" | "financial" | "clinical" | "departmental";
@@ -49,16 +52,18 @@ function pctOf(part: number, whole: number): number {
 type AnalysisReportData = {
   totalRevenue: number;
   opRevenue: number;
+  ipRevenue: number;
   pharmacyRevenue: number;
   labRevenue: number;
   bedOccupied: number;
   bedCapacity: number;
   bedOccupancyRate: number;
+  periodLabel: string;
 };
 
 /** Builds the printable HTML for the "Export PDF Report" action (rendered via printViaIframe). */
 function buildAnalysisReportHtml(data: AnalysisReportData): string {
-  const { totalRevenue, opRevenue, pharmacyRevenue, labRevenue, bedOccupied, bedCapacity, bedOccupancyRate } = data;
+  const { totalRevenue, opRevenue, ipRevenue, pharmacyRevenue, labRevenue, bedOccupied, bedCapacity, bedOccupancyRate, periodLabel } = data;
   return `
     <div data-hospai-shared-print-shell style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; padding: 6px 12px; line-height: 1.35;">
       <style>
@@ -82,7 +87,7 @@ function buildAnalysisReportHtml(data: AnalysisReportData): string {
           <h2>HospAI</h2>
           <div style="font-size: 12px; font-weight: 600; color: #334155;">Comprehensive Performance Analysis</div>
         </div>
-        <div class="meta">Generated: ${new Date().toLocaleString()}<br/>Period: Current month-to-date</div>
+        <div class="meta">Generated: ${new Date().toLocaleString()}<br/>Period: ${periodLabel}</div>
       </div>
 
       <div class="kpi-grid">
@@ -97,6 +102,7 @@ function buildAnalysisReportHtml(data: AnalysisReportData): string {
         <thead><tr><th>Department</th><th>Revenue Contribution</th><th>Share %</th></tr></thead>
         <tbody>
           <tr><td>Outpatient & Consultations (OPD)</td><td>${formatINR(opRevenue)}</td><td>${pctOf(opRevenue, totalRevenue)}%</td></tr>
+          ${ipRevenue > 0 ? `<tr><td>Inpatient (IPD) Admissions</td><td>${formatINR(ipRevenue)}</td><td>${pctOf(ipRevenue, totalRevenue)}%</td></tr>` : ""}
           <tr><td>Pharmacy Dispensing</td><td>${formatINR(pharmacyRevenue)}</td><td>${pctOf(pharmacyRevenue, totalRevenue)}%</td></tr>
           <tr><td>Laboratory & Imaging (Diagnostics)</td><td>${formatINR(labRevenue)}</td><td>${pctOf(labRevenue, totalRevenue)}%</td></tr>
           <tr><td><strong>Grand Total</strong></td><td><strong>${formatINR(totalRevenue)}</strong></td><td><strong>100%</strong></td></tr>
@@ -150,8 +156,16 @@ function EmptyNote({ children }: { children: React.ReactNode }) {
   return <p style={{ fontSize: "12.5px", color: "#94a3b8", textAlign: "center", padding: "24px 0" }}>{children}</p>;
 }
 
-export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, analytics, analyticsLoading }: Props) {
+export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, analytics, analyticsLoading, dashboardDate, setDashboardDate }: Props) {
   const [activeTab, setActiveTab] = useState<AnalysisTab>("operational");
+
+  const selectedDate = dashboardDate || toIsoDate(new Date());
+  const selectedDateObj = parseIsoDate(selectedDate);
+  const todayIso = toIsoDate(new Date());
+  const isCurrentMonth = selectedDate.slice(0, 7) === todayIso.slice(0, 7);
+  const selectedMonthLabel = new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric" }).format(selectedDateObj);
+  const selectedFullMonthLabel = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(selectedDateObj);
+  const monthBadgeText = isCurrentMonth ? "This Month" : selectedMonthLabel;
 
   // All figures below are derived directly from the real hospital-summary /
   // dashboard-analytics payloads -- no invented benchmarks or illustrative
@@ -161,24 +175,29 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
     const totalRevenue = hospitalSummary?.revenue?.monthly_total ?? 0;
     const pharmacyRevenue = hospitalSummary?.revenue?.module_breakdown?.monthly?.pharmacy ?? 0;
     const labRevenue = hospitalSummary?.revenue?.module_breakdown?.monthly?.lab_diagnostics ?? 0;
-    const opRevenue = hospitalSummary?.revenue?.module_breakdown?.monthly?.op_billing ?? Math.max(totalRevenue - pharmacyRevenue - labRevenue, 0);
+    const ipRevenue = hospitalSummary?.revenue?.module_breakdown?.monthly?.ip_billing ?? 0;
+    const opRevenue = hospitalSummary?.revenue?.module_breakdown?.monthly?.op_billing ?? Math.max(totalRevenue - pharmacyRevenue - labRevenue - ipRevenue, 0);
     const bedCapacity = hospitalSummary?.bed_stats?.capacity ?? 0;
     const bedOccupied = hospitalSummary?.bed_stats?.occupied ?? 0;
     const bedOccupancyRate = hospitalSummary?.bed_stats?.occupancy_rate ?? (bedCapacity > 0 ? Math.round((bedOccupied / bedCapacity) * 100) : 0);
     const doctorPayoutReady = hospitalSummary?.revenue?.doctor_payout_ready ?? 0;
     const pharmacyTransactionsToday = hospitalSummary?.pharmacy_summary?.today_transactions ?? 0;
-    return { totalRevenue, pharmacyRevenue, labRevenue, opRevenue, bedCapacity, bedOccupied, bedOccupancyRate, doctorPayoutReady, pharmacyTransactionsToday };
+    return { totalRevenue, pharmacyRevenue, labRevenue, ipRevenue, opRevenue, bedCapacity, bedOccupied, bedOccupancyRate, doctorPayoutReady, pharmacyTransactionsToday };
   }, [hospitalSummary]);
 
-  const { totalRevenue, pharmacyRevenue, labRevenue, opRevenue, bedCapacity, bedOccupied, bedOccupancyRate, doctorPayoutReady, pharmacyTransactionsToday } = stats;
+  const { totalRevenue, pharmacyRevenue, labRevenue, ipRevenue, opRevenue, bedCapacity, bedOccupied, bedOccupancyRate, doctorPayoutReady, pharmacyTransactionsToday } = stats;
 
   const revenueSegments = useMemo(
-    () => [
-      { label: "Outpatient (OPD) Consultations", value: opRevenue, color: "#00828a" },
-      { label: "Pharmacy Sales & Ward Indents", value: pharmacyRevenue, color: "#10b981" },
-      { label: "Laboratory & Diagnostics", value: labRevenue, color: "#3b82f6" },
-    ],
-    [opRevenue, pharmacyRevenue, labRevenue]
+    () => {
+      const segments = [
+        { label: "Outpatient (OPD) Consultations", value: opRevenue, color: "#00828a" },
+        { label: "Inpatient (IPD) Admissions", value: ipRevenue, color: "#f59e0b" },
+        { label: "Pharmacy Sales & Ward Indents", value: pharmacyRevenue, color: "#10b981" },
+        { label: "Laboratory & Diagnostics", value: labRevenue, color: "#3b82f6" },
+      ];
+      return segments.filter((s) => s.value > 0);
+    },
+    [opRevenue, ipRevenue, pharmacyRevenue, labRevenue]
   );
 
   const paymentModeSlices = useMemo(
@@ -203,12 +222,12 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
     const c = hospitalSummary?.ip_op_counts;
     if (!c) return [];
     return [
-      { label: "OP (Today)", value: c.daily_op },
-      { label: "IP (Today)", value: c.daily_ip },
-      { label: "OP (Month)", value: c.monthly_op },
-      { label: "IP (Month)", value: c.monthly_ip },
+      { label: "OP (Day)", value: c.daily_op },
+      { label: "IP (Day)", value: c.daily_ip },
+      { label: `OP (${selectedMonthLabel})`, value: c.monthly_op },
+      { label: `IP (${selectedMonthLabel})`, value: c.monthly_ip },
     ];
-  }, [hospitalSummary]);
+  }, [hospitalSummary, selectedMonthLabel]);
 
   const operationsToday = hospitalSummary?.operations_today;
   const operationsRows = useMemo(() => {
@@ -230,8 +249,18 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
   }, [operationsToday]);
 
   const printAnalysisReport = () => {
-    const html = buildAnalysisReportHtml({ totalRevenue, opRevenue, pharmacyRevenue, labRevenue, bedOccupied, bedCapacity, bedOccupancyRate });
-    printViaIframe(html, "Analysis_Report");
+    const html = buildAnalysisReportHtml({
+      totalRevenue,
+      opRevenue,
+      ipRevenue,
+      pharmacyRevenue,
+      labRevenue,
+      bedOccupied,
+      bedCapacity,
+      bedOccupancyRate,
+      periodLabel: selectedFullMonthLabel,
+    });
+    printViaIframe(html, `Analysis_Report_${selectedDate.slice(0, 7)}`);
   };
 
   return (
@@ -246,18 +275,23 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
           </div>
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#0f172a", margin: 0 }}>Executive & Departmental Analysis</h1>
           <p style={{ fontSize: "13.5px", color: "#64748b", margin: "4px 0 0" }}>
-            Real operational, financial, and clinical metrics, sourced live from the hospital database.
+            Real operational, financial, and clinical metrics for {selectedFullMonthLabel}, sourced live from the hospital database.
           </p>
         </div>
 
-        <Button
-          type="button"
-          variant="primary"
-          onClick={printAnalysisReport}
-          style={{ background: "#00828a", borderColor: "#00828a", display: "flex", alignItems: "center", gap: "6px" }}
-        >
-          <span>🖨</span> Export PDF Report
-        </Button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          {setDashboardDate && (
+            <DateCalendarPicker value={selectedDate} onChange={setDashboardDate} />
+          )}
+          <Button
+            type="button"
+            variant="primary"
+            onClick={printAnalysisReport}
+            style={{ background: "#00828a", borderColor: "#00828a", display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>🖨</span> Export PDF Report
+          </Button>
+        </div>
       </div>
 
       {analyticsLoading && (
@@ -267,12 +301,12 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
       {/* KPI Highlight Strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px", marginBottom: "24px" }}>
         <KpiTile
-          label="Gross Revenue (Monthly)"
-          badgeText="This Month"
+          label={`Gross Revenue (${monthBadgeText})`}
+          badgeText={monthBadgeText}
           badgeBg="#ccfbf1"
           badgeColor="#0f766e"
           value={formatINR(totalRevenue)}
-          footnote="Includes OPD, Pharmacy & Diagnostics"
+          footnote="Includes OPD, IPD, Pharmacy & Diagnostics"
         />
         <KpiTile
           label="Bed Occupancy"
@@ -284,16 +318,16 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
           footnoteColor="#16a34a"
         />
         <KpiTile
-          label="Pharmacy Sales (Monthly)"
-          badgeText="Live"
+          label={`Pharmacy Sales (${monthBadgeText})`}
+          badgeText={isCurrentMonth ? "Live" : selectedMonthLabel}
           badgeBg="#fef3c7"
           badgeColor="#b45309"
           value={formatINR(pharmacyRevenue)}
-          footnote={`${pharmacyTransactionsToday} transactions today`}
+          footnote={isCurrentMonth ? `${pharmacyTransactionsToday} transactions today` : `Pharmacy dispensing for ${selectedMonthLabel}`}
         />
         <KpiTile
-          label="Lab & Diagnostics (Monthly)"
-          badgeText="Live"
+          label={`Lab & Diagnostics (${monthBadgeText})`}
+          badgeText={isCurrentMonth ? "Live" : selectedMonthLabel}
           badgeBg="#f3e8ff"
           badgeColor="#7e22ce"
           value={formatINR(labRevenue)}
@@ -333,7 +367,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
       {activeTab === "operational" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
           <Card className="panel">
-            <CardHeader><CardTitle>Patient Registrations — Last {analytics?.window_days ?? 14} Days</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Patient Registrations — Window ({analytics?.window_days ?? 14} Days ending {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(selectedDateObj)})</CardTitle></CardHeader>
             <CardContent>
               {patientsTrendBars.some((b) => b.value > 0) ? (
                 <BarChart data={patientsTrendBars} barColor="#00828a" />
@@ -389,23 +423,23 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
       {activeTab === "financial" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
           <Card className="panel">
-            <CardHeader><CardTitle>Department Revenue Distribution (This Month)</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Department Revenue Distribution ({monthBadgeText})</CardTitle></CardHeader>
             <CardContent>
               {totalRevenue > 0 ? (
                 <DonutChart data={revenueSegments} centerLabel="Total" centerValue={formatINR(totalRevenue)} />
               ) : (
-                <EmptyNote>No revenue recorded this month yet.</EmptyNote>
+                <EmptyNote>No revenue recorded for {selectedFullMonthLabel} yet.</EmptyNote>
               )}
             </CardContent>
           </Card>
 
           <Card className="panel">
-            <CardHeader><CardTitle>Payment Mode Collections (Today)</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Payment Mode Collections ({isCurrentMonth ? "Today" : selectedDate})</CardTitle></CardHeader>
             <CardContent>
               {paymentModeSlices.length > 0 ? (
                 <DonutChart data={paymentModeSlices} />
               ) : (
-                <EmptyNote>No payments collected today yet.</EmptyNote>
+                <EmptyNote>No payments collected on this date yet.</EmptyNote>
               )}
 
               <div style={{ marginTop: "16px", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -455,7 +489,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
               {referralSlices.length > 0 ? (
                 <DonutChart data={referralSlices} formatValue={(v) => String(v)} size={140} />
               ) : (
-                <EmptyNote>No referral data recorded yet.</EmptyNote>
+                <EmptyNote>No referral data recorded for {selectedFullMonthLabel} yet.</EmptyNote>
               )}
             </CardContent>
           </Card>
@@ -466,18 +500,18 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
       {activeTab === "departmental" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
           <Card className="panel">
-            <CardHeader><CardTitle>Revenue Share by Department (This Month)</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Revenue Share by Department ({monthBadgeText})</CardTitle></CardHeader>
             <CardContent>
               {totalRevenue > 0 ? (
                 <DonutChart data={revenueSegments} />
               ) : (
-                <EmptyNote>No revenue recorded this month yet.</EmptyNote>
+                <EmptyNote>No revenue recorded for {selectedFullMonthLabel} yet.</EmptyNote>
               )}
             </CardContent>
           </Card>
 
           <Card className="panel">
-            <CardHeader><CardTitle>Today's Operations Completion</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Operations Completion ({isCurrentMonth ? "Today" : selectedDate})</CardTitle></CardHeader>
             <CardContent>
               {operationsRows.length > 0 ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
@@ -493,7 +527,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
                   ))}
                 </div>
               ) : (
-                <EmptyNote>No operational activity recorded today yet.</EmptyNote>
+                <EmptyNote>No operational activity recorded on this date yet.</EmptyNote>
               )}
             </CardContent>
           </Card>

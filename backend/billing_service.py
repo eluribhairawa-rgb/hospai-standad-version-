@@ -1582,8 +1582,17 @@ def get_billing_overview_entries(db: Session, target_date: str, card: str):
             cursor.execute(
                 f"""
                 SELECT i.created_at AS at, i.patient_id, {_PATIENT.format(fallback="i.patient_name")} AS patient_name,
-                       i.invoice_no AS reference, i.module AS detail, i.total_amount AS amount
-                FROM invoices i LEFT JOIN patients p ON p.patient_id = i.patient_id
+                       i.invoice_no AS reference, i.module AS detail,
+                       COALESCE(NULLIF(TRIM(i.payment_mode), ''), NULLIF(TRIM(pm.mode), ''), CASE WHEN i.due_amount > 0 AND (i.paid_amount IS NULL OR i.paid_amount = 0) THEN 'Due' ELSE '-' END) AS payment_mode,
+                       i.total_amount AS amount
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT invoice_id, STRING_AGG(DISTINCT payment_mode, ', ') AS mode
+                    FROM invoice_payments
+                    WHERE payment_mode IS NOT NULL AND TRIM(payment_mode) <> ''
+                    GROUP BY invoice_id
+                ) pm ON pm.invoice_id = i.id
+                LEFT JOIN patients p ON p.patient_id = i.patient_id
                 WHERE {_IST_DAY.format(col="i.created_at")}
                 ORDER BY i.created_at DESC
                 """, (target_date,))
@@ -1594,7 +1603,9 @@ def get_billing_overview_entries(db: Session, target_date: str, card: str):
                 f"""
                 SELECT ip.created_at AS at, i.patient_id, {_PATIENT.format(fallback="i.patient_name")} AS patient_name,
                        COALESCE(ip.receipt_no, i.invoice_no) AS reference,
-                       i.module || ' · ' || COALESCE(ip.payment_mode, '-') AS detail, ABS(ip.amount) AS amount
+                       i.module AS detail,
+                       COALESCE(NULLIF(TRIM(ip.payment_mode), ''), '-') AS payment_mode,
+                       ABS(ip.amount) AS amount
                 FROM invoice_payments ip
                 JOIN invoices i ON i.id = ip.invoice_id
                 LEFT JOIN financial_receipts fr ON fr.id = ip.canonical_receipt_id
@@ -1602,9 +1613,18 @@ def get_billing_overview_entries(db: Session, target_date: str, card: str):
                 WHERE {paid_day} AND ip.amount {sign} 0 AND COALESCE(fr.is_reversed, FALSE) = FALSE
                 UNION ALL
                 SELECT fr.created_at, fr.patient_id, {_PATIENT.format(fallback="fr.patient_id")},
-                       fr.receipt_no, CASE WHEN fr.receipt_type = 'advance' THEN 'Advance deposit' ELSE 'Refund voucher' END,
-                       fr.total_amount
-                FROM financial_receipts fr LEFT JOIN patients p ON p.patient_id = fr.patient_id
+                       fr.receipt_no,
+                       CASE WHEN fr.receipt_type = 'advance' THEN 'Advance deposit' ELSE 'Refund voucher' END AS detail,
+                       COALESCE(NULLIF(TRIM(rpl.mode), ''), '-') AS payment_mode,
+                       fr.total_amount AS amount
+                FROM financial_receipts fr
+                LEFT JOIN (
+                    SELECT receipt_id, STRING_AGG(DISTINCT payment_mode, ', ') AS mode
+                    FROM receipt_payment_lines
+                    WHERE payment_mode IS NOT NULL AND TRIM(payment_mode) <> ''
+                    GROUP BY receipt_id
+                ) rpl ON rpl.receipt_id = fr.id
+                LEFT JOIN patients p ON p.patient_id = fr.patient_id
                 WHERE {receipt_day} AND fr.receipt_type IN {receipt_types} AND fr.is_reversed = FALSE
                 ORDER BY at DESC
                 """, (target_date, target_date))
@@ -1612,7 +1632,9 @@ def get_billing_overview_entries(db: Session, target_date: str, card: str):
             cursor.execute(
                 f"""
                 SELECT i.created_at AS at, i.patient_id, {_PATIENT.format(fallback="i.patient_name")} AS patient_name,
-                       i.invoice_no AS reference, i.module AS detail, i.due_amount AS amount
+                       i.invoice_no AS reference, i.module AS detail,
+                       'Due' AS payment_mode,
+                       i.due_amount AS amount
                 FROM invoices i LEFT JOIN patients p ON p.patient_id = i.patient_id
                 WHERE i.due_amount > 0
                 ORDER BY i.created_at DESC
@@ -1627,6 +1649,7 @@ def get_billing_overview_entries(db: Session, target_date: str, card: str):
                 "patient_name": r.get("patient_name") or r.get("patient_id") or "Walk-in",
                 "reference": r.get("reference"),
                 "detail": r.get("detail"),
+                "payment_mode": r.get("payment_mode") or "-",
                 "amount": float(quantize_dec(to_decimal(r.get("amount")))),
             })
         return rows

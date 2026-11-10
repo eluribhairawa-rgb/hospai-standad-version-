@@ -3,8 +3,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { Modal } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
-import PhoneInput from "../components/PhoneInput";
-import { cleanCountryCode, validateMobileByCountry } from "../lib/phone";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -57,23 +55,6 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
 
   // Calling state animation
   const [callingId, setCallingId] = useState<string | null>(null);
-
-  // Add to Queue Modal state
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newPatientName, setNewPatientName] = useState("");
-  const [newPatientUhid, setNewPatientUhid] = useState("");
-  const [newPatientPhone, setNewPatientPhone] = useState("");
-  const [newPatientPhoneCode, setNewPatientPhoneCode] = useState("+91");
-  const [newAge, setNewAge] = useState("30");
-  const [newGender, setNewGender] = useState("Male");
-  const [newDoctor, setNewDoctor] = useState("");
-  const [newDepartment, setNewDepartment] = useState("");
-  const [newVisitType, setNewVisitType] = useState("OP");
-  const [newConsultationFee, setNewConsultationFee] = useState("0");
-  // UHID must be a registered patient: verified against /api/patients, which then fills and locks the patient fields.
-  const [uhidCheck, setUhidCheck] = useState<{ state: "idle" | "checking" | "ok" | "invalid"; message?: string }>({ state: "idle" });
-  const [addingToQueue, setAddingToQueue] = useState(false);
-  const [newTime, setNewTime] = useState("10:30 AM");
 
   // Patient Details Modal state (shows details on-screen without navigating away)
   const [detailsPatient, setDetailsPatient] = useState<QueueItem | null>(null);
@@ -361,101 +342,6 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
     setNotice({ type: "info", message: "Filters reset to default view." });
   };
 
-  // Fee comes from the Doctor Scheduling master (the server applies the same rule and ignores any amount sent).
-  const feeKind = newVisitType === "Review" ? "review" : "consultation";
-  const selectedDoctorFees = realDoctors.find((d) => d.doctor_name === newDoctor);
-  const lockedFee = selectedDoctorFees
-    ? Number((feeKind === "review" ? (selectedDoctorFees.review_fee ?? selectedDoctorFees.consultation_fee) : (selectedDoctorFees.consultation_fee ?? selectedDoctorFees.review_fee)) ?? 0)
-    : null;
-
-  const verifyUhid = async (raw: string): Promise<boolean> => {
-    const value = raw.trim();
-    if (!value) { setUhidCheck({ state: "invalid", message: "Enter the patient's registered UHID." }); return false; }
-    setUhidCheck({ state: "checking" });
-    try {
-      const res = await apiFetch<{ patient?: any }>(`/api/patients/${encodeURIComponent(value)}`, { background: true });
-      const p = res?.patient;
-      if (!p?.patient_id) throw new Error("not found");
-      setNewPatientUhid(p.patient_id);
-      setNewPatientName([p.name, p.middle_name, p.last_name].filter(Boolean).join(" "));
-      if (p.age !== undefined && p.age !== null && p.age !== "") setNewAge(String(p.age));
-      if (p.gender) setNewGender(p.gender);
-      setNewPatientPhone(p.phone || "");
-      setNewPatientPhoneCode(cleanCountryCode(p.phone_country_code));
-      setUhidCheck({ state: "ok", message: `Registered patient: ${[p.name, p.last_name].filter(Boolean).join(" ")} (${p.patient_id})` });
-      return true;
-    } catch {
-      setUhidCheck({ state: "invalid", message: `UHID "${value}" is not registered. Register the patient first.` });
-      return false;
-    }
-  };
-
-  // Add new patient to queue -- a real, atomic booking+invoice appointment,
-  // never a client-only entry with a fabricated token/UHID.
-  const handleAddNewToQueue = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPatientName.trim()) {
-      setNotice({ type: "warning", message: "Please enter patient name." });
-      return;
-    }
-    if (uhidCheck.state !== "ok" && !(await verifyUhid(newPatientUhid))) {
-      setNotice({ type: "warning", message: "Enter a registered UHID and verify it before adding to the queue." });
-      return;
-    }
-    if (!newDepartment.trim()) {
-      setNotice({ type: "warning", message: "Please select a department." });
-      return;
-    }
-    if (!newDoctor.trim()) {
-      setNotice({ type: "warning", message: "Please select a doctor." });
-      return;
-    }
-
-    const phoneError = newPatientPhone ? validateMobileByCountry(newPatientPhone, newPatientPhoneCode, false) : null;
-    if (phoneError) {
-      setNotice({ type: "warning", message: phoneError });
-      return;
-    }
-
-    setAddingToQueue(true);
-    try {
-      const result = await apiFetch<{ appointment_id: number; token_no: string }>("/api/appointments", {
-        method: "POST",
-        body: JSON.stringify({
-          patient_id: newPatientUhid.trim(),
-          patient_name: newPatientName.trim(),
-          age: newAge,
-          gender: newGender,
-          phone: newPatientPhone.trim(),
-          phone_country_code: newPatientPhoneCode,
-          doctor_name: newDoctor,
-          department: newDepartment,
-          visit_type: newVisitType,
-          appointment_date: selectedDate,
-          appointment_time: newTime,
-          fee_kind: feeKind,
-        }),
-      });
-
-      setAddModalOpen(false);
-      setNewPatientName("");
-      setNewPatientUhid("");
-      setUhidCheck({ state: "idle" });
-      setNewPatientPhone("");
-      setNewPatientPhoneCode("+91");
-      setNewConsultationFee("0");
-      setNewDoctor("");
-      setNewDepartment("");
-
-      setNotice({ type: "success", message: `Token ${result.token_no} issued and added to the real queue.` });
-      await fetchLiveAppointments();
-    } catch (error) {
-      reportError(setNotice, error as { message?: string; status?: number }, "Unable to add patient to queue.");
-    } finally {
-      setAddingToQueue(false);
-    }
-  };
-
   // Open on-screen Patient Details Modal without leaving Queue Management
   const handleOpenPatientDetails = async (patient: QueueItem) => {
     setDetailsPatient(patient);
@@ -571,16 +457,13 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
           <button
             type="button"
             className="opq-btn-add-queue"
+            title="Register patient and add to queue"
             onClick={() => {
-              if (scopedDoctor) {
-                const own = realDoctors.find((d) => d.doctor_name.trim().toLowerCase() === scopedDoctor.trim().toLowerCase());
-                setNewDoctor(own?.doctor_name || scopedDoctor);
-                if (own) {
-                  setNewDepartment(own.department);
-                  setNewConsultationFee(String(own.consultation_fee ?? 0));
-                }
+              if (onNavigate) {
+                onNavigate("add");
+              } else {
+                window.location.href = "/add";
               }
-              setAddModalOpen(true);
             }}
           >
             <span className="opq-add-icon">+</span>
@@ -926,186 +809,6 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
           </tbody>
         </table>
       </div>
-
-      {/* Add to Queue Modal */}
-      <Modal open={addModalOpen} onClose={() => setAddModalOpen(false)} title="Add Patient to OP Queue">
-        <form onSubmit={handleAddNewToQueue} className="opq-add-form">
-          <div className="opq-form-row">
-            <div className="opq-form-field">
-              <label>Patient Name *</label>
-              <input
-                type="text"
-                required
-                value={newPatientName}
-                readOnly
-                placeholder="Filled from the registered UHID"
-                className="opq-modal-input"
-                title="Comes from the patient's registration"
-              />
-            </div>
-            <div className="opq-form-field">
-              <label>UHID / Patient ID *</label>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input
-                  type="text"
-                  required
-                  value={newPatientUhid}
-                  readOnly={uhidCheck.state === "ok"}
-                  onChange={(e) => { setNewPatientUhid(e.target.value); setUhidCheck({ state: "idle" }); }}
-                  onBlur={() => { if (newPatientUhid.trim() && uhidCheck.state === "idle") void verifyUhid(newPatientUhid); }}
-                  placeholder="Registered UHID (e.g. PAT-2026...)"
-                  className="opq-modal-input"
-                />
-                {uhidCheck.state === "ok" ? (
-                  <button type="button" className="opq-uhid-btn" onClick={() => { setUhidCheck({ state: "idle" }); setNewPatientUhid(""); setNewPatientName(""); }}>Change</button>
-                ) : (
-                  <button type="button" className="opq-uhid-btn" disabled={uhidCheck.state === "checking"} onClick={() => void verifyUhid(newPatientUhid)}>
-                    {uhidCheck.state === "checking" ? "Checking..." : "Verify"}
-                  </button>
-                )}
-              </div>
-              {uhidCheck.message && (
-                <small style={{ color: uhidCheck.state === "ok" ? "#15803d" : "#b91c1c", display: "block", marginTop: 4 }}>{uhidCheck.message}</small>
-              )}
-            </div>
-          </div>
-
-          <div className="opq-form-row">
-            <div className="opq-form-field">
-              <label>Age</label>
-              <input
-                type="number"
-                value={newAge}
-                readOnly
-                className="opq-modal-input"
-              />
-            </div>
-            <div className="opq-form-field">
-              <label>Gender</label>
-              <select
-                value={newGender}
-                disabled
-                onChange={(e) => setNewGender(e.target.value)}
-                className="opq-modal-select"
-              >
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div className="opq-form-field">
-              <label>Phone</label>
-              <PhoneInput
-                disabled={uhidCheck.state === "ok"}
-                countryCode={newPatientPhoneCode}
-                value={newPatientPhone}
-                onChange={({ countryCode, value }) => { setNewPatientPhoneCode(countryCode); setNewPatientPhone(value); }}
-              />
-            </div>
-            <div className="opq-form-field">
-              <label>Consultation Fee (₹)</label>
-              <input
-                type="text"
-                value={lockedFee === null ? "" : String(lockedFee)}
-                readOnly
-                placeholder="Select a doctor"
-                className="opq-modal-input"
-                title="Set in Doctor Scheduling for the selected doctor"
-              />
-              <small style={{ color: "#64748b" }}>{feeKind === "review" ? "Review fee" : "Consultation fee"} from Doctor Scheduling</small>
-            </div>
-          </div>
-
-          <div className="opq-form-row">
-            <div className="opq-form-field">
-              <label>Department</label>
-              <select
-                value={newDepartment}
-                onChange={(e) => {
-                  setNewDepartment(e.target.value);
-                  const docs = realDoctors.filter((d) => d.department === e.target.value);
-                  if (docs.length === 1) {
-                    setNewDoctor(docs[0].doctor_name);
-                    setNewConsultationFee(String(docs[0].consultation_fee ?? 0));
-                  } else {
-                    setNewDoctor("");
-                  }
-                }}
-                className="opq-modal-select"
-              >
-                <option value="">{departmentList.length ? "Select department" : "No departments available"}</option>
-                {departmentList.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-            </div>
-            <div className="opq-form-field">
-              <label>Doctor</label>
-              <select
-                value={newDoctor}
-                disabled={!!scopedDoctor}
-                onChange={(e) => {
-                  setNewDoctor(e.target.value);
-                  const docObj = realDoctors.find((d) => d.doctor_name === e.target.value);
-                  if (docObj) {
-                    setNewDepartment(docObj.department);
-                    setNewConsultationFee(String(docObj.consultation_fee ?? 0));
-                  }
-                }}
-                className="opq-modal-select"
-              >
-                <option value="">{doctorsList.length ? "Select doctor" : "No doctors available"}</option>
-                {(newDepartment ? doctorsList.filter((d) => d.department === newDepartment) : doctorsList).map((d) => (
-                  <option key={d.name} value={d.name}>{d.name} ({d.department})</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="opq-form-row">
-            <div className="opq-form-field">
-              <label>Visit Type</label>
-              <select
-                value={newVisitType}
-                onChange={(e) => setNewVisitType(e.target.value)}
-                className="opq-modal-select"
-              >
-                <option value="OP">OP</option>
-                <option value="Follow-up">Follow-up</option>
-                <option value="Emergency">Emergency</option>
-                <option value="Review">Review</option>
-              </select>
-            </div>
-            <div className="opq-form-field">
-              <label>Appointment Time</label>
-              <input
-                type="text"
-                value={newTime}
-                onChange={(e) => setNewTime(e.target.value)}
-                placeholder="10:30 AM"
-                className="opq-modal-input"
-              />
-            </div>
-          </div>
-
-          <div className="opq-modal-actions">
-            <button
-              type="button"
-              className="opq-modal-cancel"
-              onClick={() => setAddModalOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="opq-modal-submit"
-              disabled={addingToQueue}
-            >
-              {addingToQueue ? "Adding…" : "Generate Token & Add"}
-            </button>
-          </div>
-        </form>
-      </Modal>
 
       {/* Patient Details Modal (Shows on-screen details when clicking UHID or Patient Name) */}
       <Modal

@@ -214,6 +214,7 @@ class AccessScopeTests(unittest.TestCase):
         payload = {"patient_name": "X", "visit_type": "OP", "appointment_date": "2999-01-01",
                    "consultation_fee": 0, "doctor_name": "Dr. Beena Shah"}
         with mock.patch.object(clinical.lq, "create_op_appointment_with_invoice", return_value=(1, "T1", 1, 1)) as create, \
+             mock.patch.object(clinical.lq, "list_doctor_schedules", return_value=[{"consultation_fee": 500, "review_fee": 300}]), \
              mock.patch.object(clinical, "log_audit_event"):
             clinical.appointments_create(request=make_request("/api/appointments"), payload=payload, db=self.db, user=DOC_A)
         self.assertEqual(create.call_args.args[1]["doctor_name"], "Dr. Anil Rao")

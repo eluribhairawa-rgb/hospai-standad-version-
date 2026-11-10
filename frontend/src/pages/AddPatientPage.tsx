@@ -411,32 +411,22 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     }
 
     if (!firstName.trim()) {
-      setNotice({ type: "warning", message: "First name is required." });
+      setNotice({ type: "warning", message: "Patient name is required." });
       return null;
     }
-    if (!lastName.trim()) {
-      setNotice({ type: "warning", message: "Last name is required." });
-      return null;
-    }
-    if (!dob.trim()) {
-      setNotice({ type: "warning", message: "Date of Birth is required." });
-      return null;
-    }
-    const dobParts = dob.trim().split("-");
-    const birthYear = parseInt(dobParts[0], 10);
-    const currentYear = new Date().getFullYear();
-    if (!birthYear || dobParts[0].length !== 4 || birthYear < 1900 || birthYear > currentYear) {
-      setNotice({ type: "warning", message: "Please enter a valid 4-digit birth year between 1900 and present." });
-      return null;
-    }
-    if (!gender.trim()) {
-      setNotice({ type: "warning", message: "Gender is required." });
-      return null;
+    if (dob.trim()) {
+      const dobParts = dob.trim().split("-");
+      const birthYear = parseInt(dobParts[0], 10);
+      const currentYear = new Date().getFullYear();
+      if (!birthYear || dobParts[0].length !== 4 || birthYear < 1900 || birthYear > currentYear) {
+        setNotice({ type: "warning", message: "Please enter a valid 4-digit birth year between 1900 and present." });
+        return null;
+      }
     }
     const cleanPrimaryPhone = primaryPhone.replace(/\D/g, "");
     const primaryCodeMatch = primaryCountryCode.match(/\+\d+/)?.[0] || "+91";
     if (!cleanPrimaryPhone) {
-      setNotice({ type: "warning", message: "Primary mobile number is required." });
+      setNotice({ type: "warning", message: "Phone number is required." });
       return null;
     }
     const primaryRule = COUNTRY_CODE_RULES[primaryCodeMatch] || COUNTRY_CODE_RULES["+91"];
@@ -463,20 +453,22 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       }
     }
 
-    if (!address.trim()) {
-      setNotice({ type: "warning", message: "Address / Area is required." });
-      return null;
+    let fName = firstName.trim();
+    let lName = lastName.trim();
+    if (!lName && fName.includes(" ")) {
+      const parts = fName.split(/\s+/);
+      fName = parts[0];
+      lName = parts.slice(1).join(" ");
     }
-
-    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+    const fullName = `${fName} ${lName}`.trim() || fName;
     const ageGender = `${age || "-"} / ${gender || "Not specified"}`;
     setRegistering(true);
 
     try {
       let createdPatientId = "";
       const payload: Record<string, unknown> = {
-        name: firstName.trim(),
-        last_name: lastName.trim(),
+        name: fName,
+        last_name: lName,
         dob: dob || undefined,
         age: age ? parseInt(String(age), 10) : undefined,
         gender: gender || undefined,
@@ -487,7 +479,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         family_mobile: altPhone.trim() || undefined,
         family_country_code: altCodeMatch,
         email: email.trim() || undefined,
-        address: address.trim(),
+        address: address.trim() || undefined,
         allergies: noAllergies ? "" : allergies.trim(),
         no_known_allergies: noAllergies,
         symptoms: (visitType === "OP" || visitType === "IP") ? (symptoms.trim() || undefined) : undefined,
@@ -1587,17 +1579,17 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           </div>
         )}
 
-        {/* Row 1: First Name *, Last Name *, Date of Birth * */}
+        {/* Row 1: Patient Name *, Last Name (optional), Date of Birth (optional) */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "18px", marginBottom: "18px" }}>
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              First Name <span style={{ color: "#ef4444" }}>*</span>
+              Patient Name <span style={{ color: "#ef4444" }}>*</span>
             </label>
             <input
               type="text"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value.replace(/[^a-zA-Z\s]/g, ""))}
-              placeholder="Enter first name"
+              placeholder="Enter patient name"
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 14px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             />
@@ -1605,13 +1597,13 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
 
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              Last Name <span style={{ color: "#ef4444" }}>*</span>
+              Last Name (optional)
             </label>
             <input
               type="text"
               value={lastName}
               onChange={(e) => setLastName(e.target.value.replace(/[^a-zA-Z\s]/g, ""))}
-              placeholder="Enter last name"
+              placeholder="Enter last name (optional)"
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 14px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             />
@@ -1619,7 +1611,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
 
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              Date of Birth <span style={{ color: "#ef4444" }}>*</span>
+              Date of Birth (optional)
             </label>
             <input
               type="date"
@@ -1634,37 +1626,42 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           </div>
         </div>
 
-        {/* Row 2: Age, Gender * */}
+        {/* Row 2: Age (optional), Gender (optional) */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              Age (Auto-calculated)
+              Age {dob ? "(Auto-calculated from DOB)" : "(optional)"}
             </label>
             <input
               type="text"
               value={age}
-              readOnly
-              tabIndex={-1}
-              placeholder="Auto-calculated from DOB"
+              readOnly={!!dob}
+              onChange={(e) => {
+                if (!dob) {
+                  setAge(e.target.value.replace(/\D/g, "").slice(0, 3));
+                }
+              }}
+              tabIndex={dob ? -1 : 0}
+              placeholder={dob ? "Auto-calculated from DOB" : "Enter age or select DOB"}
               className="pharmacy-rx-search-input"
               style={{
                 height: "42px",
                 padding: "0 14px",
                 borderRadius: "8px",
                 border: "1px solid #cbd5e1",
-                background: "#f1f5f9",
+                background: dob ? "#f1f5f9" : "#ffffff",
                 color: "#1e293b",
                 fontWeight: 600,
                 width: "100%",
                 boxSizing: "border-box",
-                cursor: "not-allowed",
+                cursor: dob ? "not-allowed" : "text",
               }}
             />
           </div>
 
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              Gender <span style={{ color: "#ef4444" }}>*</span>
+              Gender (optional)
             </label>
             <select
               value={gender}
@@ -1672,7 +1669,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             >
-              <option value="">Select gender</option>
+              <option value="">Select gender (optional)</option>
               <option value="Male">Male</option>
               <option value="Female">Female</option>
               <option value="Other">Other</option>
@@ -1680,11 +1677,11 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           </div>
         </div>
 
-        {/* Row 3: Primary Mobile *, Alternate Mobile (optional) with country prefix */}
+        {/* Row 3: Phone Number *, Alternate Mobile (optional) with country prefix */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              Primary Mobile <span style={{ color: "#ef4444" }}>*</span>
+              Phone Number <span style={{ color: "#ef4444" }}>*</span>
             </label>
             <div style={{ display: "flex", gap: "8px" }}>
               <select
@@ -1742,7 +1739,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           </div>
         </div>
 
-        {/* Row 4: Email (optional), Address / Area * */}
+        {/* Row 4: Email (optional), Address / Area (optional) */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
@@ -1760,13 +1757,13 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
 
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
-              Address / Area <span style={{ color: "#ef4444" }}>*</span>
+              Address / Area (optional)
             </label>
             <input
               type="text"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              placeholder="Enter complete address"
+              placeholder="Enter address (optional)"
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 14px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             />

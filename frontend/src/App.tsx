@@ -98,6 +98,7 @@ export const normalizeRouteAlias = (rawPage: string): string => {
       return "emergency-worklist";
     case "registration":
     case "registration-desk":
+    case "patient-registration":
       return "add";
     case "accounts":
       return "accounts-overview";
@@ -111,7 +112,7 @@ export const normalizeRouteAlias = (rawPage: string): string => {
 // back to the dashboard instead of rendering a blank page.
 const VALID_PAGE_IDS = new Set([
   "access-denied", "accounts", "accounts-doctor-payouts", "accounts-ledger", "accounts-overview", "analytics",
-  "accounts-vendor-payments", "add", "registration", "registration-desk", "admin", "bed-management",
+  "accounts-vendor-payments", "add", "registration", "registration-desk", "patient-registration", "admin", "bed-management",
   "billing", "billing-aging", "billing-create-invoice", "billing-record-payment",
   "billing-insurance-claims", "billing-invoices", "billing-mode-breakdown", "billing-module-collections",
   "billing-reconciliation", "billing-overview", "billing-patient-bills", "billing-ip-discharge",
@@ -1621,6 +1622,8 @@ function App() {
             hospitalSummary={hospitalSummary}
             analytics={dashboardAnalytics}
             analyticsLoading={dashboardAnalyticsLoading}
+            dashboardDate={dashboardDate}
+            setDashboardDate={setDashboardDate}
           />
         )}
 

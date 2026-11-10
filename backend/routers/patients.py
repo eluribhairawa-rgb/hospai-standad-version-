@@ -56,12 +56,6 @@ def _validate_patient_registration_payload(payload, is_update=False):
 
     if not first_name:
         errors["name"] = "First name is required."
-    if not is_update:
-        if not address:
-            errors["address"] = "Address is required."
-    else:
-        if "address" in payload and not address:
-            errors["address"] = "Address cannot be empty."
     if dob:
         parts = dob.split("-")
         if len(parts) != 3 or len(parts[0]) != 4:

@@ -57,19 +57,13 @@ type RxSuggestions = {
   lab_tests: { name: string; count: number }[];
 };
 
-/** Editor row for a medicine read from OCR or past prescriptions; an "M-A-N" frequency opens in the 3-box view. */
+/** Editor row for a medicine read from OCR or past prescriptions */
 function toMedicineItem(m: SavedMedicine, id: string): MedicineItem {
-  const parts = (m.frequency || "").split("-").map((p) => p.trim());
-  const is3Box = parts.length === 3 && parts.every((p) => /^[0-9½¼.\/]*$/.test(p));
   return {
     id,
     medicine_name: m.medicine_name,
     dosage: m.dosage || "",
     frequency: m.frequency || "",
-    is_custom: Boolean(m.frequency) && !is3Box,
-    freq_m: is3Box ? parts[0] : "",
-    freq_a: is3Box ? parts[1] : "",
-    freq_n: is3Box ? parts[2] : "",
     duration: m.duration || "",
     instructions: m.instructions || "",
   };
@@ -141,6 +135,352 @@ const COMMON_LAB_TESTS = [
   "Ultrasound Whole Abdomen",
 ];
 
+const DEFAULT_FREQUENCIES: string[] = [
+  "1-0-1",
+  "1-0-0",
+  "0-0-1",
+  "1-1-1",
+  "0-1-0",
+  "1-0-1-0",
+  "1-1-1-1",
+  "SOS",
+  "Stat",
+  "OD",
+  "BD",
+  "TDS",
+  "QID",
+  "Alternate Days",
+  "Weekly Once",
+];
+
+const FREQUENCIES_STORAGE_KEY = "hospai_prescription_frequencies";
+
+function getStoredFrequencies(): string[] {
+  try {
+    const raw = localStorage.getItem(FREQUENCIES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return DEFAULT_FREQUENCIES;
+}
+
+interface FrequencyComboboxProps {
+  value: string;
+  onChange: (val: string) => void;
+  options: string[];
+  onAddOption: (opt: string) => void;
+  onDeleteOption: (opt: string) => void;
+  onResetDefaults?: () => void;
+  placeholder?: string;
+}
+
+const FrequencyCombobox: React.FC<FrequencyComboboxProps> = ({
+  value,
+  onChange,
+  options,
+  onAddOption,
+  onDeleteOption,
+  onResetDefaults,
+  placeholder = "e.g. 1-0-1 / SOS",
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [newOption, setNewOption] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen]);
+
+  const handleAddNew = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newOption.trim();
+    if (!trimmed) return;
+    onAddOption(trimmed);
+    onChange(trimmed);
+    setNewOption("");
+  };
+
+  const hasCustomTypedValue = value && value.trim() && !options.includes(value.trim());
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", position: "relative" }}>
+        <input
+          type="text"
+          className="table-input"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setIsOpen(true)}
+          style={{
+            paddingRight: "26px",
+            fontWeight: 600,
+            fontSize: "12.5px",
+            height: "32px",
+            borderRadius: "4px",
+          }}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onClick={() => setIsOpen((prev) => !prev)}
+          title="Toggle frequency dropdown menu"
+          aria-label="Toggle frequency dropdown menu"
+          style={{
+            position: "absolute",
+            right: "4px",
+            top: "50%",
+            transform: "translateY(-50%)",
+            background: "transparent",
+            border: "none",
+            color: "#64748b",
+            cursor: "pointer",
+            padding: "4px 6px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: "3px",
+            fontSize: "10px",
+          }}
+        >
+          {isOpen ? "▲" : "▼"}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            width: "235px",
+            background: "#ffffff",
+            border: "1.5px solid #cbd5e1",
+            borderRadius: "8px",
+            boxShadow: "0 10px 25px -5px rgba(15, 23, 42, 0.2), 0 8px 10px -6px rgba(15, 23, 42, 0.1)",
+            zIndex: 1000,
+            padding: "6px",
+          }}
+        >
+          {/* Header */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "4px 6px 6px",
+              borderBottom: "1px solid #f1f5f9",
+              fontSize: "11px",
+              fontWeight: 700,
+              color: "#334155",
+            }}
+          >
+            <span>Frequencies ({options.length})</span>
+            {onResetDefaults && (
+              <button
+                type="button"
+                onClick={onResetDefaults}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#0284c7",
+                  fontSize: "10.5px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: 0,
+                  textDecoration: "underline",
+                }}
+                title="Restore default frequencies"
+              >
+                Reset Defaults
+              </button>
+            )}
+          </div>
+
+          {/* Quick-add current typed text if not yet in options */}
+          {hasCustomTypedValue && (
+            <div style={{ padding: "4px 2px", borderBottom: "1px solid #f1f5f9" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  onAddOption(value.trim());
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  background: "#f0fdf4",
+                  border: "1px dashed #86efac",
+                  borderRadius: "5px",
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  color: "#166534",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+                title={`Add "${value.trim()}" to saved frequency list`}
+              >
+                <span>+ Save &quot;{value.trim()}&quot; to list</span>
+                <span style={{ fontSize: "12px" }}>↵</span>
+              </button>
+            </div>
+          )}
+
+          {/* Scrollable list of options with delete icon */}
+          <div
+            style={{
+              maxHeight: "160px",
+              overflowY: "auto",
+              margin: "4px 0",
+              display: "flex",
+              flexDirection: "column",
+              gap: "2px",
+            }}
+          >
+            {options.length === 0 ? (
+              <div style={{ padding: "10px", fontSize: "11px", color: "#94a3b8", textAlign: "center" }}>
+                No options in list. Add below!
+              </div>
+            ) : (
+              options.map((opt) => {
+                const isSelected = opt === value;
+                return (
+                  <div
+                    key={opt}
+                    onClick={() => {
+                      onChange(opt);
+                      setIsOpen(false);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "5px 8px",
+                      borderRadius: "5px",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      fontWeight: isSelected ? 700 : 500,
+                      background: isSelected ? "#e0f2fe" : "#ffffff",
+                      color: isSelected ? "#0369a1" : "#1e293b",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "#f8fafc";
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "#ffffff";
+                    }}
+                  >
+                    <span>{opt}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteOption(opt);
+                      }}
+                      title={`Remove "${opt}" from dropdown list`}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        fontSize: "13px",
+                        lineHeight: 1,
+                        padding: "2px 5px",
+                        borderRadius: "3px",
+                        fontWeight: 700,
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.color = "#ef4444";
+                        (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.color = "#94a3b8";
+                        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Manage: Add new option input form */}
+          <div
+            style={{
+              paddingTop: "6px",
+              borderTop: "1px solid #f1f5f9",
+            }}
+          >
+            <form
+              onSubmit={handleAddNew}
+              style={{
+                display: "flex",
+                gap: "4px",
+                alignItems: "center",
+              }}
+            >
+              <input
+                type="text"
+                placeholder="New option (e.g. 2-0-2)..."
+                value={newOption}
+                onChange={(e) => setNewOption(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "4px 6px",
+                  fontSize: "11px",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "4px",
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => handleAddNew()}
+                disabled={!newOption.trim()}
+                style={{
+                  background: newOption.trim() ? "#0284c7" : "#e2e8f0",
+                  color: newOption.trim() ? "#ffffff" : "#94a3b8",
+                  border: "none",
+                  borderRadius: "4px",
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  cursor: newOption.trim() ? "pointer" : "default",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                + Add
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNavigate, scopedDoctor }: Props) {
   // Today's date
   const [selectedDate, setSelectedDate] = useState(() => new Date().toLocaleDateString("en-CA"));
@@ -201,6 +541,41 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   const [labTgl, setLabTgl] = useState("");
   const [labVitd, setLabVitd] = useState("");
 
+  // Manageable frequency dropdown options (persisted across sessions)
+  const [frequencyOptions, setFrequencyOptions] = useState<string[]>(getStoredFrequencies);
+
+  const handleAddFrequencyOption = (newOpt: string) => {
+    const trimmed = newOpt.trim();
+    if (!trimmed) return;
+    if (frequencyOptions.includes(trimmed)) return;
+    const updated = [...frequencyOptions, trimmed];
+    setFrequencyOptions(updated);
+    try {
+      localStorage.setItem(FREQUENCIES_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDeleteFrequencyOption = (optToDelete: string) => {
+    const updated = frequencyOptions.filter((opt) => opt !== optToDelete);
+    setFrequencyOptions(updated);
+    try {
+      localStorage.setItem(FREQUENCIES_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleResetFrequencyOptions = () => {
+    setFrequencyOptions(DEFAULT_FREQUENCIES);
+    try {
+      localStorage.setItem(FREQUENCIES_STORAGE_KEY, JSON.stringify(DEFAULT_FREQUENCIES));
+    } catch {
+      // ignore
+    }
+  };
+
   // Medicines List - Starts with clean empty fields without dummy data
   const [medicines, setMedicines] = useState<MedicineItem[]>([
     {
@@ -208,10 +583,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       medicine_name: "",
       dosage: "",
       frequency: "",
-      is_custom: false,
-      freq_m: "",
-      freq_a: "",
-      freq_n: "",
       duration: "",
       instructions: "",
     },
@@ -771,10 +1142,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       medicine_name: "",
       dosage: "",
       frequency: "",
-      is_custom: false,
-      freq_m: "",
-      freq_a: "",
-      freq_n: "",
       duration: "",
       instructions: "",
     };
@@ -782,17 +1149,11 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   };
 
   const handleQuickAddMedicine = (drug: (typeof COMMON_DRUGS)[0]) => {
-    const parts = (drug.freq || "").split("-").map((p) => p.trim());
-    const is3Box = parts.length === 3;
     const newMed: MedicineItem = {
       id: `med-${Date.now()}`,
       medicine_name: drug.name,
       dosage: drug.dosage,
       frequency: drug.freq,
-      is_custom: !is3Box,
-      freq_m: is3Box ? parts[0] : "",
-      freq_a: is3Box ? parts[1] : "",
-      freq_n: is3Box ? parts[2] : "",
       duration: drug.duration,
       instructions: drug.inst,
     };
@@ -806,52 +1167,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
 
   const handleUpdateMedicine = (id: string, field: keyof MedicineItem, val: string) => {
     setMedicines(medicines.map((m) => (m.id === id ? { ...m, [field]: val } : m)));
-  };
-
-  const handleUpdate3Box = (id: string, part: "freq_m" | "freq_a" | "freq_n", val: string) => {
-    setMedicines((prev) =>
-      prev.map((m) => {
-        if (m.id !== id) return m;
-        const updated = { ...m, [part]: val };
-        const mVal = updated.freq_m !== undefined ? updated.freq_m : "";
-        const aVal = updated.freq_a !== undefined ? updated.freq_a : "";
-        const nVal = updated.freq_n !== undefined ? updated.freq_n : "";
-        if (!mVal && !aVal && !nVal) {
-          updated.frequency = "";
-        } else {
-          updated.frequency = `${mVal || "0"}-${aVal || "0"}-${nVal || "0"}`;
-        }
-        return updated;
-      })
-    );
-  };
-
-  const handleToggleCustom = (id: string, isCustom: boolean) => {
-    setMedicines((prev) =>
-      prev.map((m) => {
-        if (m.id !== id) return m;
-        if (!isCustom) {
-          const parts = (m.frequency || "").split("-").map((p) => p.trim());
-          const freq_m = parts[0] || m.freq_m || "";
-          const freq_a = parts[1] || m.freq_a || "";
-          const freq_n = parts[2] || m.freq_n || "";
-          const frequency = (freq_m || freq_a || freq_n) ? `${freq_m || "0"}-${freq_a || "0"}-${freq_n || "0"}` : "";
-          return {
-            ...m,
-            is_custom: false,
-            freq_m,
-            freq_a,
-            freq_n,
-            frequency,
-          };
-        } else {
-          return {
-            ...m,
-            is_custom: true,
-          };
-        }
-      })
-    );
   };
 
   // Quick follow-up days
@@ -2751,7 +3066,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                     <th style={{ width: "35px" }}>#</th>
                     <th style={{ minWidth: "160px" }}>Medicine Name</th>
                     <th style={{ width: "95px" }}>Dosage</th>
-                    <th style={{ width: "155px" }}>Frequency (M-A-N)</th>
+                    <th style={{ width: "170px" }}>Frequency</th>
                     <th style={{ width: "100px" }}>Duration</th>
                     <th style={{ minWidth: "130px" }}>Instructions</th>
                     <th style={{ width: "40px", textAlign: "center" }}>Del</th>
@@ -2779,224 +3094,15 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                           onChange={(e) => handleUpdateMedicine(med.id, "dosage", e.target.value)}
                         />
                       </td>
-                      <td>
-                        {!med.is_custom ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "4px", alignItems: "center" }}>
-                            {/* 3 Input Boxes for Morning - Afternoon - Night with auto-shift */}
-                            <div style={{ display: "flex", alignItems: "center", gap: "3px" }}>
-                              <input
-                                id={`freq-${med.id}-m`}
-                                type="text"
-                                className="dose-input"
-                                maxLength={3}
-                                placeholder="0"
-                                title="Morning Dose (M)"
-                                value={med.freq_m || ""}
-                                autoComplete="off"
-                                autoCorrect="off"
-                                spellCheck={false}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  handleUpdate3Box(med.id, "freq_m", val);
-                                  if (val.trim().length >= 1) {
-                                    const nextEl = document.getElementById(`freq-${med.id}-a`);
-                                    if (nextEl) {
-                                      nextEl.focus();
-                                      (nextEl as HTMLInputElement).select();
-                                    }
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "ArrowRight") {
-                                    const nextEl = document.getElementById(`freq-${med.id}-a`);
-                                    if (nextEl) {
-                                      nextEl.focus();
-                                      (nextEl as HTMLInputElement).select();
-                                    }
-                                  }
-                                }}
-                                style={{
-                                  width: "28px",
-                                  height: "28px",
-                                  textAlign: "center",
-                                  fontWeight: 700,
-                                  fontSize: "13px",
-                                  border: "1.5px solid #cbd5e1",
-                                  borderRadius: "4px",
-                                  background: "#ffffff",
-                                  color: "#0f172a",
-                                }}
-                              />
-                              <span style={{ fontWeight: 800, color: "#94a3b8" }}>-</span>
-                              <input
-                                id={`freq-${med.id}-a`}
-                                type="text"
-                                className="dose-input"
-                                maxLength={3}
-                                placeholder="0"
-                                title="Afternoon Dose (A)"
-                                value={med.freq_a || ""}
-                                autoComplete="off"
-                                autoCorrect="off"
-                                spellCheck={false}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  handleUpdate3Box(med.id, "freq_a", val);
-                                  if (val.trim().length >= 1) {
-                                    const nextEl = document.getElementById(`freq-${med.id}-n`);
-                                    if (nextEl) {
-                                      nextEl.focus();
-                                      (nextEl as HTMLInputElement).select();
-                                    }
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Backspace" && !med.freq_a) {
-                                    const prevEl = document.getElementById(`freq-${med.id}-m`);
-                                    if (prevEl) {
-                                      prevEl.focus();
-                                      (prevEl as HTMLInputElement).select();
-                                    }
-                                  } else if (e.key === "ArrowLeft") {
-                                    const prevEl = document.getElementById(`freq-${med.id}-m`);
-                                    if (prevEl) {
-                                      prevEl.focus();
-                                      (prevEl as HTMLInputElement).select();
-                                    }
-                                  } else if (e.key === "ArrowRight") {
-                                    const nextEl = document.getElementById(`freq-${med.id}-n`);
-                                    if (nextEl) {
-                                      nextEl.focus();
-                                      (nextEl as HTMLInputElement).select();
-                                    }
-                                  }
-                                }}
-                                style={{
-                                  width: "28px",
-                                  height: "28px",
-                                  textAlign: "center",
-                                  fontWeight: 700,
-                                  fontSize: "13px",
-                                  border: "1.5px solid #cbd5e1",
-                                  borderRadius: "4px",
-                                  background: "#ffffff",
-                                  color: "#0f172a",
-                                }}
-                              />
-                              <span style={{ fontWeight: 800, color: "#94a3b8" }}>-</span>
-                              <input
-                                id={`freq-${med.id}-n`}
-                                type="text"
-                                className="dose-input"
-                                maxLength={3}
-                                placeholder="0"
-                                title="Night Dose (N)"
-                                value={med.freq_n || ""}
-                                autoComplete="off"
-                                autoCorrect="off"
-                                spellCheck={false}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  handleUpdate3Box(med.id, "freq_n", val);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Backspace" && !med.freq_n) {
-                                    const prevEl = document.getElementById(`freq-${med.id}-a`);
-                                    if (prevEl) {
-                                      prevEl.focus();
-                                      (prevEl as HTMLInputElement).select();
-                                    }
-                                  } else if (e.key === "ArrowLeft") {
-                                    const prevEl = document.getElementById(`freq-${med.id}-a`);
-                                    if (prevEl) {
-                                      prevEl.focus();
-                                      (prevEl as HTMLInputElement).select();
-                                    }
-                                  }
-                                }}
-                                style={{
-                                  width: "28px",
-                                  height: "28px",
-                                  textAlign: "center",
-                                  fontWeight: 700,
-                                  fontSize: "13px",
-                                  border: "1.5px solid #cbd5e1",
-                                  borderRadius: "4px",
-                                  background: "#ffffff",
-                                  color: "#0f172a",
-                                }}
-                              />
-                            </div>
-
-                            {/* Label & Switch to Custom */}
-                            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", padding: "0 2px", alignItems: "center" }}>
-                              <span style={{ fontSize: "9px", color: "#64748b", fontWeight: 700 }}>M - A - N</span>
-                              <button
-                                type="button"
-                                onClick={() => handleToggleCustom(med.id, true)}
-                                style={{
-                                  background: "#f1f5f9",
-                                  border: "1px solid #cbd5e1",
-                                  borderRadius: "3px",
-                                  color: "#0284c7",
-                                  fontSize: "9.5px",
-                                  cursor: "pointer",
-                                  padding: "1px 6px",
-                                  fontWeight: 700,
-                                }}
-                                title="Switch to custom manual text frequency"
-                              >
-                                Custom ✎
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                            {/* Custom Manual Text Input - NO DROPDOWN */}
-                            <input
-                              type="text"
-                              className="table-input"
-                              placeholder="e.g. SOS / Stat / 1-0-1-0"
-                              value={med.frequency}
-                              onChange={(e) => handleUpdateMedicine(med.id, "frequency", e.target.value)}
-                              autoComplete="off"
-                              autoCorrect="off"
-                              spellCheck={false}
-                              style={{
-                                fontWeight: 700,
-                                fontSize: "12px",
-                                padding: "4px 6px",
-                                border: "1.5px solid #0284c7",
-                                borderRadius: "4px",
-                                width: "100%",
-                              }}
-                              autoFocus
-                            />
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <span style={{ fontSize: "9px", color: "#64748b", fontWeight: 600 }}>Custom Text</span>
-                              <button
-                                type="button"
-                                onClick={() => handleToggleCustom(med.id, false)}
-                                style={{
-                                  background: "#f1f5f9",
-                                  border: "1px solid #cbd5e1",
-                                  borderRadius: "3px",
-                                  color: "#0369a1",
-                                  fontSize: "9.5px",
-                                  cursor: "pointer",
-                                  padding: "1px 6px",
-                                  fontWeight: 700,
-                                }}
-                                title="Switch back to 3-Box (M-A-N) frequency"
-                              >
-                                3 Boxes (1-0-1) ⤶
-                              </button>
-                            </div>
-                          </div>
-                        )}
+                      <td style={{ position: "relative" }}>
+                        <FrequencyCombobox
+                          value={med.frequency}
+                          onChange={(val) => handleUpdateMedicine(med.id, "frequency", val)}
+                          options={frequencyOptions}
+                          onAddOption={handleAddFrequencyOption}
+                          onDeleteOption={handleDeleteFrequencyOption}
+                          onResetDefaults={handleResetFrequencyOptions}
+                        />
                       </td>
                       <td>
                         <select

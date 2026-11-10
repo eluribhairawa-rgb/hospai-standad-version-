@@ -1819,7 +1819,7 @@ def get_patient_stats(db, hospital_id=None, selected_date=None):
 
 
 
-def get_dashboard_analytics(db, days=14, include_employee=False, hospital_id=None):
+def get_dashboard_analytics(db, days=14, include_employee=False, hospital_id=None, selected_date=None):
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     try:
         requested_days = int(days)
@@ -1828,39 +1828,44 @@ def get_dashboard_analytics(db, days=14, include_employee=False, hospital_id=Non
 
     # Keep the window bounded so the dashboard stays fast and readable.
     window_days = max(7, min(requested_days, 60))
-    start_date = current_ist_datetime().date() - timedelta(days=window_days - 1)
+    if selected_date:
+        try:
+            clean_date = str(selected_date).split('T')[0].split(' ')[0]
+            end_date = datetime.strptime(clean_date, "%Y-%m-%d").date()
+        except Exception:
+            end_date = current_ist_datetime().date()
+    else:
+        end_date = current_ist_datetime().date()
+
+    start_date = end_date - timedelta(days=window_days - 1)
     day_range = [(start_date + timedelta(days=index)).isoformat() for index in range(window_days)]
 
     with get_connection(db) as conn:
         cursor = conn.cursor()
 
         cursor.execute(
-            f"""
+            """
             SELECT DATE(created_at) AS day, COUNT(*) AS count
             FROM patients
-            WHERE hospital_id = ? AND DATE(created_at) >= CURRENT_DATE - INTERVAL '{window_days - 1} days'
+            WHERE hospital_id = ? AND DATE(created_at) >= ? AND DATE(created_at) <= ?
             GROUP BY DATE(created_at)
             ORDER BY day ASC
             """,
-            (scoped_hospital_id,),
+            (scoped_hospital_id, start_date.isoformat(), end_date.isoformat()),
         )
-        # row["day"] comes back as a datetime.date object from the DATE()
-        # cast, but day_range (below) is built from .isoformat() strings --
-        # keying the map by the raw date object made every lookup miss and
-        # silently return 0, even on days with real registrations.
-        patient_trend_map = {row["day"].isoformat(): row["count"] for row in cursor.fetchall()}
+        patient_trend_map = {(row["day"].isoformat() if hasattr(row["day"], "isoformat") else str(row["day"])): row["count"] for row in cursor.fetchall()}
 
         cursor.execute(
-            f"""
+            """
             SELECT DATE(created_at) AS day, COUNT(*) AS count
             FROM documents
-            WHERE hospital_id = ? AND DATE(created_at) >= CURRENT_DATE - INTERVAL '{window_days - 1} days'
+            WHERE hospital_id = ? AND DATE(created_at) >= ? AND DATE(created_at) <= ?
             GROUP BY DATE(created_at)
             ORDER BY day ASC
             """,
-            (scoped_hospital_id,),
+            (scoped_hospital_id, start_date.isoformat(), end_date.isoformat()),
         )
-        document_trend_map = {row["day"].isoformat(): row["count"] for row in cursor.fetchall()}
+        document_trend_map = {(row["day"].isoformat() if hasattr(row["day"], "isoformat") else str(row["day"])): row["count"] for row in cursor.fetchall()}
 
         cursor.execute(
             """
@@ -9459,7 +9464,7 @@ def get_hospital_dashboard_summary(db, selected_date=None):
 
         # Daily OP
         cursor.execute(
-            f"SELECT COUNT(*) FROM appointments WHERE visit_type='OP' AND {selected_date_clause.replace('arrival_at', 'appointment_date')}",
+            f"SELECT COUNT(*) FROM appointments WHERE UPPER(visit_type)='OP' AND {selected_date_clause.replace('arrival_at', 'appointment_date')}",
             selected_date_params,
         )
         daily_op = cursor.fetchone()[0]
@@ -9479,12 +9484,12 @@ def get_hospital_dashboard_summary(db, selected_date=None):
         # Monthly OP
         if target_month_val:
             cursor.execute(
-                "SELECT COUNT(*) FROM appointments WHERE visit_type='OP' AND to_char(appointment_date, 'YYYY-MM') = ?",
+                "SELECT COUNT(*) FROM appointments WHERE UPPER(visit_type)='OP' AND to_char(appointment_date, 'YYYY-MM') = ?",
                 (target_month_val,),
             )
         else:
             cursor.execute(
-                "SELECT COUNT(*) FROM appointments WHERE visit_type='OP' AND to_char(appointment_date, 'YYYY-MM') = to_char(CURRENT_DATE, 'YYYY-MM')",
+                "SELECT COUNT(*) FROM appointments WHERE UPPER(visit_type)='OP' AND to_char(appointment_date, 'YYYY-MM') = to_char(CURRENT_DATE, 'YYYY-MM')",
             )
         monthly_op = cursor.fetchone()[0]
 
@@ -9812,14 +9817,39 @@ def get_hospital_dashboard_summary(db, selected_date=None):
         )
         revenue_module_rows = [dict(row) for row in cursor.fetchall()]
         revenue_module_breakdown = {
-            "today": {"op_billing": 0, "lab_diagnostics": 0, "pharmacy": 0, "lab_earned": 0, "lab_collected": 0, "lab_due": 0},
-            "monthly": {"op_billing": 0, "lab_diagnostics": 0, "pharmacy": 0, "lab_earned": 0, "lab_collected": 0, "lab_due": 0},
+            "today": {"op_billing": 0, "ip_billing": 0, "lab_diagnostics": 0, "pharmacy": 0, "lab_earned": 0, "lab_collected": 0, "lab_due": 0},
+            "monthly": {"op_billing": 0, "ip_billing": 0, "lab_diagnostics": 0, "pharmacy": 0, "lab_earned": 0, "lab_collected": 0, "lab_due": 0},
         }
         for module_row in revenue_module_rows:
             label = module_row.get("label")
             if label in revenue_module_breakdown["today"]:
                 revenue_module_breakdown["today"][label] = module_row.get("today_amount", 0) or 0
                 revenue_module_breakdown["monthly"][label] = module_row.get("month_amount", 0) or 0
+
+        # Enhance with unified revenue_breakdown (includes IP billing and pharmacy invoices)
+        try:
+            import revenue_details
+            rb_today = revenue_details.revenue_breakdown(db, date_str, 'today')
+            rb_month = revenue_details.revenue_breakdown(db, date_str, 'month')
+
+            today_by_key = {r["key"]: r["amount"] for r in rb_today.get("rows", [])}
+            month_by_key = {r["key"]: r["amount"] for r in rb_month.get("rows", [])}
+
+            revenue_module_breakdown["today"]["op_billing"] = today_by_key.get("op", revenue_module_breakdown["today"]["op_billing"])
+            revenue_module_breakdown["today"]["ip_billing"] = today_by_key.get("ip", 0.0)
+            revenue_module_breakdown["today"]["pharmacy"] = today_by_key.get("pharmacy", revenue_module_breakdown["today"]["pharmacy"])
+            revenue_module_breakdown["today"]["lab_diagnostics"] = today_by_key.get("lab", revenue_module_breakdown["today"]["lab_diagnostics"])
+
+            revenue_module_breakdown["monthly"]["op_billing"] = month_by_key.get("op", revenue_module_breakdown["monthly"]["op_billing"])
+            revenue_module_breakdown["monthly"]["ip_billing"] = month_by_key.get("ip", 0.0)
+            revenue_module_breakdown["monthly"]["pharmacy"] = month_by_key.get("pharmacy", revenue_module_breakdown["monthly"]["pharmacy"])
+            revenue_module_breakdown["monthly"]["lab_diagnostics"] = month_by_key.get("lab", revenue_module_breakdown["monthly"]["lab_diagnostics"])
+
+            if rb_month.get("total", 0) > 0:
+                revenue_summary["monthly_revenue"] = rb_month["total"]
+            pharmacy_sales = revenue_module_breakdown["monthly"]["pharmacy"]
+        except Exception:
+            pass
 
         # Detailed Lab Revenue breakdown for the selected date
         detailed_lab_params = (date_str,) if date_str else ()

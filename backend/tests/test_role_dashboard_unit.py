@@ -158,6 +158,24 @@ class HospitalOverviewAccessTests(unittest.TestCase):
                      "/api/dashboard/export/excel"):
             self.assertTrue(guarded(reports_exports.router, path), path)
 
+    def test_dashboard_analytics_accepts_date_parameter(self):
+        with mock.patch.object(clinical.lq, "get_dashboard_analytics", return_value={"patients_trend": []}) as get_analytics:
+            clinical.dashboard_analytics(
+                request=mock.MagicMock(),
+                days=14,
+                date="2026-10-15",
+                db=mock.MagicMock(),
+                user=login("Admin", user_type="admin"),
+                hospital_id=1,
+            )
+            get_analytics.assert_called_once_with(
+                mock.ANY,
+                days=14,
+                include_employee=True,
+                hospital_id=1,
+                selected_date="2026-10-15",
+            )
+
 
 class NursingAccessTests(unittest.TestCase):
     def test_only_admins_and_nursing_supervisors_manage(self):

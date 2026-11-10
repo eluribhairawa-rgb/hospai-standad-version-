@@ -10,10 +10,17 @@ import "./billingTheme.css";
 type OverviewCard = "net_billed" | "receipts" | "refunds" | "dues";
 type CardDetail = {
   date: string; card: OverviewCard; total: number;
-  entries: { at: string | null; patient_id?: string | null; patient_name: string; reference?: string | null; detail?: string | null; amount: number }[];
+  entries: { at: string | null; patient_id?: string | null; patient_name: string; reference?: string | null; detail?: string | null; payment_mode?: string | null; amount: number }[];
 };
 const CARD_LABELS: Record<OverviewCard, string> = {
   net_billed: "Net billed", receipts: "Receipts", refunds: "Refunds", dues: "Outstanding patient dues",
+};
+
+const formatPaymentMode = (mode?: string | null) => {
+  if (!mode || mode === "-") return "-";
+  const trimmed = mode.trim();
+  if (trimmed.toLowerCase() === "upi") return "UPI";
+  return trimmed.split(", ").map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(", ");
 };
 
 type Props = {
@@ -871,15 +878,27 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
 
       {/* Modal: records behind a summary card */}
       <Modal open={!!cardDetail} onClose={() => setCardDetail(null)}
-        title={cardDetail ? `${CARD_LABELS[cardDetail.card]} - ${cardDetail.card === "dues" ? "all dates" : cardDetail.date}` : ""}>
+        title={cardDetail ? `${CARD_LABELS[cardDetail.card]} - ${cardDetail.card === "dues" ? "all dates" : cardDetail.date}` : ""}
+        className="billing-overview-modal"
+      >
         {cardDetail && (
           <div>
             <p style={{ margin: "0 0 0.6rem", color: "#475569" }}>
               {cardDetail.entries.length} record{cardDetail.entries.length === 1 ? "" : "s"} &middot; total <strong>₹{fmt(cardDetail.total)}</strong>
             </p>
-            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+            <div style={{ maxHeight: 440, overflowY: "auto" }}>
               <table className="billing-detail-table">
-                <thead><tr><th>Date &amp; time</th><th>Patient</th><th>UHID</th><th>Bill / receipt</th><th>Details</th><th style={{ textAlign: "right" }}>Amount</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Date &amp; time</th>
+                    <th>Patient</th>
+                    <th>UHID</th>
+                    <th>Bill / receipt</th>
+                    <th>Details</th>
+                    <th>Payment Method</th>
+                    <th style={{ textAlign: "right" }}>Amount</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {cardDetail.entries.map((e, i) => (
                     <tr key={`${e.reference}-${i}`}>
@@ -888,10 +907,23 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                       <td>{e.patient_id || "-"}</td>
                       <td>{e.reference || "-"}</td>
                       <td>{e.detail || "-"}</td>
-                      <td style={{ textAlign: "right" }}>₹{fmt(e.amount)}</td>
+                      <td>
+                        <span style={{
+                          display: "inline-block",
+                          padding: "2px 8px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          background: "#f1f5f9",
+                          color: "#334155"
+                        }}>
+                          {formatPaymentMode(e.payment_mode)}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>₹{fmt(e.amount)}</td>
                     </tr>
                   ))}
-                  {cardDetail.entries.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: "#64748b" }}>No records.</td></tr>}
+                  {cardDetail.entries.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", color: "#64748b" }}>No records.</td></tr>}
                 </tbody>
               </table>
             </div>

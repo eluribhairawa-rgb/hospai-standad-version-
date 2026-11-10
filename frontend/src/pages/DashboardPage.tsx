@@ -24,6 +24,26 @@ type RevenueDrill = {
   entries: { at: string | null; patient_id?: string | null; patient_name: string; reference?: string | null; amount: number; mode?: string | null }[];
 };
 
+type PaymentModeDrill = {
+  date: string;
+  period: string;
+  mode: string;
+  label: string;
+  total: number;
+  count: number;
+  mode_counts: Record<string, number>;
+  mode_totals: Record<string, number>;
+  entries: {
+    at: string | null;
+    patient_id?: string | null;
+    patient_name: string;
+    reference?: string | null;
+    amount: number;
+    mode?: string | null;
+    category?: string;
+  }[];
+};
+
 type Props = {
   stats: Stats;
   recentPatients: Patient[];
@@ -161,6 +181,9 @@ function ExecutiveDashboard({
   const [revenueBreakdownData, setRevenueBreakdownData] = useState<RevenueBreakdown | null>(null);
   const [revenueDrill, setRevenueDrill] = useState<RevenueDrill | null>(null);
   const [revenueDrillLoading, setRevenueDrillLoading] = useState(false);
+  const [paymentModePopup, setPaymentModePopup] = useState<string | null>(null);
+  const [paymentModeDrillLoading, setPaymentModeDrillLoading] = useState(false);
+  const [paymentModeData, setPaymentModeData] = useState<PaymentModeDrill | null>(null);
   const [viewPatient, setViewPatient] = useState<Patient | null>(null);
   const dashboardProfileRef = useRef<HTMLDivElement | null>(null);
   const currentDateLabel = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(parseIsoDate(dashboardDate));
@@ -605,6 +628,36 @@ function ExecutiveDashboard({
     }
   };
 
+  const openPaymentModeModal = async (mode: string) => {
+    setPaymentModePopup(mode);
+    setPaymentModeDrillLoading(true);
+    try {
+      const data = await apiFetch<PaymentModeDrill>(
+        `/api/dashboard/payment-mode-details?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(dashboardDate)}&period=today`
+      );
+      setPaymentModeData(data);
+    } catch (error) {
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to load collection details for this payment method.");
+    } finally {
+      setPaymentModeDrillLoading(false);
+    }
+  };
+
+  const switchPaymentModeTab = async (mode: string) => {
+    setPaymentModePopup(mode);
+    setPaymentModeDrillLoading(true);
+    try {
+      const data = await apiFetch<PaymentModeDrill>(
+        `/api/dashboard/payment-mode-details?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(dashboardDate)}&period=today`
+      );
+      setPaymentModeData(data);
+    } catch (error) {
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to load collection details.");
+    } finally {
+      setPaymentModeDrillLoading(false);
+    }
+  };
+
   const revenuePopupRows = useMemo((): { module: string; amount: number; key?: string }[] => {
     if (revenuePopup === "lab") {
       const breakdownToday = hospitalSummary?.revenue?.module_breakdown?.today as Record<string, number> | undefined;
@@ -943,7 +996,7 @@ function ExecutiveDashboard({
         <Card className="panel hosp-section-card">
           <CardHeader style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <CardTitle>Revenue Snapshot (Today)</CardTitle>
-            <button className="hosp-view-all" onClick={() => go("billing-module-collections")}>View All</button>
+            <button className="hosp-view-all" onClick={() => setRevenuePopup("today")}>View All</button>
           </CardHeader>
           <CardContent>
             <div className="hosp-rev-list">
@@ -955,11 +1008,19 @@ function ExecutiveDashboard({
                   onClick={() => {
                     if (row.label.includes("Pending")) {
                       openPayDuesModal();
+                    } else if (row.label.includes("Pharmacy")) {
+                      setRevenuePopup("pharmacy");
+                    } else if (row.label.includes("Lab")) {
+                      setRevenuePopup("lab");
+                    } else if (row.label.includes("Monthly")) {
+                      setRevenuePopup("monthly");
+                    } else if (row.label.includes("Doctor")) {
+                      go("accounts-doctor-payouts");
                     } else {
-                      go(row.label.includes("Lab") ? "diag-overview" : row.label.includes("Doctor") ? "accounts-doctor-payouts" : row.label.includes("IPD") ? "patients" : "billing-module-collections");
+                      setRevenuePopup("today");
                     }
                   }}
-                  title={row.label.includes("Pending") ? "Click to pay pending amounts" : undefined}
+                  title={`Click to view ${row.label} details`}
                 >
                   <span className="hosp-rev-icon">{row.icon}</span>
                   <span className="hosp-rev-label">{row.label}</span>
@@ -967,10 +1028,16 @@ function ExecutiveDashboard({
                 </button>
               ))}
             </div>
-            <div className="hosp-rev-total-row">
+            <button
+              type="button"
+              className="hosp-rev-total-row hosp-table-click"
+              style={{ width: "100%", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+              onClick={() => setRevenuePopup("monthly")}
+              title="Click to view monthly revenue details"
+            >
               <span>Total Revenue</span>
               <span>{formatCurrency(monthlyRevenue)}</span>
-            </div>
+            </button>
             <button
               type="button"
               className="hosp-rev-due-row hosp-table-click hosp-clickable-due-btn"
@@ -991,22 +1058,34 @@ function ExecutiveDashboard({
         <Card className="panel hosp-section-card">
           <CardHeader style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <CardTitle>Payment Summary (Today)</CardTitle>
-            <button className="hosp-view-all" onClick={() => go("billing-module-collections")}>View Details</button>
+            <button className="hosp-view-all" onClick={() => openPaymentModeModal("All")}>View Details</button>
           </CardHeader>
           <CardContent>
             <div className="hosp-pay-list">
               {paymentSummaryRows.map((row) => (
-                <button key={row.label} type="button" className="hosp-pay-row hosp-table-click" onClick={() => go("billing-module-collections")}>
+                <button
+                  key={row.label}
+                  type="button"
+                  className="hosp-pay-row hosp-table-click"
+                  onClick={() => openPaymentModeModal(row.label)}
+                  title={`Click to view ${row.label} collection details`}
+                >
                   <span className="hosp-pay-icon">💳</span>
                   <span className="hosp-pay-label">{row.label}</span>
                   <span className="hosp-pay-value">{formatCurrency(row.count)}</span>
                 </button>
               ))}
             </div>
-            <div className="hosp-pay-total-row">
+            <button
+              type="button"
+              className="hosp-pay-total-row hosp-table-click"
+              style={{ width: "100%", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+              onClick={() => openPaymentModeModal("All")}
+              title="Click to view all collections details"
+            >
               <span>Total Collected</span>
               <span style={{ color: "#0891b2", fontWeight: 700 }}>{formatCurrency(paymentSummaryTotal)}</span>
-            </div>
+            </button>
           </CardContent>
         </Card>
       </div>
@@ -1098,6 +1177,134 @@ function ExecutiveDashboard({
             </Button>
           )}
           <Button onClick={downloadRevenuePopupPdf}>Download PDF</Button>
+        </div>
+      </Modal>
+
+      {/* Payment Summary Mode Drilldown Modal */}
+      <Modal
+        open={!!paymentModePopup}
+        onClose={() => { setPaymentModePopup(null); setPaymentModeData(null); }}
+        title={`Payment Details — ${paymentModeData?.label || paymentModePopup || "Payment Summary"}`}
+        description={`Collections recorded for ${currentDateLabel}`}
+        className="hosp-revenue-pop-modal ui-modal-wide"
+      >
+        <div className="hosp-revenue-pop-summary" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "12px" }}>
+          <div>
+            <span>TOTAL COLLECTED</span>
+            <strong style={{ color: "#00828a" }}>{formatCurrency(paymentModeData?.total || 0)}</strong>
+          </div>
+          <div>
+            <span>RECORDS</span>
+            <strong>{paymentModeData?.count || 0}</strong>
+          </div>
+          <div>
+            <span>METHOD</span>
+            <strong style={{ color: "#00828a", textTransform: "uppercase" }}>{paymentModeData?.label || paymentModePopup || "ALL"}</strong>
+          </div>
+        </div>
+
+        {/* Filter Tabs for quick switching between Cash, Card, UPI, All */}
+        <div className="hosp-modal-tabs" style={{ marginTop: "14px", marginBottom: "14px" }}>
+          <button
+            type="button"
+            className={`hosp-modal-tab ${(!paymentModePopup || paymentModePopup.toLowerCase() === "all") ? "active" : ""}`}
+            onClick={() => void switchPaymentModeTab("All")}
+          >
+            All Modes ({paymentSummaryTotal > 0 ? formatCurrency(paymentSummaryTotal) : "₹0"})
+          </button>
+          {paymentModes.map((m) => (
+            <button
+              key={m.label}
+              type="button"
+              className={`hosp-modal-tab ${paymentModePopup?.toLowerCase() === m.label.toLowerCase() ? "active" : ""}`}
+              onClick={() => void switchPaymentModeTab(m.label)}
+            >
+              {m.label} ({formatCurrency(m.count)})
+            </button>
+          ))}
+        </div>
+
+        {paymentModeDrillLoading ? (
+          <div style={{ textAlign: "center", padding: "36px 0", color: "#64748b" }}>
+            Loading collection records…
+          </div>
+        ) : (
+          <div className="hosp-revenue-pop-table">
+            <div className="hosp-revenue-pop-head" style={{ alignItems: "center" }}>
+              <span>
+                {paymentModeData?.label || paymentModePopup} &middot; {paymentModeData?.entries.length || 0} record{(paymentModeData?.entries.length === 1) ? "" : "s"}
+              </span>
+              <span style={{ fontWeight: 700, color: "#00828a" }}>{formatCurrency(paymentModeData?.total || 0)}</span>
+            </div>
+            <div style={{ maxHeight: 360, overflowY: "auto" }}>
+              <table className="hosp-revenue-drill-table">
+                <thead>
+                  <tr>
+                    <th>Date &amp; Time</th>
+                    <th>Patient Name</th>
+                    <th>UHID</th>
+                    <th>Bill / Reference</th>
+                    <th>Module</th>
+                    <th>Payment Method</th>
+                    <th style={{ textAlign: "right" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(paymentModeData?.entries || []).map((e, i) => (
+                    <tr key={`${e.reference}-${i}`}>
+                      <td>
+                        {e.at ? new Date(e.at.replace(" ", "T")).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-"}
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{e.patient_name || "-"}</td>
+                      <td style={{ fontFamily: "monospace", color: "#00828a", fontWeight: 600 }}>{e.patient_id || "-"}</td>
+                      <td>{e.reference || "-"}</td>
+                      <td>
+                        <span style={{
+                          display: "inline-block",
+                          padding: "2px 7px",
+                          borderRadius: "4px",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          background: "#f1f5f9",
+                          color: "#475569",
+                          textTransform: "uppercase"
+                        }}>
+                          {e.category || "OP"}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{
+                          display: "inline-block",
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          background: (e.mode?.toLowerCase() === "cash" ? "#ecfdf5" : e.mode?.toLowerCase() === "upi" ? "#eff6ff" : "#fdf4ff"),
+                          color: (e.mode?.toLowerCase() === "cash" ? "#047857" : e.mode?.toLowerCase() === "upi" ? "#1d4ed8" : "#7e22ce"),
+                          textTransform: "uppercase"
+                        }}>
+                          {e.mode || "CASH"}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>{formatCurrency(e.amount)}</td>
+                    </tr>
+                  ))}
+                  {(!paymentModeData?.entries || paymentModeData.entries.length === 0) && (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", color: "#64748b", padding: "24px" }}>
+                        No collection records found for {paymentModeData?.label || paymentModePopup}.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className="hosp-revenue-pop-actions">
+          <Button variant="ghost" onClick={() => { setPaymentModePopup(null); setPaymentModeData(null); }}>Close</Button>
+          <Button onClick={() => go("billing-module-collections")}>Open Billing Collections</Button>
         </div>
       </Modal>
 

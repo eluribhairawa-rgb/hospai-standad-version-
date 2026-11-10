@@ -56,12 +56,12 @@ def stats(date: str | None = None, db: Session = Depends(get_db), user: dict = D
 
 
 @router.get("/dashboard/analytics")
-def dashboard_analytics(request: Request, days: int = 14, db: Session = Depends(get_db),
+def dashboard_analytics(request: Request, days: int = 14, date: str | None = None, db: Session = Depends(get_db),
                          user: dict = Depends(require_hospital_overview("patients.read")),
                          hospital_id: int = Depends(current_hospital_id)):
     permissions = security.resolve_user_permissions(user)
     include_employee = "admin.use" in permissions
-    return lq.get_dashboard_analytics(db, days=days, include_employee=include_employee, hospital_id=hospital_id)
+    return lq.get_dashboard_analytics(db, days=days, include_employee=include_employee, hospital_id=hospital_id, selected_date=date)
 
 
 @router.get("/dashboard/hospital-summary")
@@ -90,6 +90,17 @@ def dashboard_revenue_details(category: str, date: str | None = None, period: st
     import revenue_details
     try:
         return revenue_details.revenue_details(db, date, period, category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/dashboard/payment-mode-details")
+def dashboard_payment_mode_details(mode: str | None = None, date: str | None = None, period: str = "today", db: Session = Depends(get_db),
+                                   user: dict = Depends(require_hospital_overview("patients.read"))):
+    """Patient-level transactions behind a payment mode (Cash, Card, UPI, or all)."""
+    import revenue_details
+    try:
+        return revenue_details.payment_mode_details(db, date, period, mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
