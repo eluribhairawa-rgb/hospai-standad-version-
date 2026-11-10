@@ -8,6 +8,7 @@ from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, validate_required_fields, log_audit_event, client_ip
 import legacy_queries as lq
 import grn_import
+import pharmacy_profit
 
 router = APIRouter(prefix="/api/pharmacy", tags=["pharmacy"])
 
@@ -397,6 +398,24 @@ def pharmacy_sales_list(medicine_name: str | None = None, patient_id: str | None
 @router.get("/summary")
 def pharmacy_summary(db: Session = Depends(get_db), user: dict = Depends(require_permissions("pharmacy.read"))):
     return lq.get_pharmacy_summary(db)
+
+
+@router.get("/profit-analysis")
+def pharmacy_profit_analysis(from_date: str | None = None, to_date: str | None = None, q: str | None = None,
+                             group_by: str | None = None, group_value: str | None = None,
+                             sort_by: str = "profit_earned", sort_dir: str = "desc",
+                             page: int = 1, page_size: int = 25,
+                             db: Session = Depends(get_db), user: dict = Depends(require_permissions("pharmacy.report"))):
+    """Per-medicine cost (latest verified GRN), current sale price and profit
+    earned for the period (default: month to date). See pharmacy_profit.py."""
+    try:
+        return pharmacy_profit.get_profit_analysis(
+            db, from_date=from_date, to_date=to_date, q=q, group_by=group_by, group_value=group_value,
+            sort_by=sort_by, sort_dir=sort_dir, page=page, page_size=page_size,
+            today=lq.current_ist_datetime().date(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/purchase-requests")

@@ -1,0 +1,122 @@
+/* Pharmacy > Profit & Loss Analysis. Navy + white, matching the Overview. */
+.ppa-root {
+  --ppa-navy: #0b2e6b;
+  --ppa-navy-2: #1e3a8a;
+  --ppa-ink: #0f172a;
+  --ppa-muted: #64748b;
+  --ppa-line: #e2e8f0;
+  --ppa-pos: #047857;
+  --ppa-neg: #b91c1c;
+  padding: 1.25rem 1.75rem 2.5rem;
+  max-width: 1480px;
+  margin: 0 auto;
+  color: var(--ppa-ink);
+  background: #f8fafc;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.ppa-top { margin-bottom: 1.1rem; flex-wrap: wrap; align-items: flex-end; }
+.ppa-title { margin: 0.2rem 0 0; font-size: 1.45rem; font-weight: 800; color: var(--ppa-navy); letter-spacing: -0.02em; }
+.ppa-subtitle { margin: 0.3rem 0 0; color: #475569; font-size: 0.86rem; max-width: 640px; }
+
+.ppa-period { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; }
+.ppa-segment { display: inline-flex; background: #fff; border: 1px solid var(--ppa-line); border-radius: 9px; padding: 3px; }
+.ppa-segment button {
+  border: 0; background: transparent; padding: 6px 12px; border-radius: 6px;
+  font-size: 12.5px; font-weight: 600; color: #475569; cursor: pointer; white-space: nowrap;
+}
+.ppa-segment button.active { background: var(--ppa-navy); color: #fff; }
+.ppa-dates { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ppa-muted); }
+.ppa-dates input {
+  border: 1px solid #cbd5e1; border-radius: 7px; padding: 5px 8px; font: inherit; color: var(--ppa-ink); background: #fff;
+}
+
+.ppa-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 1rem; }
+.ppa-kpi-name { font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ppa-warn { color: #b45309; }
+
+.ppa-empty-banner, .ppa-info-banner {
+  border-radius: 10px; padding: 0.7rem 0.95rem; font-size: 13px; margin-bottom: 0.9rem;
+}
+.ppa-empty-banner { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; }
+.ppa-info-banner { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.ppa-link { border: 0; background: none; padding: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+
+.ppa-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; align-items: start; }
+.ppa-panel {
+  background: #fff; border: 1px solid #e2eef5; border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(9, 30, 45, 0.07); min-width: 0;
+}
+
+.ppa-toolbar { display: flex; gap: 0.6rem; padding: 0.85rem; border-bottom: 1px solid var(--ppa-line); flex-wrap: wrap; }
+.ppa-search {
+  flex: 1 1 260px; display: flex; align-items: center; gap: 8px; color: var(--ppa-muted);
+  border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; background: #fff;
+}
+.ppa-search:focus-within { border-color: var(--ppa-navy-2); box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.12); }
+.ppa-search input { border: 0; outline: 0; flex: 1; padding: 8px 0; font: inherit; font-size: 13px; color: var(--ppa-ink); background: transparent; min-width: 0; }
+.ppa-filter { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.ppa-filter select, .ppa-pager select {
+  border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; color: var(--ppa-ink); background: #fff; max-width: 220px;
+}
+
+.ppa-table-wrap { overflow-x: auto; transition: opacity 0.15s ease; }
+.ppa-table-wrap.is-loading { opacity: 0.55; }
+.ppa-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ppa-table th {
+  background: var(--ppa-navy); color: #fff; font-size: 11.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; padding: 0; white-space: nowrap;
+}
+.ppa-table th button {
+  width: 100%; border: 0; background: none; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit;
+  padding: 10px 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; justify-content: inherit;
+}
+.ppa-table th[style*="right"] button { justify-content: flex-end; }
+.ppa-sort-arrow { opacity: 0.55; font-size: 10px; }
+.ppa-table th.is-sorted .ppa-sort-arrow { opacity: 1; }
+.ppa-table td { padding: 9px 12px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
+.ppa-table tbody tr:hover td { background: #f8fbff; }
+.ppa-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ppa-med { font-weight: 600; color: var(--ppa-ink); }
+.ppa-sub { font-size: 11.5px; color: var(--ppa-muted); margin-top: 2px; }
+.ppa-profit { font-weight: 700; }
+.ppa-pos { color: var(--ppa-pos); }
+.ppa-neg, .ppa-sub.ppa-neg, .hosp-kpi-value.ppa-neg { color: var(--ppa-neg); }
+.ppa-empty-cell { text-align: center; padding: 2.2rem 1rem !important; color: var(--ppa-muted); font-weight: 500; }
+
+.ppa-pager {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  padding: 0.7rem 0.85rem; font-size: 12.5px; color: var(--ppa-muted);
+}
+.ppa-pager-controls { display: flex; align-items: center; gap: 0.5rem; }
+.ppa-pager-controls button {
+  width: 30px; height: 30px; border-radius: 7px; border: 1px solid #cbd5e1; background: #fff;
+  color: var(--ppa-navy); font-size: 16px; cursor: pointer;
+}
+.ppa-pager-controls button:disabled { opacity: 0.4; cursor: default; }
+
+.ppa-chart-panel { padding: 1rem; }
+.ppa-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+.ppa-panel-head h2 { margin: 0; font-size: 0.95rem; font-weight: 800; color: var(--ppa-navy); }
+.ppa-panel-head span { font-size: 11.5px; color: var(--ppa-muted); }
+.ppa-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+.ppa-bar-label { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 12.5px; margin-bottom: 4px; }
+.ppa-bar-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ppa-bar-value { font-weight: 700; color: var(--ppa-navy); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.ppa-bar-track { height: 9px; background: #eef2f7; border-radius: 4px; overflow: hidden; }
+.ppa-bar-fill { height: 100%; background: var(--ppa-navy-2); border-radius: 4px; transition: width 0.45s ease; }
+.ppa-bar-fill.is-neg { background: var(--ppa-neg); }
+.ppa-chart-empty { color: var(--ppa-muted); font-size: 13px; text-align: center; padding: 2.5rem 0.5rem; }
+
+@media (max-width: 1180px) {
+  .ppa-grid { grid-template-columns: 1fr; }
+  .ppa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .ppa-root { padding: 1rem 16px 2rem; }
+  .ppa-kpis { grid-template-columns: 1fr; }
+  .ppa-period { align-items: stretch; width: 100%; }
+  .ppa-segment { overflow-x: auto; }
+  .ppa-filter, .ppa-filter select { width: 100%; max-width: none; }
+}

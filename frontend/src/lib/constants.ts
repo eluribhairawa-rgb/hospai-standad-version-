@@ -71,6 +71,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "pharmacy-purchases", label: "Purchase & GRN", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
   { id: "pharmacy-suppliers", label: "Suppliers", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
   { id: "pharmacy-reports", label: "Reports", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
+  { id: "pharmacy-profit-analysis", label: "Profit & Loss Analysis", group: "pharmacy", module: "pharmacy", permission: "pharmacy.report", deniedHint: "You do not have permission to view pharmacy profit analysis." },
   { id: "pharmacy-settings", label: "Settings", group: "pharmacy", module: "pharmacy", permission: "pharmacy.read", deniedHint: "You do not have permission to access Pharmacy." },
 
   // 7. Billing & Accounts Department
@@ -261,6 +262,7 @@ export const PAGE_MODULE_MAP: Record<string, ModuleId> = {
   "pharmacy-purchases-grn": "pharmacy",
   "pharmacy-suppliers": "pharmacy",
   "pharmacy-reports": "pharmacy",
+  "pharmacy-profit-analysis": "pharmacy",
   "pharmacy-settings": "pharmacy",
   "pharmacy-dispense": "pharmacy",
   "pharmacy-ward-indents": "pharmacy",

@@ -41,6 +41,7 @@ import PharmacyInventoryStock from "./pages/pharmacy/PharmacyInventoryStock";
 import PharmacyPurchasesGrn from "./pages/pharmacy/PharmacyPurchasesGrn";
 import PharmacySuppliers from "./pages/pharmacy/PharmacySuppliers";
 import PharmacyReports from "./pages/pharmacy/PharmacyReports";
+import PharmacyProfitAnalysis from "./pages/pharmacy/PharmacyProfitAnalysis";
 import PharmacySettings from "./pages/pharmacy/PharmacySettings";
 import LabDiagnosticsCataloguePage from "./pages/LabDiagnosticsCataloguePage";
 import LabDiagnosticsOverviewPage from "./pages/LabDiagnosticsOverviewPage";
@@ -120,7 +121,7 @@ const VALID_PAGE_IDS = new Set([
   "doctors-history", "emergency", "emergency-worklist", "employees", "hrms", "inpatient", "inpatient-patients", "insurance-desk", "ip-admission", "lab", "laboratory",
   "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients",
   "pharmacy", "pharmacy-overview", "pharmacy-op-dispense", "pharmacy-ip-dispense", "pharmacy-inventory", "pharmacy-inventory-stock",
-  "pharmacy-purchases", "pharmacy-purchases-grn", "pharmacy-suppliers", "pharmacy-reports", "pharmacy-settings",
+  "pharmacy-purchases", "pharmacy-purchases-grn", "pharmacy-suppliers", "pharmacy-reports", "pharmacy-profit-analysis", "pharmacy-settings",
   "pharmacy-billing-insurance", "pharmacy-dispense", "pharmacy-emar",
   "pharmacy-inventory-batches", "pharmacy-inventory-expiry", "pharmacy-inventory-medicines",
   "pharmacy-inventory-transfers", "pharmacy-medication-orders",
@@ -191,6 +192,7 @@ const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   "pharmacy-purchases": "cart",
   "pharmacy-suppliers": "team",
   "pharmacy-reports": "chart",
+  "pharmacy-profit-analysis": "billing",
   "pharmacy-settings": "settings",
   "pharmacy-dispense": "pill",
   "pharmacy-billing-insurance": "shield-check",
@@ -1417,7 +1419,22 @@ function App() {
                 <span>Reports</span>
               </button>
 
-              {/* 8. Settings */}
+              {/* 8. Profit & Loss Analysis */}
+              {hasPermission("pharmacy.report") && (
+                <button
+                  type="button"
+                  className={`sidebar-tab ${page === "pharmacy-profit-analysis" ? "active" : ""}`}
+                  onClick={() => {
+                    setIsSidebarOpen(false);
+                    navigateToPage("pharmacy-profit-analysis");
+                  }}
+                >
+                  <span className="sidebar-tab-icon"><SidebarIcon name="billing" /></span>
+                  <span>Profit &amp; Loss Analysis</span>
+                </button>
+              )}
+
+              {/* 9. Settings */}
               <button
                 type="button"
                 className={`sidebar-tab ${page === "pharmacy-settings" ? "active" : ""}`}
@@ -1827,6 +1844,9 @@ function App() {
         )}
         {page === "pharmacy-reports" && hasPermission("pharmacy.read") && (
           <PharmacyReports key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
+        )}
+        {page === "pharmacy-profit-analysis" && hasPermission("pharmacy.report") && (
+          <PharmacyProfitAnalysis key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
         )}
         {page === "pharmacy-settings" && hasPermission("pharmacy.read") && (
           <PharmacySettings key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
