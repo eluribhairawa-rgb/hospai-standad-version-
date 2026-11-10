@@ -64,6 +64,7 @@ import BedManagementPage from "./pages/BedManagementPage";
 import InpatientPatientsPage from "./pages/InpatientPatientsPage";
 import NurseEmarPage from "./pages/NurseEmarPage";
 import DoctorPrescriptionPage from "./pages/DoctorPrescriptionPage";
+import PreBookingPage from "./pages/PreBookingPage";
 import HospitalBrand from "./components/HospitalBrand";
 import { API_BASE, EMPTY_PATIENT_FORM, EMPTY_STATS, LEGACY_MODULE_EXPANSIONS, NAV_ITEMS, PAGE_MODULE_MAP } from "./lib/constants";
 import { apiFetch, getHospitalCode, reportError, setHospitalCode } from "./lib/api";
@@ -120,7 +121,7 @@ const VALID_PAGE_IDS = new Set([
   "consent-desk", "dashboard", "diag", "lab-diagnostics", "diag-catalogue", "diag-imaging", "diag-laboratory",
   "diag-orders-billing", "diag-overview", "discharge-summary", "patient-reach-ai", "reach-survey-management", "reach-survey-templates", "reach-whatsapp-templates", "reach-survey-reports", "diag-quality-equipment", "diag-reports-approval", "diag-reports-history", "doctor-prescription",
   "doctors-history", "emergency", "emergency-worklist", "employees", "hrms", "inpatient", "inpatient-patients", "insurance-desk", "ip-admission", "lab", "laboratory",
-  "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients",
+  "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients", "pre-booking",
   "pharmacy", "pharmacy-overview", "pharmacy-op-dispense", "pharmacy-ip-dispense", "pharmacy-inventory", "pharmacy-inventory-stock",
   "pharmacy-purchases", "pharmacy-purchases-grn", "pharmacy-suppliers", "pharmacy-reports", "pharmacy-profit-analysis", "pharmacy-settings",
   "pharmacy-billing-insurance", "pharmacy-dispense", "pharmacy-emar",
@@ -133,6 +134,7 @@ const VALID_PAGE_IDS = new Set([
 const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   dashboard: "dashboard",
   add: "add",
+  "pre-booking": "appointment",
   "op-desk": "patients",
   "consent-desk": "add",
   "insurance-desk": "billing",
@@ -1567,7 +1569,7 @@ function App() {
           <span className="mobile-top-bar-title">HospAI</span>
         </div>
         <Container size="full">
-        {page !== "dashboard" && !page.startsWith("pharmacy-") && !isBillingRoute && page !== "doctor-prescription" && page !== "op-queue-management" && page !== "add" && page !== "ip-admission" && page !== "patient-journey" && page !== "discharge-summary" && page !== "patient-reach-ai" && !page.startsWith("reach-") && page !== "bed-management" && page !== "inpatient-patients" && (
+        {page !== "dashboard" && !page.startsWith("pharmacy-") && !isBillingRoute && page !== "doctor-prescription" && page !== "op-queue-management" && page !== "add" && page !== "pre-booking" && page !== "ip-admission" && page !== "patient-journey" && page !== "discharge-summary" && page !== "patient-reach-ai" && !page.startsWith("reach-") && page !== "bed-management" && page !== "inpatient-patients" && (
           <header className="topbar module-unified-topbar">
             <div className="module-topbar-breadcrumb-row">
               <div className="module-topbar-breadcrumb">
@@ -1635,6 +1637,14 @@ function App() {
             selectedPatient={selectedPatient}
             setNotice={setNotice}
             onDocumentSaved={refreshPatientData}
+            onNavigate={navigateToPage}
+          />
+        )}
+
+        {page === "pre-booking" && (
+          <PreBookingPage
+            key={pageKeys[page] || 0}
+            setNotice={setNotice}
             onNavigate={navigateToPage}
           />
         )}

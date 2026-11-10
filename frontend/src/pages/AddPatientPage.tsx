@@ -191,6 +191,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const [savingProvider, setSavingProvider] = useState(false);
   const [noAllergies, setNoAllergies] = useState(false);
   const [allergies, setAllergies] = useState("");
+  const [prebookingRefId, setPrebookingRefId] = useState<number | null>(null);
 
   // Visit Type: 'OP' | 'IP' | 'Emergency'
   const [visitType, setVisitType] = useState<"OP" | "IP" | "Emergency">("OP");
@@ -240,6 +241,58 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   useEffect(() => {
     fetchNextUhid();
     void loadInsuranceProviders();
+
+    // Check for pre-booked patient prefill data
+    try {
+      const raw = sessionStorage.getItem("hospai_prefill_prebooking");
+      if (raw) {
+        const item = JSON.parse(raw);
+        if (item) {
+          if (item.id) setPrebookingRefId(item.id);
+          const rawName = String(item.patient_name || "").trim();
+          if (rawName) {
+            const parts = rawName.split(/\s+/);
+            if (parts.length > 1) {
+              setFirstName(parts[0]);
+              setLastName(parts.slice(1).join(" "));
+            } else {
+              setFirstName(rawName);
+            }
+          }
+          if (item.phone) {
+            setPrimaryPhone(item.phone);
+          }
+          if (item.phone_country_code) {
+            const matched = COUNTRY_OPTIONS.find((opt) => opt.includes(item.phone_country_code));
+            if (matched) setPrimaryCountryCode(matched);
+          }
+          if (item.dob) {
+            setDob(item.dob);
+            setAge(calculateAgeFromDob(item.dob));
+          } else if (item.age) {
+            setAge(String(item.age));
+          }
+          if (item.email) {
+            setEmail(item.email);
+          }
+          if (item.reason) {
+            setSymptoms(item.reason);
+          }
+          if (item.department) {
+            setSelectedDepartment(item.department);
+          }
+          if (item.doctor_name) {
+            setSelectedDoctor(item.doctor_name);
+          }
+          setNotice({
+            type: "info",
+            message: `Pre-booked details for "${rawName}" auto-filled! Complete registration below to generate official UHID.`,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Could not parse pre-booking prefill data:", e);
+    }
   }, []);
 
   const loadInsuranceProviders = async () => {
@@ -498,6 +551,19 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       }
 
       setPatientId(createdPatientId);
+
+      if (prebookingRefId) {
+        try {
+          await apiFetch(`/api/pre-bookings/${prebookingRefId}/convert`, {
+            method: "PUT",
+            body: JSON.stringify({ patient_id: createdPatientId }),
+          });
+          sessionStorage.removeItem("hospai_prefill_prebooking");
+          setPrebookingRefId(null);
+        } catch (linkErr) {
+          console.warn("Could not link pre-booking:", linkErr);
+        }
+      }
 
       const regSummary = {
         patientId: createdPatientId,
@@ -1501,6 +1567,50 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             Fields marked with <span style={{ color: "#ef4444", fontWeight: 700 }}>*</span> are mandatory
           </div>
         </div>
+
+        {prebookingRefId && (
+          <div
+            style={{
+              marginBottom: "20px",
+              padding: "12px 18px",
+              background: "#f0fdf4",
+              border: "1px solid #86efac",
+              borderRadius: "8px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              fontSize: "13px",
+              color: "#166534",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px" }}>📋</span>
+              <span>
+                <strong>Pre-booking Loaded (#{prebookingRefId}):</strong> Details have been auto-filled. Complete registration to generate the official UHID.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setPrebookingRefId(null);
+                sessionStorage.removeItem("hospai_prefill_prebooking");
+                resetPatientDetailsForm();
+                setNotice({ type: "info", message: "Pre-booking prefill cleared." });
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#166534",
+                textDecoration: "underline",
+                cursor: "pointer",
+                fontSize: "12px",
+                fontWeight: 600,
+              }}
+            >
+              Clear prefill
+            </button>
+          </div>
+        )}
 
         {lastRegisteredPatient && (
           <div

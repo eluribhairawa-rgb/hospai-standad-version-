@@ -36,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   // 2. OP Management
   { id: "patients", label: "Patients", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "add", label: "Patient Registration", group: "op-management", module: "patient-registration", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
+  { id: "pre-booking", label: "Pre-booking", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access Pre-booking." },
   { id: "op-queue-management", label: "Queue Management", group: "op-management", module: "queue-management", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "doctor-prescription", label: "Doctor Prescription", group: "op-management", module: "doctor-prescription", permission: "patients.read", deniedHint: "You do not have permission to access Doctor Prescription." },
   { id: "patient-journey", label: "Patient Journey", group: "op-management", module: "consultation", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
@@ -224,6 +225,7 @@ export const PAGE_MODULE_MAP: Record<string, ModuleId> = {
   dashboard: "dashboard",
   analytics: "analytics",
   add: "patient-registration",
+  "pre-booking": "patients",
   registration: "patient-registration",
   "registration-desk": "patient-registration",
   patients: "patients",

@@ -488,7 +488,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   // Queue state
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(false);
-  const [queueStatusFilter, setQueueStatusFilter] = useState<"ALL" | "Waiting" | "In Consultation" | "Completed">("ALL");
+  const [queueStatusFilter, setQueueStatusFilter] = useState<"In Consultation" | "Waiting" | "ALL">("In Consultation");
   const [queueSearch, setQueueSearch] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("All Departments");
   const [selectedDoctor, setSelectedDoctor] = useState("All Doctors");
@@ -857,19 +857,8 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     const deptTerm = selectedDepartment.trim().toLowerCase();
 
     return queue.filter((item) => {
-      // Status filter
-      if (queueStatusFilter !== "ALL" && item.status !== queueStatusFilter) {
-        return false;
-      }
-      // Department filter
-      if (selectedDepartment !== "All Departments" && item.department.toLowerCase() !== deptTerm) {
-        return false;
-      }
-      // Doctor filter
-      if (selectedDoctor !== "All Doctors" && item.doctor.toLowerCase() !== docTerm) {
-        return false;
-      }
-      // Search term (name, token, uhid, phone)
+      // If doctor is typing in the search bar:
+      // Return matching patients across ALL statuses (including Completed)
       if (qTerm) {
         const matchName = item.name.toLowerCase().includes(qTerm);
         const matchToken = item.token.toLowerCase().includes(qTerm);
@@ -878,7 +867,38 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         if (!matchName && !matchToken && !matchUhid && !matchPhone) {
           return false;
         }
+        if (selectedDepartment !== "All Departments" && item.department.toLowerCase() !== deptTerm) {
+          return false;
+        }
+        if (selectedDoctor !== "All Doctors" && item.doctor.toLowerCase() !== docTerm) {
+          return false;
+        }
+        return true;
       }
+
+      // Default Queue View (when search is empty):
+      // Do NOT show completed patients in the active queue!
+      if (item.status === "Completed") {
+        return false;
+      }
+
+      // Filter by active consultation tab
+      if (queueStatusFilter === "In Consultation" && item.status !== "In Consultation") {
+        return false;
+      }
+      if (queueStatusFilter === "Waiting" && item.status !== "Waiting") {
+        return false;
+      }
+
+      // Department filter
+      if (selectedDepartment !== "All Departments" && item.department.toLowerCase() !== deptTerm) {
+        return false;
+      }
+      // Doctor filter
+      if (selectedDoctor !== "All Doctors" && item.doctor.toLowerCase() !== docTerm) {
+        return false;
+      }
+
       return true;
     });
   }, [queue, queueStatusFilter, selectedDepartment, selectedDoctor, queueSearch]);
@@ -889,7 +909,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     const inConsultation = queue.filter((i) => i.status === "In Consultation").length;
     const completed = queue.filter((i) => i.status === "Completed").length;
     return {
-      all: queue.length,
+      all: waiting + inConsultation,
       waiting,
       inConsultation,
       completed,
@@ -1036,16 +1056,69 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     }
     if (uhid === vitalsSourceUhid) return;
 
-    // Fetch vitals if exact registered patient match, starts with PAT-, or has length >= 4
+    // Fetch vitals & past prescription if exact registered patient match, starts with PAT-, or has length >= 4
     const isExact = registeredPatients.some((p) => (p.patient_id || "").toLowerCase() === uhid.toLowerCase());
     if (isExact || uhid.toUpperCase().startsWith("PAT-") || uhid.length >= 4) {
       const timer = setTimeout(() => {
         const matched = registeredPatients.find((p) => (p.patient_id || "").toLowerCase() === uhid.toLowerCase());
         void loadPatientLatestVitals(uhid, matched);
+        void loadPatientPreviousPrescription(uhid, matched ? getPatientFullName(matched) : undefined);
       }, 250);
       return () => clearTimeout(timer);
     }
   }, [patientUhid, vitalsSourceUhid, registeredPatients]);
+
+  // Load previous prescription for patient (medicines, diagnosis, lab tests, advice, lab params, follow-up)
+  const loadPatientPreviousPrescription = async (uhid: string, patientNameDisplay?: string) => {
+    if (!uhid || !uhid.trim()) return null;
+    try {
+      const res = await apiFetch<{ prescriptions?: any[] }>(`/api/prescriptions?patient_id=${encodeURIComponent(uhid.trim())}`);
+      const prescList = res?.prescriptions && Array.isArray(res.prescriptions) ? res.prescriptions : [];
+      if (prescList.length > 0) {
+        const latest = prescList[0];
+
+        // Restore diagnosis, tests, advice, follow-up
+        if (latest.diagnosis) setDiagnosis(latest.diagnosis);
+        if (latest.lab_tests) setLabTests(latest.lab_tests);
+        if (latest.advice) setAdvice(latest.advice);
+        if (latest.follow_up_date) setFollowUpDate(latest.follow_up_date);
+
+        // Restore lab parameters
+        setLabFbs(latest.lab_fbs || "");
+        setLabPpbs(latest.lab_ppbs || "");
+        setLabHba1c(latest.lab_hba1c || "");
+        setLabTchol(latest.lab_tchol || "");
+        setLabLdl(latest.lab_ldl || "");
+        setLabTgl(latest.lab_tgl || "");
+        setLabVitd(latest.lab_vitd || "");
+
+        // Restore prescribed medicines list
+        if (Array.isArray(latest.medicines) && latest.medicines.length > 0) {
+          const stamp = Date.now();
+          const loadedMeds: MedicineItem[] = latest.medicines.map((m: any, i: number) => ({
+            id: `med-prev-${stamp}-${i}`,
+            medicine_name: m.medicine_name || "",
+            dosage: m.dosage || "",
+            frequency: m.frequency || "",
+            duration: m.duration || "",
+            instructions: m.instructions || "",
+          }));
+          setMedicines(loadedMeds);
+        }
+
+        const dateStr = latest.created_at ? new Date(latest.created_at).toLocaleDateString("en-IN") : "";
+        const medCount = latest.medicines?.length || 0;
+        setNotice({
+          type: "success",
+          message: `Loaded past prescription for ${patientNameDisplay || uhid}${dateStr ? ` (${dateStr})` : ""}: ${medCount} medicine(s), diagnosis and advice restored.`,
+        });
+        return latest;
+      }
+    } catch {
+      // non-blocking
+    }
+    return null;
+  };
 
   // Select patient from queue
   const handleSelectPatient = async (patient: QueueItem) => {
@@ -1096,28 +1169,22 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       }
     }
 
-    // Try to load any previous prescription for this patient
+    // Load previous prescription for this patient (medicines, diagnosis, advice, labs, vitals)
     if (patient.uhid) {
-      try {
-        const res = await apiFetch<{ prescriptions?: any[] }>(`/api/prescriptions?patient_id=${encodeURIComponent(patient.uhid)}`);
-        if (res?.prescriptions && res.prescriptions.length > 0) {
-          const latest = res.prescriptions[0];
-          if (latest.diagnosis && !diagnosis) setDiagnosis(latest.diagnosis);
-          if (latest.lab_tests && !labTests) setLabTests(latest.lab_tests);
-          if (latest.advice) setAdvice(latest.advice);
-        }
-      } catch {
-        // non-blocking
+      const prev = await loadPatientPreviousPrescription(patient.uhid, patient.name);
+      if (!prev) {
+        setNotice({
+          type: "info",
+          message: `Selected Token #${patient.token}: ${patient.name} (${patient.uhid || "UHID Pending"}). Ready for consultation.`,
+        });
       }
-
-      // Auto-fill vitals with latest records taken
       void loadPatientLatestVitals(patient.uhid, patient);
+    } else {
+      setNotice({
+        type: "info",
+        message: `Selected Token #${patient.token}: ${patient.name} (${patient.uhid || "UHID Pending"}). Ready for consultation.`,
+      });
     }
-
-    setNotice({
-      type: "info",
-      message: `Selected Token #${patient.token}: ${patient.name} (${patient.uhid || "UHID Pending"}). Ready for consultation.`,
-    });
   };
 
   // Select next waiting patient in queue
@@ -1315,6 +1382,13 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         lab_tests: labTests.trim(),
         advice: advice.trim(),
         follow_up_date: followUpDate || null,
+        lab_fbs: labFbs || null,
+        lab_ppbs: labPpbs || null,
+        lab_hba1c: labHba1c || null,
+        lab_tchol: labTchol || null,
+        lab_ldl: labLdl || null,
+        lab_tgl: labTgl || null,
+        lab_vitd: labVitd || null,
         medicines: medicines.filter((m) => m.medicine_name.trim()),
         send_to_pharmacy: sendToPharmacy,
         complete_consultation: false,
@@ -1363,6 +1437,17 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
             vitalsTemp ? `Temp ${vitalsTemp}` : "",
             vitalsWeight ? `Wt ${vitalsWeight}` : "",
             vitalsSpo2 ? `SpO2 ${vitalsSpo2}` : "",
+          ].filter(Boolean).join(", ")}`
+        : "",
+      (labFbs || labPpbs || labHba1c || labTchol || labLdl || labTgl || labVitd)
+        ? `🔬 *Recent Labs:* ${[
+            labFbs ? `FBS ${labFbs} mg/dL` : "",
+            labPpbs ? `PPBS ${labPpbs} mg/dL` : "",
+            labHba1c ? `HbA1c ${labHba1c}%` : "",
+            labTchol ? `T.Chol ${labTchol} mg/dL` : "",
+            labLdl ? `LDL ${labLdl} mg/dL` : "",
+            labTgl ? `TGL ${labTgl} mg/dL` : "",
+            labVitd ? `Vit-D ${labVitd} ng/mL` : "",
           ].filter(Boolean).join(", ")}`
         : "",
       medsList ? `\n💊 *Prescribed Medicines:*\n${medsList}` : "",
@@ -1469,28 +1554,22 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       setDepartment(p.latest_department);
     }
 
-    // Try to load any previous prescription for this patient
+    // Load previous prescription for this patient (medicines, diagnosis, advice, labs, vitals)
     if (uhid) {
-      try {
-        const res = await apiFetch<{ prescriptions?: any[] }>(`/api/prescriptions?patient_id=${encodeURIComponent(uhid)}`);
-        if (res?.prescriptions && res.prescriptions.length > 0) {
-          const latest = res.prescriptions[0];
-          if (latest.diagnosis && !diagnosis) setDiagnosis(latest.diagnosis);
-          if (latest.lab_tests && !labTests) setLabTests(latest.lab_tests);
-          if (latest.advice && !advice) setAdvice(latest.advice);
-        }
-      } catch {
-        // non-blocking
+      const prev = await loadPatientPreviousPrescription(uhid, fullName);
+      if (!prev) {
+        setNotice({
+          type: "success",
+          message: `Loaded registered patient: ${fullName} (${uhid}). Ready for consultation.`,
+        });
       }
-
-      // Auto-fill vitals with latest records taken
       void loadPatientLatestVitals(uhid, p);
+    } else {
+      setNotice({
+        type: "success",
+        message: `Loaded registered patient: ${fullName}. Ready for consultation.`,
+      });
     }
-
-    setNotice({
-      type: "success",
-      message: `Loaded registered patient: ${fullName} (${uhid}). Ready for consultation.`,
-    });
   };
 
   return (
@@ -1514,6 +1593,8 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
             padding: 24px !important;
             box-shadow: none !important;
             border: none !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           .doctor-rx-top-header,
           .doctor-rx-queue-section,
@@ -1694,27 +1775,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
             <div style={{ display: "flex", gap: "6px" }}>
               <button
                 type="button"
-                onClick={() => setQueueStatusFilter("Waiting")}
-                style={{
-                  background: queueStatusFilter === "Waiting" ? "#fef3c7" : "#f8fafc",
-                  color: queueStatusFilter === "Waiting" ? "#b45309" : "#64748b",
-                  border: queueStatusFilter === "Waiting" ? "1.5px solid #f59e0b" : "1px solid #e2e8f0",
-                  borderRadius: "20px",
-                  padding: "4px 10px",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#f59e0b" }}></span>
-                Waiting: <strong>{queueCounts.waiting}</strong>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setQueueStatusFilter("In Consultation")}
                 style={{
                   background: queueStatusFilter === "In Consultation" ? "#e0f2fe" : "#f8fafc",
@@ -1736,11 +1796,11 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
 
               <button
                 type="button"
-                onClick={() => setQueueStatusFilter("Completed")}
+                onClick={() => setQueueStatusFilter("Waiting")}
                 style={{
-                  background: queueStatusFilter === "Completed" ? "#dcfce7" : "#f8fafc",
-                  color: queueStatusFilter === "Completed" ? "#15803d" : "#64748b",
-                  border: queueStatusFilter === "Completed" ? "1.5px solid #16a34a" : "1px solid #e2e8f0",
+                  background: queueStatusFilter === "Waiting" ? "#fef3c7" : "#f8fafc",
+                  color: queueStatusFilter === "Waiting" ? "#b45309" : "#64748b",
+                  border: queueStatusFilter === "Waiting" ? "1.5px solid #f59e0b" : "1px solid #e2e8f0",
                   borderRadius: "20px",
                   padding: "4px 10px",
                   fontSize: "12px",
@@ -1751,8 +1811,8 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   gap: "4px",
                 }}
               >
-                <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#16a34a" }}></span>
-                Completed: <strong>{queueCounts.completed}</strong>
+                <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#f59e0b" }}></span>
+                Waiting: <strong>{queueCounts.waiting}</strong>
               </button>
 
               <button
@@ -1769,7 +1829,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   cursor: "pointer",
                 }}
               >
-                All: <strong>{queueCounts.all}</strong>
+                All Active: <strong>{queueCounts.all}</strong>
               </button>
             </div>
 
@@ -1859,12 +1919,22 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
               <div style={{ position: "relative", flex: "1", minWidth: "180px" }}>
                 <input
                   type="text"
-                  placeholder="Search queue by token, patient name or UHID..."
+                  placeholder="Search patient by UHID, name, or phone to load old prescription..."
                   value={queueSearch}
                   onChange={(e) => setQueueSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (filteredQueue.length > 0) {
+                        void handleSelectPatient(filteredQueue[0]);
+                      } else if (matchingRegisteredForQueue.length > 0) {
+                        void handlePickSearchedPatient(matchingRegisteredForQueue[0]);
+                      }
+                    }
+                  }}
                   style={{
                     width: "100%",
-                    padding: "7px 10px 7px 30px",
+                    padding: "7px 30px 7px 30px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "12.5px",
@@ -1884,6 +1954,28 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   <circle cx="11" cy="11" r="8" />
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
+                {queueSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setQueueSearch("")}
+                    title="Clear search"
+                    style={{
+                      position: "absolute",
+                      right: "8px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      color: "#94a3b8",
+                      cursor: "pointer",
+                      padding: "2px 5px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
 
               <input
@@ -2151,6 +2243,54 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                       })}
                     </div>
                   </div>
+                ) : queueStatusFilter === "In Consultation" && queueCounts.waiting > 0 ? (
+                  <div
+                    style={{
+                      padding: "24px",
+                      textAlign: "center",
+                      background: "#f8fafc",
+                      borderRadius: "8px",
+                      border: "1px dashed #cbd5e1",
+                      color: "#64748b",
+                      fontSize: "13px",
+                    }}
+                  >
+                    No patients currently under consultation. You have <strong>{queueCounts.waiting}</strong> patient(s) waiting in queue.
+                    <div style={{ marginTop: "10px", display: "flex", justifyContent: "center", gap: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setQueueStatusFilter("Waiting")}
+                        style={{
+                          background: "#0284c7",
+                          color: "#ffffff",
+                          border: "none",
+                          borderRadius: "6px",
+                          padding: "6px 14px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        View Waiting Patients ({queueCounts.waiting}) →
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleNextPatient}
+                        style={{
+                          background: "#f0fdf4",
+                          color: "#166534",
+                          border: "1px solid #86efac",
+                          borderRadius: "6px",
+                          padding: "6px 14px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Call Next Waiting Patient 🔔
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <div
                     style={{
@@ -2297,10 +2437,10 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                           style={{
                             fontSize: "11.5px",
                             fontWeight: 700,
-                            color: isSelected ? "#0284c7" : "#0369a1",
+                            color: isSelected ? "#0284c7" : isCompleted ? "#059669" : "#0369a1",
                           }}
                         >
-                          {isSelected ? "Currently Selected ✓" : isCompleted ? "View Prescribed" : "Select & Prescribe →"}
+                          {isSelected ? "Currently Selected ✓" : isCompleted ? "View Old Prescription 📋" : "Select & Prescribe →"}
                         </span>
                       </div>
                     </div>
@@ -3378,6 +3518,13 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   setDiagnosis("");
                   setSymptoms("");
                   setLabTests("");
+                  setLabFbs("");
+                  setLabPpbs("");
+                  setLabHba1c("");
+                  setLabTchol("");
+                  setLabLdl("");
+                  setLabTgl("");
+                  setLabVitd("");
                   setActiveQueueItem(null);
                   setPatientUhid("");
                   setPatientName("");
@@ -3532,6 +3679,65 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                 {vitalsTemp && <span><strong>Temp:</strong> {vitalsTemp}</span>}
                 {vitalsWeight && <span><strong>Wt:</strong> {vitalsWeight}</span>}
                 {vitalsSpo2 && <span><strong>SpO2:</strong> {vitalsSpo2}</span>}
+              </div>
+            ) : null}
+
+            {/* Recent Lab Parameters if recorded */}
+            {(labFbs || labPpbs || labHba1c || labTchol || labLdl || labTgl || labVitd) ? (
+              <div
+                className="rx-sheet-labs-box"
+                style={{
+                  fontSize: "11px",
+                  color: "#0f172a",
+                  background: "#f8fafc",
+                  border: "1px solid #cbd5e1",
+                  padding: "5px 10px",
+                  borderRadius: "4px",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: "12px",
+                  marginBottom: "8px",
+                }}
+              >
+                <span style={{ fontWeight: 700, color: "#0369a1", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <span>🔬</span> Recent Lab Parameters:
+                </span>
+                {labFbs && (
+                  <span>
+                    <strong>FBS:</strong> {labFbs} <span style={{ fontSize: "10px", color: "#64748b" }}>mg/dL</span>
+                  </span>
+                )}
+                {labPpbs && (
+                  <span>
+                    <strong>PPBS:</strong> {labPpbs} <span style={{ fontSize: "10px", color: "#64748b" }}>mg/dL</span>
+                  </span>
+                )}
+                {labHba1c && (
+                  <span>
+                    <strong>HbA1c:</strong> {labHba1c}<span style={{ fontSize: "10px", color: "#64748b" }}>%</span>
+                  </span>
+                )}
+                {labTchol && (
+                  <span>
+                    <strong>T. Chol:</strong> {labTchol} <span style={{ fontSize: "10px", color: "#64748b" }}>mg/dL</span>
+                  </span>
+                )}
+                {labLdl && (
+                  <span>
+                    <strong>LDL:</strong> {labLdl} <span style={{ fontSize: "10px", color: "#64748b" }}>mg/dL</span>
+                  </span>
+                )}
+                {labTgl && (
+                  <span>
+                    <strong>TGL:</strong> {labTgl} <span style={{ fontSize: "10px", color: "#64748b" }}>mg/dL</span>
+                  </span>
+                )}
+                {labVitd && (
+                  <span>
+                    <strong>Vit-D:</strong> {labVitd} <span style={{ fontSize: "10px", color: "#64748b" }}>ng/mL</span>
+                  </span>
+                )}
               </div>
             ) : null}
 

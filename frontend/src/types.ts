@@ -612,3 +612,25 @@ export interface Alert {
   read: boolean;
   module?: string;
 }
+
+export interface PreBookingRecord {
+  id: number;
+  hospital_id?: number;
+  patient_name: string;
+  phone: string;
+  phone_country_code: string;
+  dob?: string | null;
+  age?: number | null;
+  email?: string | null;
+  appointment_date?: string | null;
+  appointment_time?: string | null;
+  department?: string | null;
+  doctor_name?: string | null;
+  reason?: string | null;
+  status: string;
+  patient_id?: string | null;
+  appointment_id?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+

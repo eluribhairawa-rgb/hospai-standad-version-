@@ -2771,3 +2771,33 @@ class Documents(Base):
 
     admission: Mapped[Optional['Admissions']] = relationship('Admissions', back_populates='documents')
     patient: Mapped[Optional['Patients']] = relationship('Patients', back_populates='documents')
+
+
+class PreBooking(Base):
+    __tablename__ = 'pre_bookings'
+    __table_args__ = (
+        PrimaryKeyConstraint('id', name='pre_bookings_pkey'),
+        Index('idx_pre_bookings_date', 'appointment_date'),
+        Index('idx_pre_bookings_phone', 'phone'),
+        Index('idx_pre_bookings_patient_id', 'patient_id'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    hospital_id: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('1'))
+    patient_name: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str] = mapped_column(Text, nullable=False)
+    phone_country_code: Mapped[Optional[str]] = mapped_column(Text, server_default=text("'+91'::text"))
+    dob: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    age: Mapped[Optional[int]] = mapped_column(Integer)
+    email: Mapped[Optional[str]] = mapped_column(Text)
+    appointment_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    appointment_time: Mapped[Optional[str]] = mapped_column(Text)
+    department: Mapped[Optional[str]] = mapped_column(Text)
+    doctor_name: Mapped[Optional[str]] = mapped_column(Text)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[Optional[str]] = mapped_column(Text, server_default=text("'Confirmed'::text"))
+    patient_id: Mapped[Optional[str]] = mapped_column(Text)
+    appointment_id: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
