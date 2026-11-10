@@ -282,13 +282,20 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
   // Update Status handler
   const handleStatusChange = async (id: string, newStatus: QueueStatus) => {
     const item = queue.find((q) => q.id === id);
-    const updated = queue.map((q) => (q.id === id ? { ...q, status: newStatus } : q));
-    saveQueue(updated);
     setOpenStatusDropdownId(null);
-    setDetailsPatient((prev) => (prev && prev.id === id ? { ...prev, status: newStatus } : prev));
+    if (!item || item.status === newStatus) return;
 
-    // Call backend API if appointmentId is present
-    if (item?.appointmentId) {
+    // Completed is terminal -- a finished consultation can't be reopened or sent back to waiting.
+    if (item.status === "Completed") {
+      setNotice({
+        type: "error",
+        message: `Token ${item.token} (${item.name}) is already completed. Its status can no longer be changed.`,
+      });
+      return;
+    }
+
+    // Persist first; only reflect the change on screen once the backend accepts it.
+    if (item.appointmentId) {
       try {
         const backendStatus =
           newStatus === "Waiting"
@@ -300,10 +307,17 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
           method: "PUT",
           body: JSON.stringify({ status: backendStatus }),
         });
-      } catch {
-        // silent
+      } catch (err) {
+        setNotice({
+          type: "error",
+          message: err instanceof Error && err.message ? err.message : "Could not update queue status. Please try again.",
+        });
+        return;
       }
     }
+
+    saveQueue(queue.map((q) => (q.id === id ? { ...q, status: newStatus } : q)));
+    setDetailsPatient((prev) => (prev && prev.id === id ? { ...prev, status: newStatus } : prev));
 
     setNotice({
       type: "success",
@@ -695,20 +709,25 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
                     <div className="opq-status-dropdown-wrap">
                       <button
                         type="button"
-                        className={`opq-status-btn status-${patient.status.toLowerCase().replace(/\s+/g, "-")}`}
+                        className={`opq-status-btn status-${patient.status.toLowerCase().replace(/\s+/g, "-")}${patient.status === "Completed" ? " is-locked" : ""}`}
+                        disabled={patient.status === "Completed"}
+                        title={patient.status === "Completed" ? "Consultation completed - status is locked" : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (patient.status === "Completed") return;
                           setOpenActionDropdownId(null);
                           setOpenStatusDropdownId(isStatusDropdownOpen ? null : patient.id);
                         }}
                       >
                         <span className="status-dot">●</span>
                         <span className="status-label">{patient.status}</span>
-                        <span className="status-arrow">{isStatusDropdownOpen ? "▴" : "▾"}</span>
+                        {patient.status !== "Completed" && (
+                          <span className="status-arrow">{isStatusDropdownOpen ? "▴" : "▾"}</span>
+                        )}
                       </button>
 
                       {/* Dropdown Menu */}
-                      {isStatusDropdownOpen && (
+                      {isStatusDropdownOpen && patient.status !== "Completed" && (
                         <div className="opq-status-menu" onClick={(e) => e.stopPropagation()}>
                           {/* Option 1: Waiting */}
                           <div
@@ -736,7 +755,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
 
                           {/* Option 3: Completed */}
                           <div
-                            className={`opq-status-option ${patient.status === "Completed" ? "active" : ""}`}
+                            className="opq-status-option"
                             onClick={() => handleStatusChange(patient.id, "Completed")}
                           >
                             <div className="option-title-row">

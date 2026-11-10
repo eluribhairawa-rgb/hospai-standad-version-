@@ -2270,6 +2270,107 @@ def _normalize_appointment_status(status_str):
 
 
 
+_SLOT_FREE_STATUSES = ("cancelled", "no_show", "skipped")
+_DEFAULT_SLOT_MINUTES = 15
+
+
+def _parse_hhmm(value):
+    match = re.match(r"^\s*(\d{1,2}):(\d{2})", str(value or ""))
+    if not match:
+        return None
+    hours, minutes = int(match.group(1)), int(match.group(2))
+    if hours > 23 or minutes > 59:
+        return None
+    return hours * 60 + minutes
+
+
+def _format_slot_label(total_minutes):
+    hours, minutes = divmod(int(total_minutes), 60)
+    suffix = "AM" if hours < 12 else "PM"
+    return f"{(hours % 12) or 12}:{minutes:02d} {suffix}"
+
+
+def _assign_doctor_slot(cursor, doctor_name, visit_type, appointment_date, appointment_day, schedule):
+    """Return the appointment_date to store so one doctor never has two patients
+    at the same time.
+
+    A date-only booking (walk-in from registration) gets the doctor's next free
+    slot instead of piling up at 00:00. A booking with an explicit time is
+    rejected if that doctor already has a live appointment at that minute.
+    Emergency bookings go to the duty pool, not a timed slot, and are left alone.
+    """
+    if not doctor_name or str(visit_type or "").strip().lower() == "emergency":
+        return appointment_date
+
+    # Serialise bookings for this doctor/day so two desks can't take the same slot.
+    cursor.execute(
+        "SELECT pg_advisory_xact_lock(hashtext(?))",
+        (f"appointment-slot:{doctor_name.lower()}:{appointment_day}",),
+    )
+    cursor.execute(
+        """
+        SELECT appointment_date FROM appointments
+        WHERE LOWER(TRIM(doctor_name)) = LOWER(?) AND DATE(appointment_date) = DATE(?)
+          AND COALESCE(status, '') NOT IN ('cancelled', 'no_show', 'skipped')
+        """,
+        (doctor_name, appointment_day),
+    )
+    taken = set()
+    for row in cursor.fetchall():
+        value = row["appointment_date"]
+        minute = (value.hour * 60 + value.minute) if hasattr(value, "hour") else _parse_hhmm(str(value)[11:16])
+        if minute is not None:
+            taken.add(minute)
+
+    slot_minutes = _DEFAULT_SLOT_MINUTES
+    day_start, day_end = 9 * 60, 24 * 60
+    if schedule:
+        start = _parse_hhmm(schedule["start_time"])
+        end = _parse_hhmm(schedule["end_time"])
+        capacity = schedule["slot_capacity"] or 0
+        if start is not None:
+            day_start = start
+        if start is not None and end is not None and end > start and capacity > 0:
+            slot_minutes = max(5, (end - start) // capacity)
+
+    def next_free(from_minute):
+        candidate = from_minute
+        while candidate < day_end:
+            if not any(candidate <= t < candidate + slot_minutes for t in taken):
+                return candidate
+            candidate += slot_minutes
+        # Grid is full: fall back to the first unused minute.
+        for candidate in range(from_minute, day_end):
+            if candidate not in taken:
+                return candidate
+        return None
+
+    earliest = day_start
+    now = current_ist_datetime()
+    if appointment_day == now.strftime("%Y-%m-%d"):
+        now_minute = now.hour * 60 + now.minute
+        earliest = max(earliest, now_minute + (-now_minute % 5))
+
+    raw = str(appointment_date).strip()
+    time_match = re.search(r"[T ](\d{1,2}:\d{2})", raw)
+    if time_match:
+        requested = _parse_hhmm(time_match.group(1))
+        if requested is not None and requested in taken:
+            suggestion = next_free(max(requested, earliest))
+            hint = f" Next free slot: {_format_slot_label(suggestion)}." if suggestion is not None else ""
+            raise ValueError(
+                f"Dr. {doctor_name} already has a patient booked at {_format_slot_label(requested)} on {appointment_day}. "
+                f"Please choose another time.{hint}"
+            )
+        return appointment_date
+
+    slot = next_free(earliest)
+    if slot is None:
+        raise ValueError(f"Dr. {doctor_name} has no free appointment slot left on {appointment_day}.")
+    hours, minutes = divmod(slot, 60)
+    return f"{appointment_day} {hours:02d}:{minutes:02d}:00"
+
+
 def create_appointment(db, data):
     appointment_date = data["appointment_date"]
     appointment_day = str(appointment_date).split("T")[0].split(" ")[0]
@@ -2293,7 +2394,7 @@ def create_appointment(db, data):
 
         if doctor_name:
             cursor.execute(
-                "SELECT schedule_date, status, department, slot_capacity FROM doctor_schedules WHERE doctor_name = ? AND (schedule_date = ? OR schedule_date IS NULL)",
+                "SELECT schedule_date, status, department, slot_capacity, start_time, end_time FROM doctor_schedules WHERE doctor_name = ? AND (schedule_date = ? OR schedule_date IS NULL)",
                 (doctor_name, appointment_day)
             )
             schedules = cursor.fetchall()
@@ -2325,6 +2426,11 @@ def create_appointment(db, data):
                         raise ValueError("Selected doctor has reached the maximum appointment capacity for the selected schedule.")
         else:
             resolved_department = department or "General Medicine"
+
+        appointment_date = _assign_doctor_slot(
+            cursor, doctor_name, data.get("visit_type", "OP"), appointment_date, appointment_day,
+            best_schedule if doctor_name else None,
+        )
 
         cursor.execute(
             "SELECT COALESCE(MAX(token_no), 0) AS value FROM appointments WHERE DATE(appointment_date) = DATE(?)",
@@ -2385,7 +2491,7 @@ def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
             cursor.execute(
                 """
                 SELECT id, token_no FROM appointments
-                WHERE patient_id = ? AND doctor_name = ? AND appointment_date = ?
+                WHERE patient_id = ? AND doctor_name = ? AND DATE(appointment_date) = DATE(?)
                   AND created_at >= (CURRENT_TIMESTAMP - INTERVAL '10 seconds')
                 ORDER BY created_at DESC LIMIT 1
                 """,
@@ -2421,7 +2527,7 @@ def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
 
         if doctor_name:
             cursor.execute(
-                "SELECT schedule_date, status, department, slot_capacity FROM doctor_schedules WHERE doctor_name = ? AND (schedule_date = ? OR schedule_date IS NULL)",
+                "SELECT schedule_date, status, department, slot_capacity, start_time, end_time FROM doctor_schedules WHERE doctor_name = ? AND (schedule_date = ? OR schedule_date IS NULL)",
                 (doctor_name, appointment_day)
             )
             schedules = cursor.fetchall()
@@ -2453,6 +2559,11 @@ def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
                         raise ValueError("Selected doctor has reached the maximum appointment capacity for the selected schedule.")
         else:
             resolved_department = department or "General Medicine"
+
+        appointment_date = _assign_doctor_slot(
+            cursor, doctor_name, payload.get("visit_type", "OP"), appointment_date, appointment_day,
+            best_schedule if doctor_name else None,
+        )
 
         cursor.execute(
             "SELECT COALESCE(MAX(token_no), 0) AS value FROM appointments WHERE DATE(appointment_date) = DATE(?)",
@@ -2711,7 +2822,8 @@ APPOINTMENT_STATUS_TRANSITIONS = {
     "in_consultation": {"in_consultation", "completed", "waiting", "pending", "scheduled"},
     "skipped": {"skipped", "scheduled", "checked_in", "waiting", "pending"},
     "cancelled": {"cancelled", "scheduled", "checked_in", "waiting", "pending"},
-    "completed": {"completed", "in_consultation"},
+    # Completed is terminal: once a consultation is done its queue status is locked.
+    "completed": {"completed"},
     "no_show": {"no_show", "scheduled", "checked_in", "waiting", "pending"},
 }
 

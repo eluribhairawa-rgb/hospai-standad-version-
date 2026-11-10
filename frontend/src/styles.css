@@ -12475,6 +12475,15 @@ label,
   border-color: #94a3b8;
 }
 
+.opq-status-btn.is-locked,
+.opq-status-btn.is-locked:hover {
+  cursor: not-allowed;
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: inherit;
+  opacity: 1;
+}
+
 .status-waiting .status-dot {
   color: #eab308;
 }
