@@ -140,6 +140,7 @@ export interface HospitalSummary {
     module_breakdown?: {
       today?: {
         op_billing?: number;
+        ip_billing?: number;
         lab_diagnostics?: number;
         pharmacy?: number;
         lab_earned?: number;
@@ -148,6 +149,7 @@ export interface HospitalSummary {
       };
       monthly?: {
         op_billing?: number;
+        ip_billing?: number;
         lab_diagnostics?: number;
         pharmacy?: number;
       };
@@ -245,6 +247,9 @@ export interface Patient {
   is_inpatient?: boolean;
   symptoms?: string;
   phone?: string;
+  phone_country_code?: string | null;
+  family_country_code?: string | null;
+  emergency_country_code?: string | null;
   email?: string;
   address?: string;
   emergency_contact?: string;
@@ -583,9 +588,11 @@ export interface Employee {
   full_name?: string;
   email?: string;
   phone?: string;
+  phone_country_code?: string | null;
   department?: string;
   address?: string;
   emergency_contact?: string;
+  emergency_contact_country_code?: string | null;
   status?: string;
   job_role?: string;
   access_role?: string;

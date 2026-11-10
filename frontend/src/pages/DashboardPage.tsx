@@ -15,6 +15,15 @@ import DateCalendarPicker, { toIsoDate, parseIsoDate } from "../components/DateC
 import { KpiCard } from "../components/DashboardWidgets";
 import RoleDashboard, { isExecutiveDashboardUser } from "./dashboard/RoleDashboard";
 
+type RevenueBreakdown = {
+  date: string; period: "today" | "month"; total: number; collected: number; outstanding: number;
+  rows: { key: string; label: string; amount: number; count: number }[];
+};
+type RevenueDrill = {
+  category: string; label: string; total: number;
+  entries: { at: string | null; patient_id?: string | null; patient_name: string; reference?: string | null; amount: number; mode?: string | null }[];
+};
+
 type Props = {
   stats: Stats;
   recentPatients: Patient[];
@@ -147,6 +156,11 @@ function ExecutiveDashboard({
   const [visitModalTab, setVisitModalTab] = useState<"all" | "new" | "revisits" | "followups">("all");
   const [bedOccupancyModalOpen, setBedOccupancyModalOpen] = useState(false);
   const [revenuePopup, setRevenuePopup] = useState<"today" | "monthly" | "pharmacy" | "lab" | null>(null);
+  // Today / Monthly modal rows come from /api/dashboard/revenue-breakdown (they add up to the total, IP included);
+  // clicking a row loads the patients behind it.
+  const [revenueBreakdownData, setRevenueBreakdownData] = useState<RevenueBreakdown | null>(null);
+  const [revenueDrill, setRevenueDrill] = useState<RevenueDrill | null>(null);
+  const [revenueDrillLoading, setRevenueDrillLoading] = useState(false);
   const [viewPatient, setViewPatient] = useState<Patient | null>(null);
   const dashboardProfileRef = useRef<HTMLDivElement | null>(null);
   const currentDateLabel = new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(parseIsoDate(dashboardDate));
@@ -566,41 +580,73 @@ function ExecutiveDashboard({
     }
   };
 
-  const revenuePopupRows = useMemo(() => {
+  useEffect(() => {
+    setRevenueDrill(null);
+    if (revenuePopup !== "today" && revenuePopup !== "monthly") { setRevenueBreakdownData(null); return; }
+    let stale = false;
+    const period = revenuePopup === "today" ? "today" : "month";
+    apiFetch<RevenueBreakdown>(`/api/dashboard/revenue-breakdown?date=${encodeURIComponent(dashboardDate)}&period=${period}`)
+      .then((data) => { if (!stale) setRevenueBreakdownData(data); })
+      .catch((error) => reportError(setNotice, error as { message?: string; status?: number }, "Unable to load the revenue breakdown."));
+    return () => { stale = true; };
+  }, [revenuePopup, dashboardDate]);
+
+  const openRevenueDrill = async (category: string, label: string) => {
+    const period = revenuePopup === "monthly" ? "month" : "today";
+    setRevenueDrillLoading(true);
+    try {
+      const data = await apiFetch<RevenueDrill>(
+        `/api/dashboard/revenue-details?category=${encodeURIComponent(category)}&date=${encodeURIComponent(dashboardDate)}&period=${period}`);
+      setRevenueDrill({ ...data, label: data.label || label });
+    } catch (error) {
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to load the patients for this revenue line.");
+    } finally {
+      setRevenueDrillLoading(false);
+    }
+  };
+
+  const revenuePopupRows = useMemo((): { module: string; amount: number; key?: string }[] => {
     if (revenuePopup === "lab") {
       const breakdownToday = hospitalSummary?.revenue?.module_breakdown?.today as Record<string, number> | undefined;
       const earned = breakdownToday?.lab_earned ?? diagIncome;
       const collected = breakdownToday?.lab_collected ?? 0;
       const due = breakdownToday?.lab_due ?? 0;
       return [
-        { module: "Lab & Diagnostics (Total Billed)", amount: earned },
-        { module: "Collected / Received", amount: collected },
-        { module: "Outstanding Due", amount: due },
+        { module: "Lab & Diagnostics (Total Billed)", amount: earned, key: "lab" },
+        { module: "Collected / Received", amount: collected, key: "lab" },
+        { module: "Outstanding Due", amount: due, key: "due" },
       ];
     }
     if (revenuePopup === "pharmacy") {
       return [
-        { module: "Pharmacy Sales (Counter & Inpatient)", amount: pharmacyIncome },
+        { module: "Pharmacy Sales (Counter & Inpatient)", amount: pharmacyIncome, key: "pharmacy" },
         { module: "Pharmacy Monthly Sales", amount: monthlyPharmacyIncome },
         { module: "Dispensed Indents Today", amount: hospitalSummary?.pharmacy_summary?.today_indents_dispensed ?? 0 },
       ];
+    }
+    if (revenueBreakdownData) {
+      return revenueBreakdownData.rows.map((r) => ({ module: r.label, amount: r.amount, key: r.key }));
     }
     const activeBreakdown = revenuePopup === "today" ? todayRevenueBreakdown : monthlyRevenueBreakdown;
     const activeTotal = revenuePopup === "today" ? todayRevenue : monthlyRevenue;
     const labAmount = Number(activeBreakdown.lab_diagnostics ?? (revenuePopup === "today" ? 0 : diagIncome));
     const pharmacyAmount = Number(activeBreakdown.pharmacy ?? (revenuePopup === "today" ? pharmacyIncome : monthlyPharmacyIncome));
-    const opAmount = Math.max(activeTotal - labAmount - pharmacyAmount, 0);
+    const ipAmount = Number((activeBreakdown as Record<string, number>).ip_billing ?? 0);
+    const opAmount = Math.max(activeTotal - ipAmount - labAmount - pharmacyAmount, 0);
     return [
-      { module: "OP / General Billing", amount: opAmount },
-      { module: "Pharmacy Sales", amount: pharmacyAmount },
-      { module: "Lab & Diagnostics", amount: labAmount },
-      { module: "Pending / Due", amount: dueRevenue },
+      { module: "OP / General Billing", amount: opAmount, key: "op" },
+      { module: "IP (Inpatient) Billing", amount: ipAmount, key: "ip" },
+      { module: "Pharmacy Sales", amount: pharmacyAmount, key: "pharmacy" },
+      { module: "Lab & Diagnostics", amount: labAmount, key: "lab" },
+      { module: "Pending / Due", amount: dueRevenue, key: "due" },
     ];
-  }, [revenuePopup, todayRevenue, monthlyRevenue, diagIncome, pharmacyIncome, monthlyPharmacyIncome, dueRevenue, todayRevenueBreakdown, monthlyRevenueBreakdown, hospitalSummary]);
+  }, [revenuePopup, revenueBreakdownData, todayRevenue, monthlyRevenue, diagIncome, pharmacyIncome, monthlyPharmacyIncome, dueRevenue, todayRevenueBreakdown, monthlyRevenueBreakdown, hospitalSummary]);
 
   const breakdownTodayForTotal = hospitalSummary?.revenue?.module_breakdown?.today as Record<string, number> | undefined;
   const revenuePopupTotal =
-    revenuePopup === "today"
+    revenueBreakdownData && (revenuePopup === "today" || revenuePopup === "monthly")
+      ? revenueBreakdownData.total
+      : revenuePopup === "today"
       ? todayRevenue
       : revenuePopup === "lab"
         ? (breakdownTodayForTotal?.lab_earned ?? diagIncome)
@@ -608,7 +654,9 @@ function ExecutiveDashboard({
           ? pharmacyIncome
           : monthlyRevenue;
   const revenuePopupCollected =
-    revenuePopup === "today"
+    revenueBreakdownData && (revenuePopup === "today" || revenuePopup === "monthly")
+      ? revenueBreakdownData.collected
+      : revenuePopup === "today"
       ? todayRevenue
       : revenuePopup === "lab"
         ? (breakdownTodayForTotal?.lab_collected ?? diagIncome)
@@ -993,18 +1041,55 @@ function ExecutiveDashboard({
             <strong style={{ color: "#dc2626" }}>{formatCurrency(revenuePopupOutstanding)}</strong>
           </div>
         </div>
-        <div className="hosp-revenue-pop-table">
-          <div className="hosp-revenue-pop-head">
-            <span>Module</span>
-            <span>Amount</span>
-          </div>
-          {revenuePopupRows.map((row) => (
-            <div key={row.module} className="hosp-revenue-pop-row">
-              <span>{row.module}</span>
-              <strong>{formatCurrency(row.amount)}</strong>
+        {revenueDrill ? (
+          <div className="hosp-revenue-pop-table">
+            <div className="hosp-revenue-pop-head" style={{ alignItems: "center" }}>
+              <span>
+                <button type="button" className="hosp-revenue-back" onClick={() => setRevenueDrill(null)}>&larr; Back</button>
+                {" "}{revenueDrill.label} &middot; {revenueDrill.entries.length} record{revenueDrill.entries.length === 1 ? "" : "s"}
+              </span>
+              <span>{formatCurrency(revenueDrill.total)}</span>
             </div>
-          ))}
-        </div>
+            <div style={{ maxHeight: 340, overflowY: "auto" }}>
+              <table className="hosp-revenue-drill-table">
+                <thead><tr><th>Date &amp; time</th><th>Patient</th><th>UHID</th><th>Bill / item</th><th>Mode</th><th style={{ textAlign: "right" }}>Amount</th></tr></thead>
+                <tbody>
+                  {revenueDrill.entries.map((e, i) => (
+                    <tr key={`${e.reference}-${i}`}>
+                      <td>{e.at ? new Date(e.at.replace(" ", "T")).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-"}</td>
+                      <td>{e.patient_name}</td>
+                      <td>{e.patient_id || "-"}</td>
+                      <td>{e.reference || "-"}</td>
+                      <td>{e.mode || "-"}</td>
+                      <td style={{ textAlign: "right" }}>{formatCurrency(e.amount)}</td>
+                    </tr>
+                  ))}
+                  {revenueDrill.entries.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: "#64748b" }}>No records for this line.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="hosp-revenue-pop-table">
+            <div className="hosp-revenue-pop-head">
+              <span>Module</span>
+              <span>Amount</span>
+            </div>
+            {revenuePopupRows.map((row) => (
+              <button
+                type="button"
+                key={row.module}
+                className="hosp-revenue-pop-row hosp-revenue-pop-row-clickable"
+                disabled={!row.key || revenueDrillLoading}
+                title={row.key ? "Show the patients behind this amount" : undefined}
+                onClick={() => row.key && void openRevenueDrill(row.key, row.module)}
+              >
+                <span>{row.module}{row.key && <span className="hosp-revenue-chevron" aria-hidden> &rsaquo;</span>}</span>
+                <strong>{formatCurrency(row.amount)}</strong>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="hosp-revenue-pop-actions">
           <Button variant="ghost" onClick={() => setRevenuePopup(null)}>Close</Button>
           {revenuePopup === "lab" && (

@@ -7,6 +7,15 @@ import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
 import "./billingTheme.css";
 
+type OverviewCard = "net_billed" | "receipts" | "refunds" | "dues";
+type CardDetail = {
+  date: string; card: OverviewCard; total: number;
+  entries: { at: string | null; patient_id?: string | null; patient_name: string; reference?: string | null; detail?: string | null; amount: number }[];
+};
+const CARD_LABELS: Record<OverviewCard, string> = {
+  net_billed: "Net billed", receipts: "Receipts", refunds: "Refunds", dues: "Outstanding patient dues",
+};
+
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
   onNavigate: (pageId: string) => void;
@@ -19,7 +28,11 @@ const fmt = (n: number) =>
   });
 
 export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
-  const [targetDate, setTargetDate] = useState(() => new Date().toISOString().split("T")[0]);
+  // Local (IST) date: toISOString() is UTC and showed yesterday before 5:30 AM.
+  const [targetDate, setTargetDate] = useState(() => new Date().toLocaleDateString("en-CA"));
+  // Clicking a summary card lists the records behind it (/api/billing/overview-details).
+  const [cardDetail, setCardDetail] = useState<CardDetail | null>(null);
+  const [cardLoading, setCardLoading] = useState<OverviewCard | null>(null);
   const [department, setDepartment] = useState("All departments");
   const [visitType, setVisitType] = useState("All visit types");
   const [searchQuery, setSearchQuery] = useState("");
@@ -29,11 +42,11 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [stats, setStats] = useState({
-    net_billed: 26100,
-    receipts_today: 21600,
-    refunds_today: 600,
-    net_collections: 21000,
-    outstanding_dues: 18450,
+    net_billed: 0,
+    receipts_today: 0,
+    refunds_today: 0,
+    net_collections: 0,
+    outstanding_dues: 0,
   });
 
   const [sessionLoading, setSessionLoading] = useState(true);
@@ -63,6 +76,18 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
   const [closingNotes, setClosingNotes] = useState("");
 
   // Independent Data Fetchers
+  const openCard = async (card: OverviewCard) => {
+    setCardLoading(card);
+    try {
+      const res = await apiFetch<CardDetail>(`/api/billing/overview-details?card=${card}&date=${targetDate}`);
+      setCardDetail(res);
+    } catch (err: any) {
+      reportError(setNotice, err, "Could not load the records for this card.");
+    } finally {
+      setCardLoading(null);
+    }
+  };
+
   const loadStats = async (dateStr: string) => {
     setStatsLoading(true);
     setStatsError(null);
@@ -311,7 +336,7 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
       {/* 3. Four KPI Summary Cards */}
       <div className="billing-kpi-grid-4">
         {/* Card 1: Net billed today */}
-        <div className="billing-kpi-card">
+        <button type="button" className="billing-kpi-card billing-kpi-card-clickable" onClick={() => void openCard("net_billed")} disabled={cardLoading === "net_billed"} title="Show the records behind this figure">
           <div className="billing-kpi-icon-wrap" style={{ background: "#f0fdfa", color: "#0d9488" }}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -325,10 +350,10 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
             <span className="billing-kpi-label">Net billed today</span>
             <span className="billing-kpi-value">₹{fmt(stats.net_billed)}</span>
           </div>
-        </div>
+        </button>
 
         {/* Card 2: Receipts today */}
-        <div className="billing-kpi-card">
+        <button type="button" className="billing-kpi-card billing-kpi-card-clickable" onClick={() => void openCard("receipts")} disabled={cardLoading === "receipts"} title="Show the records behind this figure">
           <div className="billing-kpi-icon-wrap" style={{ background: "#f0fdf4", color: "#16a34a" }}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="5" width="20" height="14" rx="2" />
@@ -340,10 +365,10 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
             <span className="billing-kpi-value">₹{fmt(stats.receipts_today)}</span>
             <span className="billing-kpi-subtitle">Includes advances</span>
           </div>
-        </div>
+        </button>
 
         {/* Card 3: Refunds today */}
-        <div className="billing-kpi-card">
+        <button type="button" className="billing-kpi-card billing-kpi-card-clickable" onClick={() => void openCard("refunds")} disabled={cardLoading === "refunds"} title="Show the records behind this figure">
           <div className="billing-kpi-icon-wrap" style={{ background: "#fef2f2", color: "#dc2626" }}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="1 4 1 10 7 10" />
@@ -354,10 +379,10 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
             <span className="billing-kpi-label">Refunds today</span>
             <span className="billing-kpi-value">₹{fmt(stats.refunds_today)}</span>
           </div>
-        </div>
+        </button>
 
         {/* Card 4: Outstanding patient dues */}
-        <div className="billing-kpi-card">
+        <button type="button" className="billing-kpi-card billing-kpi-card-clickable" onClick={() => void openCard("dues")} disabled={cardLoading === "dues"} title="Show the records behind this figure">
           <div className="billing-kpi-icon-wrap" style={{ background: "#fff7ed", color: "#ea580c" }}>
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -371,7 +396,7 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
             <span className="billing-kpi-value">₹{fmt(stats.outstanding_dues)}</span>
             <span className="billing-kpi-subtitle">Across all dates</span>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* 4. Search Bar & Primary Record Action */}
@@ -843,6 +868,36 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Modal: records behind a summary card */}
+      <Modal open={!!cardDetail} onClose={() => setCardDetail(null)}
+        title={cardDetail ? `${CARD_LABELS[cardDetail.card]} - ${cardDetail.card === "dues" ? "all dates" : cardDetail.date}` : ""}>
+        {cardDetail && (
+          <div>
+            <p style={{ margin: "0 0 0.6rem", color: "#475569" }}>
+              {cardDetail.entries.length} record{cardDetail.entries.length === 1 ? "" : "s"} &middot; total <strong>₹{fmt(cardDetail.total)}</strong>
+            </p>
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              <table className="billing-detail-table">
+                <thead><tr><th>Date &amp; time</th><th>Patient</th><th>UHID</th><th>Bill / receipt</th><th>Details</th><th style={{ textAlign: "right" }}>Amount</th></tr></thead>
+                <tbody>
+                  {cardDetail.entries.map((e, i) => (
+                    <tr key={`${e.reference}-${i}`}>
+                      <td>{e.at ? new Date(e.at.replace(" ", "T")).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "-"}</td>
+                      <td>{e.patient_name}</td>
+                      <td>{e.patient_id || "-"}</td>
+                      <td>{e.reference || "-"}</td>
+                      <td>{e.detail || "-"}</td>
+                      <td style={{ textAlign: "right" }}>₹{fmt(e.amount)}</td>
+                    </tr>
+                  ))}
+                  {cardDetail.entries.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", color: "#64748b" }}>No records.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Modal: Open Cashier Shift */}
       {openSessionModal && (
