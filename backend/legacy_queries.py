@@ -812,8 +812,8 @@ def add_patient(db, data, hospital_id=None):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO patients (hospital_id, patient_id, name, middle_name, last_name, dob, age, gender, pregnant, allergies, allergy_status, symptoms, phone, address, emergency_contact, emergency_relation, family_mobile, marital_status, nationality, email, emergency_mobile, insurance_provider, insurance_policy_no)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO patients (hospital_id, patient_id, name, middle_name, last_name, dob, age, gender, pregnant, allergies, allergy_status, symptoms, phone, address, emergency_contact, emergency_relation, family_mobile, marital_status, nationality, email, emergency_mobile, insurance_provider, insurance_policy_no, phone_country_code, family_country_code, emergency_country_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 scoped_hospital_id,
@@ -839,6 +839,9 @@ def add_patient(db, data, hospital_id=None):
                 data.get("emergency_mobile"),
                 data.get("insurance_provider") or None,
                 data.get("insurance_policy_no") or None,
+                data.get("phone_country_code") or "+91",
+                data.get("family_country_code"),
+                data.get("emergency_country_code"),
             ),
         )
         conn.commit()
@@ -1380,38 +1383,58 @@ def list_nursing_care_logs(db, patient_id=None, admission_id=None):
 
 
 def update_patient(db, patient_id, data, hospital_id=None):
+    """Updates the fields present in `data`. A field the caller did not send keeps its
+    stored value (an edit form that shows only some fields must not blank the rest,
+    e.g. emergency contact, email or nationality)."""
     add_patient_vitals(db, patient_id, data)
 
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT * FROM patients WHERE patient_id = ? AND hospital_id = ?", (patient_id, scoped_hospital_id))
+        current = cursor.fetchone()
+        if not current:
+            return False
+
+        def value(key, default=""):
+            if key in data:
+                return data[key]
+            stored = current.get(key)
+            return default if stored is None and default is not None else stored
+
+        gender = value("gender", None)
+        pregnant = data["pregnant"] if "pregnant" in data else current.get("pregnant")
         cursor.execute(
             """
             UPDATE patients SET name=?, middle_name=?, last_name=?, dob=?, age=?,
             gender=?, pregnant=?, allergies=?, allergy_status=?, symptoms=?, phone=?, address=?, emergency_contact=?, emergency_relation=?, family_mobile=?,
-            marital_status=?, nationality=?, email=?, emergency_mobile=?
+            marital_status=?, nationality=?, email=?, emergency_mobile=?, phone_country_code=?,
+            family_country_code=?, emergency_country_code=?
             WHERE patient_id=? AND hospital_id=?
         """,
             (
-                data["name"],
-                data.get("middle_name", ""),
-                data["last_name"],
-                data.get("dob") or None,  # normalize blank DOB to NULL
-                data.get("age"),
-                data.get("gender"),
-                (1 if data.get("pregnant") else 0) if str(data.get("gender") or "").strip().lower() == "female" else 0,
-                data.get("allergies", ""),
-                data.get("allergy_status") or "not_recorded",
-                data.get("symptoms", ""),
-                data.get("phone", ""),
-                data.get("address", ""),
-                data.get("emergency_contact", ""),
-                data.get("emergency_relation", ""),
-                data.get("family_mobile", ""),
-                data.get("marital_status"),
-                data.get("nationality"),
-                data.get("email"),
-                data.get("emergency_mobile", ""),
+                value("name"),
+                value("middle_name"),
+                value("last_name"),
+                (data.get("dob") or None) if "dob" in data else current.get("dob"),  # normalize blank DOB to NULL
+                value("age", None),
+                gender,
+                (1 if pregnant else 0) if str(gender or "").strip().lower() == "female" else 0,
+                value("allergies"),
+                value("allergy_status") or "not_recorded",
+                value("symptoms"),
+                value("phone"),
+                value("address"),
+                value("emergency_contact"),
+                value("emergency_relation"),
+                value("family_mobile"),
+                value("marital_status", None),
+                value("nationality", None),
+                value("email", None),
+                value("emergency_mobile"),
+                value("phone_country_code", None) or "+91",
+                value("family_country_code", None),
+                value("emergency_country_code", None),
                 patient_id,
                 scoped_hospital_id,
             ),
@@ -1429,7 +1452,8 @@ def list_insurance_providers(db):
 
 
 
-def create_insurance_provider(db, name, contact_person=None, contact_phone=None, notes=None, username=None):
+def create_insurance_provider(db, name, contact_person=None, contact_phone=None, notes=None, username=None,
+                              contact_phone_country_code=None):
     name = str(name or "").strip()
     if not name:
         raise ValueError("Provider name is required.")
@@ -1441,10 +1465,11 @@ def create_insurance_provider(db, name, contact_person=None, contact_phone=None,
             raise ValueError(f"'{existing['name']}' is already in the provider list.")
         cursor.execute(
             """
-            INSERT INTO insurance_providers (name, contact_person, contact_phone, notes, created_by)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO insurance_providers (name, contact_person, contact_phone, notes, created_by, contact_phone_country_code)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (name, contact_person or None, contact_phone or None, notes or None, username),
+            (name, contact_person or None, contact_phone or None, notes or None, username,
+             (contact_phone_country_code or None) if contact_phone else None),
         )
         provider_id = cursor.lastrowid
         conn.commit()
@@ -1973,7 +1998,8 @@ def get_all_employees(db, hospital_id=None):
         cursor.execute(
             """
             SELECT id, username, role, job_role, full_name, email, phone, department,
-                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
+                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name,
+                   phone_country_code, emergency_contact_country_code
             FROM users
             WHERE hospital_id = ?
             ORDER BY date_joined DESC
@@ -1993,7 +2019,8 @@ def get_employee(db, employee_id=None, username=None, hospital_id=None):
             cursor.execute(
                 """
                 SELECT id, username, role, job_role, full_name, email, phone, department,
-                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
+                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name,
+                   phone_country_code, emergency_contact_country_code
                 FROM users WHERE employee_id = ? AND hospital_id = ?
             """,
                 (employee_id, scoped_hospital_id),
@@ -2002,7 +2029,8 @@ def get_employee(db, employee_id=None, username=None, hospital_id=None):
             cursor.execute(
                 """
                 SELECT id, username, role, job_role, full_name, email, phone, department,
-                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
+                       employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name,
+                   phone_country_code, emergency_contact_country_code
                 FROM users WHERE username = ? AND hospital_id = ?
             """,
                 (username, scoped_hospital_id),
@@ -2014,28 +2042,41 @@ def get_employee(db, employee_id=None, username=None, hospital_id=None):
 
 
 def update_employee(db, employee_id, data, hospital_id=None):
+    """Updates the fields present in `data`; a field the caller did not send keeps its
+    stored value (a promote or role change must not blank name, phone or status)."""
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE employee_id=? AND hospital_id=?", (employee_id, scoped_hospital_id))
+        current = cursor.fetchone()
+        if not current:
+            return False
+
+        def value(key):
+            return data[key] if key in data else current.get(key)
+
         cursor.execute(
             """
             UPDATE users SET full_name=?, email=?, phone=?, department=?,
                            status=?, address=?, emergency_contact=?, job_role=?, access_role=COALESCE(?, access_role),
-                           user_type=COALESCE(?, user_type), module_access=COALESCE(?, module_access)
+                           user_type=COALESCE(?, user_type), module_access=COALESCE(?, module_access),
+                           phone_country_code=?, emergency_contact_country_code=?
             WHERE employee_id=? AND hospital_id=?
         """,
             (
-                data.get("full_name"),
-                data.get("email"),
-                data.get("phone"),
-                data.get("department"),
-                data.get("status"),
-                data.get("address"),
-                data.get("emergency_contact"),
-                data.get("job_role"),
+                value("full_name"),
+                value("email"),
+                value("phone"),
+                value("department"),
+                value("status") or current.get("status") or "active",
+                value("address"),
+                value("emergency_contact"),
+                value("job_role"),
                 data.get("access_role"),
                 data.get("user_type"),
                 json.dumps(data["module_access"], separators=(",", ":")) if "module_access" in data else None,
+                value("phone_country_code"),
+                value("emergency_contact_country_code"),
                 employee_id,
                 scoped_hospital_id,
             ),
@@ -2129,7 +2170,8 @@ def search_employees(db, query, hospital_id=None):
         cursor.execute(
             """
             SELECT id, username, role, job_role, full_name, email, phone, department,
-                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name
+                   employee_id, date_joined, status, address, emergency_contact, created_at, access_role, user_type, module_access, doctor_name,
+                   phone_country_code, emergency_contact_country_code
             FROM users WHERE
             hospital_id = ? AND (full_name LIKE ? OR email LIKE ? OR phone LIKE ? OR employee_id LIKE ?)
             ORDER BY date_joined DESC
@@ -5580,6 +5622,10 @@ def list_inventory_items(db, stock_source=None):
                    COALESCE(m.reorder_level, pi.reorder_level, 10) AS master_reorder_level,
                    COALESCE(ps_batch.supplier_name, ps_po.supplier_name, ps_pr.supplier_name, ps_def.supplier_name) AS supplier_name,
                    COALESCE(ps_batch.phone, ps_po.phone, ps_pr.phone, ps_def.phone) AS supplier_phone,
+                   CASE WHEN ps_batch.phone IS NOT NULL THEN ps_batch.phone_country_code
+                        WHEN ps_po.phone IS NOT NULL THEN ps_po.phone_country_code
+                        WHEN ps_pr.phone IS NOT NULL THEN ps_pr.phone_country_code
+                        ELSE ps_def.phone_country_code END AS supplier_phone_country_code,
                    COALESCE(ps_batch.contact_person, ps_po.contact_person, ps_pr.contact_person, ps_def.contact_person) AS supplier_contact_person
             FROM pharmacy_inventory pi
             LEFT JOIN medicines m ON m.id = pi.medicine_id
@@ -5599,7 +5645,7 @@ def list_inventory_items(db, stock_source=None):
             ) last_pr ON LOWER(last_pr.medicine_name) = LOWER(pi.medicine_name) AND last_pr.rn = 1
             LEFT JOIN pharmacy_suppliers ps_pr ON ps_pr.id = last_pr.supplier_id
             LEFT JOIN (
-                SELECT id, supplier_name, phone, contact_person
+                SELECT id, supplier_name, phone, phone_country_code, contact_person
                 FROM pharmacy_suppliers
                 WHERE status = 'active'
                 ORDER BY id ASC
@@ -5629,14 +5675,15 @@ def create_pharmacy_supplier(db, data):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO pharmacy_suppliers (supplier_name, contact_person, phone, status)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO pharmacy_suppliers (supplier_name, contact_person, phone, status, phone_country_code)
+            VALUES (?, ?, ?, ?, ?)
             """,
             (
                 data["supplier_name"],
                 data.get("contact_person"),
                 data.get("phone"),
                 data.get("status", "active"),
+                data.get("phone_country_code"),
             ),
         )
         supplier_id = cursor.lastrowid
@@ -5663,7 +5710,7 @@ def update_pharmacy_supplier(db, supplier_id, data):
         cursor.execute(
             """
             UPDATE pharmacy_suppliers
-            SET supplier_name = ?, contact_person = ?, phone = ?, status = ?
+            SET supplier_name = ?, contact_person = ?, phone = ?, status = ?, phone_country_code = ?
             WHERE id = ?
             """,
             (
@@ -5671,6 +5718,7 @@ def update_pharmacy_supplier(db, supplier_id, data):
                 data.get("contact_person", existing["contact_person"]),
                 data.get("phone", existing["phone"]),
                 data.get("status", existing["status"]),
+                data.get("phone_country_code", existing.get("phone_country_code")),
                 supplier_id,
             ),
         )
@@ -10641,18 +10689,20 @@ def create_diag_order(db, data, username=None):
         patient_id = None
         encounter_type = "EXTERNAL"
         walkin_name = (data.get("walkin_name") or "").strip()
-        walkin_mobile = re.sub(r"\D", "", str(data.get("walkin_mobile") or ""))
         if not walkin_name:
             raise ValueError("Patient name is required for an external sale.")
-        if len(walkin_mobile) < 7:
-            raise ValueError("A valid mobile number is required for an external sale.")
+        from phone import validate_phone
+        walkin_mobile, walkin_country_code, mobile_error = validate_phone(
+            data.get("walkin_mobile"), data.get("walkin_country_code"), required=True, label="Mobile number")
+        if mobile_error:
+            raise ValueError(mobile_error)
         walkin_age = str(data.get("walkin_age") or "").strip() or None
         walkin_gender = (data.get("walkin_gender") or "").strip() or None
         external_source = (data.get("external_source") or "").strip() or "Walk-in"
     else:
         patient_id = data["patient_id"]
         encounter_type = data["encounter_type"]
-        walkin_name = walkin_mobile = walkin_age = walkin_gender = None
+        walkin_name = walkin_mobile = walkin_age = walkin_gender = walkin_country_code = None
         external_source = data.get("external_source")
         if encounter_type not in ("OP", "IP", "EMERGENCY", "EXTERNAL"):
             raise ValueError("Invalid encounter type.")
@@ -10684,8 +10734,8 @@ def create_diag_order(db, data, username=None):
             INSERT INTO diag_orders (
                 order_no, patient_id, encounter_type, appointment_id, admission_id, external_source,
                 referring_clinician, priority, clinical_indication, notes, source_document_id, status, created_by,
-                sale_type, walkin_name, walkin_mobile, walkin_age, walkin_gender, service_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
+                sale_type, walkin_name, walkin_mobile, walkin_age, walkin_gender, service_type, walkin_country_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_no,
@@ -10704,6 +10754,7 @@ def create_diag_order(db, data, username=None):
                 walkin_name, walkin_mobile, walkin_age, walkin_gender,
                 # Outsourcing / Home Visit orders set their own type (diag_service_types.create_service_order).
                 "EXTERNAL" if is_external_sale else "IN_HOUSE",
+                walkin_country_code,
             ),
         )
         order_id = cursor.lastrowid
@@ -11178,7 +11229,7 @@ def get_diag_lab_item_detail(db, order_item_id):
         if not item:
             return None
         item_dict = dict(item)
-        cursor.execute("SELECT name, last_name, dob, age, gender, phone FROM patients WHERE patient_id = ?", (item_dict["patient_id"],))
+        cursor.execute("SELECT name, last_name, dob, age, gender, phone, phone_country_code FROM patients WHERE patient_id = ?", (item_dict["patient_id"],))
         p = cursor.fetchone()
         item_dict["patient"] = dict(p) if p else None
         cursor.execute("SELECT * FROM diag_specimens WHERE order_item_id = ? ORDER BY id DESC", (order_item_id,))
@@ -11624,7 +11675,7 @@ def get_diag_imaging_detail(db, order_item_id):
         if not item:
             return None
         item_dict = dict(item)
-        cursor.execute("SELECT name, last_name, dob, age, gender, phone FROM patients WHERE patient_id = ?", (item_dict["patient_id"],))
+        cursor.execute("SELECT name, last_name, dob, age, gender, phone, phone_country_code FROM patients WHERE patient_id = ?", (item_dict["patient_id"],))
         p = cursor.fetchone()
         item_dict["patient"] = dict(p) if p else None
         cursor.execute("SELECT * FROM diag_imaging_exams WHERE order_item_id = ?", (order_item_id,))

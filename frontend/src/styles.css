@@ -14416,3 +14416,106 @@ label,
   padding: 2px 4px;
   margin: 0 -4px;
 }
+
+/* ------------------------------------------------------------------------------------------
+   Lab Orders & Billing (LabDiagnosticsSalesPage / LabOrderWorkspace / LabOrderHistoryPage)
+   ------------------------------------------------------------------------------------------ */
+.lab-ob-page { display: flex; flex-direction: column; gap: 1.1rem; }
+.lab-badge-home { background: hsl(270 70% 55% / 0.14); color: hsl(270 55% 42%); }
+
+.lab-ob-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; }
+.lab-ob-type {
+  display: flex; align-items: center; justify-content: center; gap: 0.9rem; text-align: left;
+  padding: 0.95rem 1rem; border-radius: var(--radius); cursor: pointer;
+  background: hsl(var(--card)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground));
+  box-shadow: var(--shadow-sm); transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.lab-ob-type:hover { border-color: hsl(var(--primary) / 0.5); }
+.lab-ob-type:focus-visible { outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
+.lab-ob-type strong { display: block; font-size: 1rem; }
+.lab-ob-type small { display: block; font-size: 0.78rem; color: hsl(var(--muted-foreground)); margin-top: 2px; }
+.lab-ob-type-icon { font-size: 1.9rem; flex: none; color: hsl(var(--primary)); }
+.lab-ob-type.active { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); box-shadow: var(--shadow-md, var(--shadow-sm)); }
+.lab-ob-type.active small, .lab-ob-type.active .lab-ob-type-icon { color: hsl(var(--primary-foreground) / 0.92); }
+
+.lab-ob-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(320px, 1fr); gap: 1.1rem; align-items: start; }
+.lab-ob-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
+.lab-ob-summary { position: sticky; top: 1rem; }
+.lab-ob-card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.8rem; }
+.lab-ob-card-head h3 { margin: 0; font-size: 1.08rem; }
+
+.lab-ob-patient-row { display: grid; grid-template-columns: 2.1fr 1.3fr 1fr 1fr; gap: 0.75rem; }
+.lab-ob-patient-row label { display: block; margin-bottom: 4px; }
+.lab-ob-span2 { grid-column: span 2; }
+.lab-ob-span3 { grid-column: span 3; }
+.lab-ob-patient-row input[readonly] { background: hsl(var(--muted) / 0.6); }
+
+.lab-ob-segment { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 2px); background: hsl(var(--muted) / 0.5); }
+.lab-ob-segment button { border: 0; background: transparent; padding: 0.4rem 0.9rem; border-radius: calc(var(--radius) - 4px); font-weight: 600; font-size: 0.85rem; color: hsl(var(--muted-foreground)); cursor: pointer; }
+.lab-ob-segment button.active { background: hsl(var(--card)); color: hsl(var(--primary)); box-shadow: var(--shadow-sm); }
+.lab-ob-segment.small button { padding: 0.3rem 1.1rem; }
+.lab-ob-segment.small button.active { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+
+.lab-ob-tabs { display: flex; gap: 0.35rem; margin: 0.8rem 0 0; border-bottom: 1px solid hsl(var(--border)); flex-wrap: wrap; }
+.lab-ob-tabs button { border: 1px solid transparent; border-bottom: 0; background: transparent; padding: 0.45rem 1rem; border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0; font-weight: 600; font-size: 0.88rem; color: hsl(var(--muted-foreground)); cursor: pointer; margin-bottom: -1px; }
+.lab-ob-tabs button.active { background: hsl(var(--card)); border-color: hsl(var(--border)); color: hsl(var(--primary)); }
+.lab-ob-tabs button:disabled { opacity: 0.45; cursor: not-allowed; }
+.lab-ob-table-wrap { max-height: 320px; overflow: auto; border: 1px solid hsl(var(--border)); border-top: 0; border-radius: 0 0 calc(var(--radius) - 2px) calc(var(--radius) - 2px); }
+.lab-ob-history .lab-ob-table-wrap { border-top: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 2px); }
+.lab-ob-table-wrap .diag-data-table { margin: 0; }
+.lab-ob-added { font-size: 0.8rem; font-weight: 600; color: hsl(164 55% 30%); }
+
+.lab-ob-summary-table td, .lab-ob-summary-table th { font-size: 0.85rem; }
+.lab-ob-inline-select { margin-top: 4px; font-size: 0.8rem; }
+.lab-ob-trash { border: 1px solid hsl(var(--destructive) / 0.35); background: hsl(var(--destructive) / 0.08); color: hsl(var(--destructive)); border-radius: 6px; padding: 5px 7px; cursor: pointer; line-height: 0; }
+.lab-ob-trash:hover { background: hsl(var(--destructive) / 0.16); }
+.lab-ob-discount-head { display: flex; align-items: center; justify-content: space-between; margin: 0.9rem 0 0.4rem; }
+.lab-ob-totals { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.9rem 0; }
+.lab-ob-totals > div { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.95rem; }
+.lab-ob-total { background: hsl(var(--primary) / 0.1); border-radius: calc(var(--radius) - 4px); padding: 0.55rem 0.7rem; font-weight: 800; font-size: 1.15rem !important; }
+.lab-ob-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 0.9rem; }
+.lab-ob-link { background: none; border: 0; color: hsl(var(--muted-foreground)); text-decoration: underline; cursor: pointer; margin-top: 0.6rem; font-size: 0.85rem; }
+
+.lab-ob-history-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.lab-ob-history-head h3 { margin: 0; font-size: 1.08rem; }
+.lab-ob-chips { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.lab-ob-chips button { border: 1px solid hsl(var(--border)); background: hsl(var(--card)); border-radius: 6px; padding: 0.22rem 0.6rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; color: hsl(var(--foreground)); }
+.lab-ob-chips button.active { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+.lab-ob-history-tools { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; flex-wrap: wrap; }
+.lab-ob-history-tools input[type="date"] { width: 150px; }
+.lab-ob-search-box { position: relative; min-width: 300px; }
+.lab-ob-search-box svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: hsl(var(--muted-foreground)); pointer-events: none; }
+.lab-ob-pager { display: flex; justify-content: space-between; align-items: center; margin-top: 0.6rem; }
+
+@media (max-width: 1200px) {
+  .lab-ob-grid { grid-template-columns: minmax(0, 1fr); }
+  .lab-ob-summary { position: static; }
+}
+@media (max-width: 900px) {
+  .lab-ob-types { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lab-ob-patient-row { grid-template-columns: 1fr 1fr; }
+  .lab-ob-span3 { grid-column: span 2; }
+  .lab-ob-history-tools { margin-left: 0; width: 100%; }
+  .lab-ob-search-box { min-width: 0; flex: 1; }
+}
+@media (max-width: 560px) {
+  .lab-ob-types, .lab-ob-patient-row { grid-template-columns: 1fr; }
+  .lab-ob-span2, .lab-ob-span3 { grid-column: auto; }
+  .lab-ob-type { justify-content: flex-start; }
+}
+
+/* Dashboard revenue modal: clickable rows and the patient drill-down */
+.hosp-revenue-pop-row-clickable { width: 100%; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; font: inherit; cursor: pointer; }
+.hosp-revenue-pop-row-clickable:hover:not(:disabled) { background: #f0fdfa; }
+.hosp-revenue-pop-row-clickable:focus-visible { outline: 2px solid #0f766e; outline-offset: -2px; }
+.hosp-revenue-pop-row-clickable:disabled { cursor: default; }
+.hosp-revenue-chevron { color: #0f766e; font-weight: 700; }
+.hosp-revenue-back { background: none; border: 0; color: #0f766e; font-weight: 700; cursor: pointer; padding: 0; }
+.hosp-revenue-drill-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.hosp-revenue-drill-table th { text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; background: #fff; }
+.hosp-revenue-drill-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }
+
+/* OP Queue: UHID verify button and locked fields */
+.opq-uhid-btn { flex: none; padding: 0 12px; border-radius: 8px; border: 1px solid #0f766e; background: #f0fdfa; color: #0f766e; font-weight: 700; cursor: pointer; }
+.opq-uhid-btn:disabled { opacity: 0.6; cursor: progress; }
+.opq-modal-input[readonly] { background: #f1f5f9; color: #334155; }

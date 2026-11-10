@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import PhoneInput from "../../components/PhoneInput";
+import { formatPhone, splitStoredPhone } from "../../lib/phone";
 import Modal from "../../components/ui/Modal";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import { apiFetch, reportError } from "../../lib/api";
@@ -99,6 +101,7 @@ export function SendSurveyModal({ requestId, onClose, onSent, setNotice }: {
   const [request, setRequest] = useState<SurveyRequest | null>(null);
   const [waTemplateId, setWaTemplateId] = useState<number | "">("");
   const [phone, setPhone] = useState("");
+  const [phoneCode, setPhoneCode] = useState("+91");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -108,7 +111,9 @@ export function SendSurveyModal({ requestId, onClose, onSent, setNotice }: {
     apiFetch<SurveyRequest>(`/api/reach/surveys/${requestId}`)
       .then((req) => {
         setRequest(req);
-        setPhone(req.phone || "");
+        const stored = splitStoredPhone(req.phone, (req as { patient_phone_country_code?: string | null }).patient_phone_country_code);
+        setPhone(stored.value);
+        setPhoneCode(stored.countryCode);
       })
       .catch((err) => {
         reportError(setNotice, err as { message?: string; status?: number }, "Unable to load survey.");
@@ -146,13 +151,13 @@ export function SendSurveyModal({ requestId, onClose, onSent, setNotice }: {
 
   const markSent = async (launch: boolean) => {
     if (!request || !message.trim()) return;
-    if (launch) openWhatsApp(phone, message);
+    if (launch) openWhatsApp(formatPhone(phoneCode, phone), message);
     setSaving(true);
     try {
       await apiFetch(`/api/reach/surveys/${request.id}/mark-sent`, {
         method: "POST",
         body: JSON.stringify({
-          message, phone, whatsapp_template_id: waTemplateId || null,
+          message, phone: formatPhone(phoneCode, phone), whatsapp_template_id: waTemplateId || null,
           template_name: waTemplates.find((t) => t.id === waTemplateId)?.name || null,
         }),
       });
@@ -192,7 +197,7 @@ export function SendSurveyModal({ requestId, onClose, onSent, setNotice }: {
               </div>
             </div>
             <Field label="WhatsApp number">
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" style={S.input} />
+              <PhoneInput countryCode={phoneCode} value={phone} onChange={({ countryCode, value }) => { setPhoneCode(countryCode); setPhone(value); }} />
             </Field>
             <Field label="WhatsApp template">
               <select value={waTemplateId} onChange={(e) => setWaTemplateId(e.target.value ? Number(e.target.value) : "")} style={S.input}>

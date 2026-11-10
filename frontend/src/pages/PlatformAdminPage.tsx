@@ -1,4 +1,6 @@
 import type { FormEvent } from "react";
+import { useState } from "react";
+import PhoneInput from "../components/PhoneInput";
 import { Button, Input, Label } from "../components/ui";
 
 type Props = {
@@ -80,7 +82,7 @@ export default function PlatformAdminPage({
           </Label>
           <Label>
             Admin Phone
-            <Input name="admin_phone" />
+            <AdminPhoneField />
           </Label>
           <Button type="submit" variant="primary">
             Onboard Hospital Admin
@@ -143,4 +145,11 @@ export default function PlatformAdminPage({
       </div>
     </div>
   );
+}
+
+
+/** Uncontrolled-form friendly phone: submits admin_phone and admin_phone_country_code. */
+function AdminPhoneField() {
+  const [phone, setPhone] = useState({ countryCode: "+91", value: "" });
+  return <PhoneInput name="admin_phone" countryCode={phone.countryCode} value={phone.value} onChange={setPhone} />;
 }

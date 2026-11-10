@@ -1,16 +1,14 @@
+// Home visits: the visit board (collect / receive at lab / reschedule / cancel) and the
+// queue of tests waiting for a partner lab. Booking is on the shared order screen.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { Button, Input, Label, Modal, Select, Tabs, TabsTrigger, Textarea } from "../components/ui";
+import { Button, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
-import {
-  BasketTable, BillSummary, OrderResultPanel, PatientChooser, PaymentModal, ROUTING_LABELS, TestPicker,
-  loadOrderWithInvoice, money, patientFields, printLabInvoice, useBillTotals, useDraftCheckout, useTestBasket,
-} from "../components/lab/LabCheckout";
-import type { LabInvoice, LabOrder, LabOrderItem, PatientChoice, Vendor } from "../components/lab/LabCheckout";
+import { PaymentModal, ROUTING_LABELS, loadOrderWithInvoice, money, printLabInvoice } from "../components/lab/LabCheckout";
+import type { LabInvoice, LabOrderItem, Vendor } from "../components/lab/LabCheckout";
 
 type Props = { setNotice: Dispatch<SetStateAction<Notice | null>> };
-type View = "new" | "board" | "pending";
 type BoardFilter = "today" | "upcoming" | "scheduled" | "collected" | "received" | "cancelled" | "all";
 type Visit = {
   id: number; order_no: string; status: string; patient_id?: string | null; patient_name?: string; patient_phone?: string;
@@ -28,132 +26,9 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const toLocalInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-export default function LabHomeVisitsPage({ setNotice }: Props) {
-  const [view, setView] = useState<View>("new");
-  const [pendingCount, setPendingCount] = useState(0);
-
-  const refreshPendingCount = useCallback(() => {
-    apiFetch<{ items: PendingItem[] }>("/api/diag/routing/pending-vendor", { background: true })
-      .then((d) => setPendingCount((d.items || []).length)).catch(() => {});
-  }, []);
-  useEffect(() => { refreshPendingCount(); }, [refreshPendingCount, view]);
-
-  return (
-    <div className="diag-page">
-      <Tabs>
-        <TabsTrigger active={view === "new"} onClick={() => setView("new")}>New home visit</TabsTrigger>
-        <TabsTrigger active={view === "board"} onClick={() => setView("board")}>Visit board</TabsTrigger>
-        <TabsTrigger active={view === "pending"} onClick={() => setView("pending")}>
-          Needs partner lab{pendingCount > 0 ? ` (${pendingCount})` : ""}
-        </TabsTrigger>
-      </Tabs>
-      {view === "new" && <NewHomeVisit setNotice={setNotice} onOpenBoard={() => setView("board")} />}
-      {view === "board" && <VisitBoard setNotice={setNotice} onRouted={refreshPendingCount} />}
-      {view === "pending" && <PendingVendorQueue setNotice={setNotice} onChange={refreshPendingCount} />}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ new visit --
-
-function NewHomeVisit({ setNotice, onOpenBoard }: { setNotice: Props["setNotice"]; onOpenBoard: () => void }) {
-  const [patient, setPatient] = useState<PatientChoice>({ mode: "walkin", name: "", mobile: "", age: "", gender: "" });
-  const [address, setAddress] = useState("");
-  const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 2 * 3600 * 1000)));
-  const [defaultFee, setDefaultFee] = useState(0);
-  const [fee, setFee] = useState<number | "">("");
-  const [result, setResult] = useState<{ order: LabOrder; invoice: LabInvoice | null } | null>(null);
-  const { services, basket, add, update, remove, clear } = useTestBasket(setNotice);
-  const effectiveFee = fee === "" ? defaultFee : fee;
-  const bill = useBillTotals(basket, effectiveFee);
-  const { checkout, busy, resetDraft } = useDraftCheckout("/api/diag/service-orders");
-
-  useEffect(() => {
-    apiFetch<{ home_visit_fee: number }>("/api/diag/settings").then((s) => setDefaultFee(Number(s.home_visit_fee) || 0)).catch(() => {});
-  }, []);
-
-  // Prefill the service address from the registered patient's record.
-  useEffect(() => {
-    if (patient.mode === "registered" && patient.patient?.address && !address.trim()) setAddress(patient.patient.address);
-  }, [patient, address]);
-
-  const submit = async () => {
-    try {
-      if (address.trim().length < 5) throw new Error("Enter the full service address.");
-      if (!when) throw new Error("Select the visit date and time.");
-      if (new Date(when).getTime() < Date.now() - 15 * 60 * 1000) throw new Error("The visit date and time cannot be in the past.");
-      if (basket.length === 0) throw new Error("Add at least one test.");
-      const payload = {
-        service_type: "HOME_VISIT", ...patientFields(patient), visit_address: address.trim(), visit_scheduled_at: when,
-        home_visit_fee: effectiveFee, items: bill.itemsForApi(), notes: bill.discountNote,
-      };
-      const res = await checkout(payload);
-      setResult(res);
-      setNotice({ type: "success", message: `Home visit ${res.order.order_no} booked for ${new Date(when).toLocaleString()}. Invoice ${money(res.invoice?.total_amount)}.` });
-    } catch (err: any) {
-      reportError(setNotice, err, "Could not book the home visit.");
-    }
-  };
-
-  const startNew = () => {
-    setResult(null); clear(); bill.reset(); resetDraft(); setFee(""); setAddress("");
-    setWhen(toLocalInput(new Date(Date.now() + 2 * 3600 * 1000)));
-    setPatient({ mode: "walkin", name: "", mobile: "", age: "", gender: "" });
-  };
-
-  if (result) {
-    return (
-      <>
-        <OrderResultPanel result={result} setNotice={setNotice} onNew={startNew}
-          onReload={() => void loadOrderWithInvoice(result.order.id).then(setResult).catch((err) => reportError(setNotice, err, "Could not reload the order."))} />
-        <div className="diag-form-actions"><Button variant="secondary" onClick={onOpenBoard}>Open visit board</Button></div>
-      </>
-    );
-  }
-
-  return (
-    <div className="diag-split diag-split-wide">
-      <div style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
-        <PatientChooser value={patient} onChange={setPatient} />
-        <div className="diag-card">
-          <div className="diag-card-header"><h3>Visit details</h3></div>
-          <div className="diag-form-grid">
-            <div className="diag-form-full"><Label>Service address *</Label>
-              <Textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="House no, street, area, landmark, city" />
-            </div>
-            <div><Label>Visit date &amp; time *</Label>
-              <Input type="datetime-local" value={when} min={toLocalInput(new Date())} onChange={(e) => setWhen(e.target.value)} />
-            </div>
-          </div>
-        </div>
-        <div className="diag-card">
-          <div className="diag-card-header"><h3>Select tests</h3></div>
-          <TestPicker services={services} onAdd={add} />
-          <div className="diag-section-title">Selected tests</div>
-          <BasketTable basket={basket} onUpdate={update} onRemove={remove} />
-        </div>
-      </div>
-      <BillSummary
-        bill={bill}
-        feeLabel="Home visit fee"
-        feeEditor={(
-          <div className="diag-note-box" style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-            <strong>Home visit fee</strong>
-            <Input type="number" min={0} value={fee === "" ? defaultFee : fee} onChange={(e) => setFee(e.target.value === "" ? "" : Math.max(Number(e.target.value) || 0, 0))} />
-            <span className="muted" style={{ fontSize: 12 }}>Default from Lab settings: {money(defaultFee)}</span>
-          </div>
-        )}
-        note="When the samples reach the lab, each test runs in-house if its analyser is available, otherwise it is sent to the test's partner lab, on this same order."
-      >
-        <Button variant="primary" disabled={busy} onClick={() => void submit()}>{busy ? "Working..." : "Book visit & generate invoice"}</Button>
-      </BillSummary>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- visit board --
 
-function VisitBoard({ setNotice, onRouted }: { setNotice: Props["setNotice"]; onRouted: () => void }) {
+export function VisitBoard({ setNotice, onRouted }: { setNotice: Props["setNotice"]; onRouted: () => void }) {
   const [filter, setFilter] = useState<BoardFilter>("today");
   const [search, setSearch] = useState("");
   const [visits, setVisits] = useState<Visit[]>([]);
@@ -367,7 +242,7 @@ function VisitBoard({ setNotice, onRouted }: { setNotice: Props["setNotice"]; on
 
 // ------------------------------------------------------- pending partner lab --
 
-function PendingVendorQueue({ setNotice, onChange }: { setNotice: Props["setNotice"]; onChange: () => void }) {
+export function PendingVendorQueue({ setNotice, onChange }: { setNotice: Props["setNotice"]; onChange: () => void }) {
   const [items, setItems] = useState<PendingItem[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [choice, setChoice] = useState<Record<number, number>>({});

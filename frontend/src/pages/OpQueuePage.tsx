@@ -3,6 +3,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { Modal } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
+import PhoneInput from "../components/PhoneInput";
+import { cleanCountryCode, validateMobileByCountry } from "../lib/phone";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -61,12 +63,15 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
   const [newPatientName, setNewPatientName] = useState("");
   const [newPatientUhid, setNewPatientUhid] = useState("");
   const [newPatientPhone, setNewPatientPhone] = useState("");
+  const [newPatientPhoneCode, setNewPatientPhoneCode] = useState("+91");
   const [newAge, setNewAge] = useState("30");
   const [newGender, setNewGender] = useState("Male");
   const [newDoctor, setNewDoctor] = useState("");
   const [newDepartment, setNewDepartment] = useState("");
   const [newVisitType, setNewVisitType] = useState("OP");
   const [newConsultationFee, setNewConsultationFee] = useState("0");
+  // UHID must be a registered patient: verified against /api/patients, which then fills and locks the patient fields.
+  const [uhidCheck, setUhidCheck] = useState<{ state: "idle" | "checking" | "ok" | "invalid"; message?: string }>({ state: "idle" });
   const [addingToQueue, setAddingToQueue] = useState(false);
   const [newTime, setNewTime] = useState("10:30 AM");
 
@@ -356,6 +361,35 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
     setNotice({ type: "info", message: "Filters reset to default view." });
   };
 
+  // Fee comes from the Doctor Scheduling master (the server applies the same rule and ignores any amount sent).
+  const feeKind = newVisitType === "Review" ? "review" : "consultation";
+  const selectedDoctorFees = realDoctors.find((d) => d.doctor_name === newDoctor);
+  const lockedFee = selectedDoctorFees
+    ? Number((feeKind === "review" ? (selectedDoctorFees.review_fee ?? selectedDoctorFees.consultation_fee) : (selectedDoctorFees.consultation_fee ?? selectedDoctorFees.review_fee)) ?? 0)
+    : null;
+
+  const verifyUhid = async (raw: string): Promise<boolean> => {
+    const value = raw.trim();
+    if (!value) { setUhidCheck({ state: "invalid", message: "Enter the patient's registered UHID." }); return false; }
+    setUhidCheck({ state: "checking" });
+    try {
+      const res = await apiFetch<{ patient?: any }>(`/api/patients/${encodeURIComponent(value)}`, { background: true });
+      const p = res?.patient;
+      if (!p?.patient_id) throw new Error("not found");
+      setNewPatientUhid(p.patient_id);
+      setNewPatientName([p.name, p.middle_name, p.last_name].filter(Boolean).join(" "));
+      if (p.age !== undefined && p.age !== null && p.age !== "") setNewAge(String(p.age));
+      if (p.gender) setNewGender(p.gender);
+      setNewPatientPhone(p.phone || "");
+      setNewPatientPhoneCode(cleanCountryCode(p.phone_country_code));
+      setUhidCheck({ state: "ok", message: `Registered patient: ${[p.name, p.last_name].filter(Boolean).join(" ")} (${p.patient_id})` });
+      return true;
+    } catch {
+      setUhidCheck({ state: "invalid", message: `UHID "${value}" is not registered. Register the patient first.` });
+      return false;
+    }
+  };
+
   // Add new patient to queue -- a real, atomic booking+invoice appointment,
   // never a client-only entry with a fabricated token/UHID.
   const handleAddNewToQueue = async (e: React.FormEvent) => {
@@ -364,13 +398,8 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
       setNotice({ type: "warning", message: "Please enter patient name." });
       return;
     }
-    if (!newPatientUhid.trim()) {
-      setNotice({ type: "warning", message: "Enter the patient's real UHID (from registration)." });
-      return;
-    }
-    const fee = Number(newConsultationFee);
-    if (Number.isNaN(fee) || fee < 0) {
-      setNotice({ type: "warning", message: "Consultation fee must be a valid amount (0 or more)." });
+    if (uhidCheck.state !== "ok" && !(await verifyUhid(newPatientUhid))) {
+      setNotice({ type: "warning", message: "Enter a registered UHID and verify it before adding to the queue." });
       return;
     }
     if (!newDepartment.trim()) {
@@ -379,6 +408,12 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
     }
     if (!newDoctor.trim()) {
       setNotice({ type: "warning", message: "Please select a doctor." });
+      return;
+    }
+
+    const phoneError = newPatientPhone ? validateMobileByCountry(newPatientPhone, newPatientPhoneCode, false) : null;
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError });
       return;
     }
 
@@ -392,19 +427,22 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
           age: newAge,
           gender: newGender,
           phone: newPatientPhone.trim(),
+          phone_country_code: newPatientPhoneCode,
           doctor_name: newDoctor,
           department: newDepartment,
           visit_type: newVisitType,
           appointment_date: selectedDate,
           appointment_time: newTime,
-          consultation_fee: fee,
+          fee_kind: feeKind,
         }),
       });
 
       setAddModalOpen(false);
       setNewPatientName("");
       setNewPatientUhid("");
+      setUhidCheck({ state: "idle" });
       setNewPatientPhone("");
+      setNewPatientPhoneCode("+91");
       setNewConsultationFee("0");
       setNewDoctor("");
       setNewDepartment("");
@@ -899,20 +937,36 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
                 type="text"
                 required
                 value={newPatientName}
-                onChange={(e) => setNewPatientName(e.target.value)}
-                placeholder="e.g. Ramesh Kumar"
+                readOnly
+                placeholder="Filled from the registered UHID"
                 className="opq-modal-input"
+                title="Comes from the patient's registration"
               />
             </div>
             <div className="opq-form-field">
-              <label>UHID / Patient ID (Optional)</label>
-              <input
-                type="text"
-                value={newPatientUhid}
-                onChange={(e) => setNewPatientUhid(e.target.value)}
-                placeholder="Auto-generated if blank"
-                className="opq-modal-input"
-              />
+              <label>UHID / Patient ID *</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type="text"
+                  required
+                  value={newPatientUhid}
+                  readOnly={uhidCheck.state === "ok"}
+                  onChange={(e) => { setNewPatientUhid(e.target.value); setUhidCheck({ state: "idle" }); }}
+                  onBlur={() => { if (newPatientUhid.trim() && uhidCheck.state === "idle") void verifyUhid(newPatientUhid); }}
+                  placeholder="Registered UHID (e.g. PAT-2026...)"
+                  className="opq-modal-input"
+                />
+                {uhidCheck.state === "ok" ? (
+                  <button type="button" className="opq-uhid-btn" onClick={() => { setUhidCheck({ state: "idle" }); setNewPatientUhid(""); setNewPatientName(""); }}>Change</button>
+                ) : (
+                  <button type="button" className="opq-uhid-btn" disabled={uhidCheck.state === "checking"} onClick={() => void verifyUhid(newPatientUhid)}>
+                    {uhidCheck.state === "checking" ? "Checking..." : "Verify"}
+                  </button>
+                )}
+              </div>
+              {uhidCheck.message && (
+                <small style={{ color: uhidCheck.state === "ok" ? "#15803d" : "#b91c1c", display: "block", marginTop: 4 }}>{uhidCheck.message}</small>
+              )}
             </div>
           </div>
 
@@ -922,7 +976,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
               <input
                 type="number"
                 value={newAge}
-                onChange={(e) => setNewAge(e.target.value)}
+                readOnly
                 className="opq-modal-input"
               />
             </div>
@@ -930,6 +984,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
               <label>Gender</label>
               <select
                 value={newGender}
+                disabled
                 onChange={(e) => setNewGender(e.target.value)}
                 className="opq-modal-select"
               >
@@ -940,23 +995,24 @@ export default function OpQueuePage({ setNotice, onOpenPatient, onNavigate, scop
             </div>
             <div className="opq-form-field">
               <label>Phone</label>
-              <input
-                type="tel"
+              <PhoneInput
+                disabled={uhidCheck.state === "ok"}
+                countryCode={newPatientPhoneCode}
                 value={newPatientPhone}
-                onChange={(e) => setNewPatientPhone(e.target.value)}
-                placeholder="10-digit number"
-                className="opq-modal-input"
+                onChange={({ countryCode, value }) => { setNewPatientPhoneCode(countryCode); setNewPatientPhone(value); }}
               />
             </div>
             <div className="opq-form-field">
-              <label>Consultation Fee (₹) *</label>
+              <label>Consultation Fee (₹)</label>
               <input
-                type="number"
-                value={newConsultationFee}
-                onChange={(e) => setNewConsultationFee(e.target.value)}
-                placeholder="0"
+                type="text"
+                value={lockedFee === null ? "" : String(lockedFee)}
+                readOnly
+                placeholder="Select a doctor"
                 className="opq-modal-input"
+                title="Set in Doctor Scheduling for the selected doctor"
               />
+              <small style={{ color: "#64748b" }}>{feeKind === "review" ? "Review fee" : "Consultation fee"} from Doctor Scheduling</small>
             </div>
           </div>
 

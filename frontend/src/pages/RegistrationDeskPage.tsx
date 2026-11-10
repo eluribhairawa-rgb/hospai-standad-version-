@@ -8,7 +8,8 @@ import type { Appointment, Notice, Patient } from "../types";
 import { PRINT_BRAND_HEADER_DATA_URI } from "../lib/printBrand";
 import { printViaIframe } from "../lib/printViaIframe";
 import { filterInteger, filterDecimal } from "../lib/format";
-import { normalizePhoneNumber, normalizeSearchQuery } from "../lib/phone";
+import { cleanCountryCode, formatPhone, normalizeSearchQuery } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 
 type RegistrationMode = "appointment-in" | "appointment-out" | "consent" | "insurance";
 
@@ -80,11 +81,13 @@ const DEFAULT_CONSENT_FORM = {
   age: "",
   gender: "",
   mobile: "",
+  mobile_country_code: "+91",
   consent_type: "",
   doctor_name: "",
   signed_by: "",
   relation_to_patient: "",
   attender_mobile: "",
+  attender_country_code: "+91",
   status: "",
   patient_signature: "",
   attender_signature: "",
@@ -173,7 +176,7 @@ function printConsentDocument(form: typeof DEFAULT_CONSENT_FORM, setNotice: Disp
   }
   const field = (label: string, value: unknown) => `<div class="journey-print-field"><span>${safeText(label)}</span><strong>${safeText(value || "-")}</strong></div>`;
   const consentLabel = CONSENT_TYPE_OPTIONS.find((item) => item.value === form.consent_type)?.label || form.consent_type || "-";
-  const body = `<section class="journey-print-section"><h2>Patient Information</h2><div class="journey-print-grid">${field("Patient Name", form.patient_name)}${field("UHID / Patient ID", form.patient_id)}${field("Mobile", form.mobile)}${field("Age / Gender", `${form.age || "-"} / ${form.gender || "-"}`)}</div></section><section class="journey-print-section"><h2>Consent Details</h2><div class="journey-print-grid">${field("Consent Type", consentLabel)}${field("Doctor / Consultant", form.doctor_name)}${field("Signed By", form.signed_by)}${field("Relationship", form.relation_to_patient)}${field("Attender Mobile", form.attender_mobile)}${field("Consent Status", form.status)}${field("Document Reference", form.document_reference)}${field("Consent Summary", form.notes)}</div></section><section class="journey-print-section"><h2>Signatures</h2><div class="journey-print-grid">${field("Patient Signature", form.patient_signature)}${field("Attender Signature", form.attender_signature)}${field("Doctor Signature", form.doctor_signature)}${field("Date", new Date().toLocaleDateString("en-IN"))}</div></section>`;
+  const body = `<section class="journey-print-section"><h2>Patient Information</h2><div class="journey-print-grid">${field("Patient Name", form.patient_name)}${field("UHID / Patient ID", form.patient_id)}${field("Mobile", formatPhone(form.mobile_country_code, form.mobile))}${field("Age / Gender", `${form.age || "-"} / ${form.gender || "-"}`)}</div></section><section class="journey-print-section"><h2>Consent Details</h2><div class="journey-print-grid">${field("Consent Type", consentLabel)}${field("Doctor / Consultant", form.doctor_name)}${field("Signed By", form.signed_by)}${field("Relationship", form.relation_to_patient)}${field("Attender Mobile", formatPhone(form.attender_country_code, form.attender_mobile))}${field("Consent Status", form.status)}${field("Document Reference", form.document_reference)}${field("Consent Summary", form.notes)}</div></section><section class="journey-print-section"><h2>Signatures</h2><div class="journey-print-grid">${field("Patient Signature", form.patient_signature)}${field("Attender Signature", form.attender_signature)}${field("Doctor Signature", form.doctor_signature)}${field("Date", new Date().toLocaleDateString("en-IN"))}</div></section>`;
   openRegistrationDeskDocumentPrint("Consent Desk Report", body, setNotice);
 }
 
@@ -472,6 +475,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
       age: selectedPatient?.age ? String(selectedPatient.age) : prev.age,
       gender: normalizeConsentGender(selectedPatient?.gender) || prev.gender,
       mobile: selectedPatient?.phone || prev.mobile,
+      mobile_country_code: selectedPatient?.phone ? cleanCountryCode(selectedPatient.phone_country_code) : prev.mobile_country_code,
       signed_by: defaultPatientName || prev.signed_by,
       relation_to_patient: defaultPatientName ? "Self" : prev.relation_to_patient,
       patient_signature: defaultPatientName || prev.patient_signature,
@@ -691,7 +695,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
           department: appointmentForm.department.trim() || undefined,
           doctor_name: appointmentForm.doctor_name.trim() || undefined,
           appointment_date: appointmentForm.appointment_date,
-          appointment_kind: appointmentForm.appointment_kind || "new",
+          appointment_kind: appointmentForm.appointment_kind || "new", fee_kind: selectedAppointmentPatient?.eligible_for_free_followup ? "free_followup" : undefined,
           notes: buildAppointmentNotes() || undefined,
           consultation_fee: consultationFee,
           payment_mode: appointmentForm.payment_mode || "cash",
@@ -726,7 +730,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
         department: appointmentForm.department.trim() || undefined,
         doctor_name: appointmentForm.doctor_name.trim() || undefined,
         appointment_date: appointmentForm.appointment_date,
-        appointment_kind: appointmentForm.appointment_kind || "new",
+        appointment_kind: appointmentForm.appointment_kind || "new", fee_kind: selectedAppointmentPatient?.eligible_for_free_followup ? "free_followup" : undefined,
         notes: buildAppointmentNotes() || undefined,
         consultation_fee: consultationFee,
         operator_name: appointmentForm.operator_name.trim() || undefined,
@@ -764,7 +768,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
       department: appointmentForm.department.trim() || undefined,
       doctor_name: appointmentForm.doctor_name.trim() || undefined,
       appointment_date: appointmentForm.appointment_date,
-      appointment_kind: appointmentForm.appointment_kind || "new",
+      appointment_kind: appointmentForm.appointment_kind || "new", fee_kind: selectedAppointmentPatient?.eligible_for_free_followup ? "free_followup" : undefined,
       notes: buildAppointmentNotes() || undefined,
       consultation_fee: consultationFee,
       payment_mode: appointmentForm.payment_mode || "cash",
@@ -874,8 +878,10 @@ const activeDepartments = (data.departments || []).filter((department) => {
       age: consentForm.age.trim(),
       gender: consentForm.gender.trim(),
       mobile: consentForm.mobile.trim(),
+      mobile_country_code: consentForm.mobile_country_code,
       doctor_name: consentForm.doctor_name.trim(),
       attender_mobile: consentForm.attender_mobile.trim(),
+      attender_country_code: consentForm.attender_country_code,
       patient_signature: consentForm.patient_signature.trim(),
       attender_signature: consentForm.attender_signature.trim(),
       doctor_signature: consentForm.doctor_signature.trim(),
@@ -961,10 +967,12 @@ const activeDepartments = (data.departments || []).filter((department) => {
       age: patient.age ? String(patient.age) : "",
       gender: normalizeConsentGender(patient.gender),
       mobile: patient.phone || "",
+      mobile_country_code: cleanCountryCode(patient.phone_country_code),
       doctor_name: latestVisit?.doctor_name || prev.doctor_name,
       signed_by: fullName,
       relation_to_patient: "Self",
       attender_mobile: patient.family_mobile || patient.phone || "",
+      attender_country_code: cleanCountryCode(patient.family_mobile ? patient.family_country_code : patient.phone_country_code),
       patient_signature: fullName,
       notes: latestVisit?.department ? `Latest visit department: ${latestVisit.department}` : prev.notes,
     }));
@@ -987,7 +995,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
   const parseConsentNotes = (notes?: string) => {
     if (!notes) return null;
     try {
-      return JSON.parse(notes) as { doctor_name?: string; document_reference?: string; mobile?: string };
+      return JSON.parse(notes) as { doctor_name?: string; document_reference?: string; mobile?: string; mobile_country_code?: string };
     } catch {
       return { document_reference: notes };
     }
@@ -1084,7 +1092,8 @@ const activeDepartments = (data.departments || []).filter((department) => {
             </Label>
             <Label>
               Mobile
-              <Input value={consentForm.mobile} onChange={(event) => setConsentForm((prev) => ({ ...prev, mobile: normalizePhoneNumber(event.target.value, "+91") }))} placeholder="Patient mobile" />
+              <PhoneInput countryCode={consentForm.mobile_country_code} value={consentForm.mobile} placeholder="Patient mobile"
+                onChange={({ countryCode, value }) => setConsentForm((prev) => ({ ...prev, mobile_country_code: countryCode, mobile: value }))} />
             </Label>
             <Label>
               Consent Type
@@ -1106,7 +1115,8 @@ const activeDepartments = (data.departments || []).filter((department) => {
             </Label>
             <Label>
               Attender Mobile
-              <Input value={consentForm.attender_mobile} onChange={(event) => setConsentForm((prev) => ({ ...prev, attender_mobile: normalizePhoneNumber(event.target.value, "+91") }))} placeholder="Optional" />
+              <PhoneInput countryCode={consentForm.attender_country_code} value={consentForm.attender_mobile} placeholder="Optional"
+                onChange={({ countryCode, value }) => setConsentForm((prev) => ({ ...prev, attender_country_code: countryCode, attender_mobile: value }))} />
             </Label>
             <Label>
               Consent Status
@@ -1159,7 +1169,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
                       <span>Status: {consent.status || "signed"}</span>
                       <span>Date: {formatDateTime(consent.signed_at)}</span>
                       {parsedNotes?.doctor_name && <span>Doctor: {parsedNotes.doctor_name}</span>}
-                      {parsedNotes?.mobile && <span>Mobile: {parsedNotes.mobile}</span>}
+                      {parsedNotes?.mobile && <span>Mobile: {formatPhone(parsedNotes.mobile_country_code, parsedNotes.mobile)}</span>}
                       {parsedNotes?.document_reference && <span>Document: {parsedNotes.document_reference}</span>}
                     </div>
                   );

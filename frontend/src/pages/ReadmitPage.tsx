@@ -1,4 +1,5 @@
-import { normalizePhoneNumber, normalizeSearchQuery } from "../lib/phone";
+import { cleanCountryCode, formatPhone, normalizeSearchQuery, validateMobileByCountry } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import DocumentUploadDropzone from "../components/DocumentUploadDropzone";
@@ -21,6 +22,7 @@ type ProfileUpdates = {
   pulse: string;
   spo2: string;
   phone: string;
+  phone_country_code: string;
   symptoms: string;
   gender: string;
   pregnant: boolean;
@@ -135,6 +137,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
     pulse: "",
     spo2: "",
     phone: "",
+    phone_country_code: "+91",
     symptoms: "",
     gender: "",
     pregnant: false,
@@ -215,6 +218,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
       pulse: patient?.pulse ?? "",
       spo2: patient?.spo2 ?? "",
       phone: patient?.phone || "",
+      phone_country_code: cleanCountryCode(patient?.phone_country_code),
       symptoms: patient?.symptoms || "",
       gender: patient?.gender || "Female",
       pregnant: patient?.gender === "Female" && (patient?.pregnant === 1 || patient?.pregnant === true),
@@ -494,9 +498,6 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
 
   const handleProfileChange = (field: keyof ProfileUpdates) => (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     let value: string | boolean = field === "pregnant" ? (event.target as HTMLInputElement).checked : event.target.value;
-    if (field === "phone" && typeof value === "string") {
-      value = normalizePhoneNumber(value, "+91");
-    }
     setProfileUpdates((prev) => {
       const next = { ...prev, [field]: value };
       if (field === "gender" && event.target.value !== "Female") {
@@ -522,7 +523,8 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
     const age = profileUpdates.age || activePatient.age || "-";
     const gender = profileUpdates.gender || activePatient.gender || "-";
     const doctor = doctorName || "Doctor not assigned";
-    const mobile = profileUpdates.phone || activePatient.phone || activePatient.family_mobile || "-";
+    const mobile = (profileUpdates.phone ? formatPhone(profileUpdates.phone_country_code, profileUpdates.phone) : "")
+      || formatPhone(activePatient.phone_country_code, activePatient.phone) || activePatient.family_mobile || "-";
     const fee = Number(reviewFee || 0).toFixed(2);
     const operatorName = "name";
     const visitTime = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
@@ -684,6 +686,8 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
     if (!paymentMode.trim()) {
       validationErrors.paymentMode = "Payment Mode is required.";
     }
+    const phoneError = profileUpdates.phone ? validateMobileByCountry(profileUpdates.phone, profileUpdates.phone_country_code, false) : null;
+    if (phoneError) validationErrors.phone = phoneError;
     if (Object.keys(validationErrors).length > 0) {
       setReadmitValidationErrors(validationErrors);
       setNotice({ type: "warning", message: "Please fill the required follow-up details before saving." });
@@ -704,6 +708,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
           ...activePatient,
           age: numberOrNull(profileUpdates.age),
           phone: profileUpdates.phone,
+          phone_country_code: profileUpdates.phone_country_code,
           gender: profileUpdates.gender,
           pregnant: profileUpdates.pregnant,
         }),
@@ -959,7 +964,8 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                       </Label>
                         <Label>
                           Phone
-                          <Input value={profileUpdates.phone} onChange={handleProfileChange("phone")} />
+                          <PhoneInput countryCode={profileUpdates.phone_country_code} value={profileUpdates.phone}
+                            onChange={({ countryCode, value }) => setProfileUpdates((prev) => ({ ...prev, phone_country_code: countryCode, phone: value }))} />
                         </Label>
                       <Label>
                         Appointment Kind

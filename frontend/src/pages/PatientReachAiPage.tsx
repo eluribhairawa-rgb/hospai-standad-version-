@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import PhoneInput from "../components/PhoneInput";
+import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../lib/api";
 import { printViaIframe } from "../lib/printViaIframe";
@@ -116,16 +118,6 @@ const esc = (value: unknown) =>
 const fmtDate = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
-const cleanPhoneForWhatsApp = (rawPhone?: string): string => {
-  if (!rawPhone) return "";
-  let digits = rawPhone.replace(/[^0-9]/g, "");
-  if (digits.startsWith("0")) digits = digits.substring(1);
-  // Default to 91 for standard 10-digit Indian numbers
-  if (digits.length === 10) {
-    return "91" + digits;
-  }
-  return digits;
-};
 
 // SVG Icons
 const WhatsAppIcon = ({ size = 18 }: { size?: number }) => (
@@ -195,6 +187,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
   // WhatsApp Dialog State
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
   const [recipientPhone, setRecipientPhone] = useState("");
+  const [recipientPhoneCode, setRecipientPhoneCode] = useState("+91");
   const [recipientName, setRecipientName] = useState("");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<"summary" | "meds" | "followup" | "quick">("summary");
@@ -524,8 +517,13 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
   // Open WhatsApp dialog
   const handleOpenWhatsAppDialog = () => {
     if (!activePatient) return;
-    const phone = activePatient.phone || activePatient.family_mobile || "";
-    setRecipientPhone(phone);
+    const usePrimary = !!activePatient.phone;
+    const stored = splitStoredPhone(
+      usePrimary ? activePatient.phone : activePatient.family_mobile,
+      usePrimary ? activePatient.phone_country_code : activePatient.family_country_code,
+    );
+    setRecipientPhone(stored.value);
+    setRecipientPhoneCode(stored.countryCode);
     setRecipientName([activePatient.name, activePatient.last_name].filter(Boolean).join(" "));
     setSavedTemplateId(null);
     const initialMsg = buildTemplateMessage(selectedTemplate);
@@ -559,7 +557,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
 
   // Launch WhatsApp link
   const handleSendWhatsApp = () => {
-    const cleaned = cleanPhoneForWhatsApp(recipientPhone);
+    const cleaned = toWhatsAppNumber(recipientPhoneCode, recipientPhone);
     const encoded = encodeURIComponent(whatsAppMessage);
     const url = cleaned
       ? `https://wa.me/${cleaned}?text=${encoded}`
@@ -1432,25 +1430,16 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
                 <div>
                   <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "4px" }}>
-                    Recipient Phone Number (with Country Code)
+                    Recipient Phone Number
                   </label>
-                  <input
-                    type="text"
+                  <PhoneInput
+                    countryCode={recipientPhoneCode}
                     value={recipientPhone}
-                    onChange={(e) => setRecipientPhone(e.target.value)}
-                    placeholder="e.g. 9849237676 or +919849237676"
-                    style={{
-                      width: "100%",
-                      height: "38px",
-                      padding: "0 10px",
-                      boxSizing: "border-box",
-                      borderRadius: "8px",
-                      border: "1.5px solid #cbd5e1",
-                      fontSize: "13px",
-                    }}
+                    placeholder="Mobile number, or leave blank"
+                    onChange={({ countryCode, value }) => { setRecipientPhoneCode(countryCode); setRecipientPhone(value); }}
                   />
                   <div style={{ fontSize: "11px", color: "#64748b", marginTop: "3px" }}>
-                    Standard 10-digit Indian numbers auto-prefixed with 91
+                    Pick the country, then the mobile number (leave blank to choose a contact in WhatsApp)
                   </div>
                 </div>
 

@@ -1,4 +1,5 @@
-import { normalizePhoneNumber } from "../lib/phone";
+import { splitStoredPhone } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 import { useEffect, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { ALL_ASSIGNABLE_MODULES, MODULE_OPTIONS } from "../lib/constants";
@@ -14,13 +15,14 @@ type AdminForm = {
   full_name: string;
   email: string;
   phone: string;
+  phone_country_code: string;
   department: string;
   user_type: UserType;
   module_access: ModuleId[];
 };
 
 const EMPTY_FORM: AdminForm = {
-  username: "", password: "", full_name: "", email: "", phone: "", department: "",
+  username: "", password: "", full_name: "", email: "", phone: "", phone_country_code: "+91", department: "",
   user_type: "normal", module_access: [],
 };
 
@@ -67,8 +69,8 @@ export default function AdminPage({ setNotice }: Props) {
         module_access: (form.user_type === "super_admin" || form.user_type === "admin") ? ALL_ASSIGNABLE_MODULES : form.module_access,
         job_role: form.user_type === "super_admin" ? "System Admin" : (form.user_type === "admin" ? "Staff Admin" : "Staff"),
         status: "active",
-        address: "",
-        emergency_contact: "",
+        // New users start blank; an edit leaves the stored address and emergency contact alone.
+        ...(editingId ? {} : { address: "", emergency_contact: "" }),
       };
       const response = await apiFetch<{ success?: boolean; message?: string; employee_id?: string }>(
         editingId ? `/api/admin/users/${editingId}` : "/api/admin/users",
@@ -92,7 +94,8 @@ export default function AdminPage({ setNotice }: Props) {
       password: "",
       full_name: user.full_name || "",
       email: user.email || "",
-      phone: user.phone || "",
+      phone: splitStoredPhone(user.phone, user.phone_country_code).value,
+      phone_country_code: splitStoredPhone(user.phone, user.phone_country_code).countryCode,
       department: user.department || "",
       user_type: user.user_type === "super_admin" ? "super_admin" : (user.user_type === "admin" ? "admin" : "normal"),
       module_access: (user.user_type === "super_admin" || user.user_type === "admin") ? [...ALL_ASSIGNABLE_MODULES] : (user.module_access || []),
@@ -130,7 +133,7 @@ export default function AdminPage({ setNotice }: Props) {
                 <Label>Password<Input type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} required={!editingId} disabled={!!editingId} placeholder={editingId ? "Password remains unchanged" : ""} /></Label>
                 <Label>Full Name<Input value={form.full_name} onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))} required /></Label>
                 <Label>Email<Input type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} required /></Label>
-                <Label>Phone<Input value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: normalizePhoneNumber(e.target.value, "+91") }))} required /></Label>
+                <Label>Phone<PhoneInput required countryCode={form.phone_country_code} value={form.phone} onChange={({ countryCode, value }) => setForm((p) => ({ ...p, phone_country_code: countryCode, phone: value }))} /></Label>
                 <Label>Department<Input value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} required /></Label>
                 <Label>User Type<Select value={form.user_type} onChange={(e) => setForm((p) => ({ ...p, user_type: e.target.value as UserType }))}><option value="normal">Normal</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option></Select></Label>
               </div>

@@ -223,6 +223,15 @@ def billing_overview_stats(date: str | None = None, cashier: str | None = None, 
     return bs.get_billing_overview_stats(db, target_date=date, cashier=cashier, counter=counter)
 
 
+@router.get("/overview-details")
+def billing_overview_details(card: str, date: str | None = None, db: Session = Depends(get_db),
+                             user: dict = Depends(require_permissions("billing.read"))):
+    """Patient-level rows behind a Billing Overview card (net billed, receipts, refunds, dues)."""
+    target = date or bs.current_ist_datetime().strftime("%Y-%m-%d")
+    rows = bs.get_billing_overview_entries(db, target, card)
+    return {"date": target, "card": card, "total": round(sum(r["amount"] for r in rows), 2), "entries": rows}
+
+
 @router.get("/worklist")
 def billing_worklist(tab: str = "pending_payments", department: str | None = None,
                      visit_type: str | None = None, q: str | None = None,

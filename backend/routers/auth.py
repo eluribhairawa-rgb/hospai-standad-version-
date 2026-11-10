@@ -164,14 +164,16 @@ def admin_users_update(employee_id: str, payload: dict = Body(...), db: Session 
         list(security.ASSIGNABLE_MODULES) if user_type in ("super_admin", "admin")
         else security.normalize_module_access(payload.get("module_access", []), "normal")
     )
+    phones, phone_error = security.normalize_user_phones(payload, partial=True)
+    if phone_error:
+        raise HTTPException(status_code=400, detail=phone_error)
     updated = lq.update_employee(db, employee_id, {
+        **phones,
         "full_name": payload.get("full_name", target.get("full_name")),
         "email": payload.get("email", target.get("email")),
-        "phone": payload.get("phone", target.get("phone")),
         "department": payload.get("department", target.get("department")),
         "status": payload.get("status", target.get("status") or "active"),
         "address": payload.get("address", target.get("address")),
-        "emergency_contact": payload.get("emergency_contact", target.get("emergency_contact")),
         "job_role": payload.get("job_role", target.get("job_role")),
         "doctor_name": payload.get("doctor_name", target.get("doctor_name")),
         "access_role": "owner" if user_type == "super_admin" else payload.get("access_role", target.get("access_role")),

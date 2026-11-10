@@ -1556,68 +1556,96 @@ def record_doctor_statement_payout(db: Session, statement_id: int, payload: dict
 # 6. OVERVIEW, WORKLIST & REPORTING QUERIES
 # ==============================================================================
 
+OVERVIEW_CARDS = ("net_billed", "receipts", "refunds", "dues")
+_IST_DAY = "DATE(timezone('Asia/Kolkata', CAST({col} AS timestamptz))) = DATE(?)"
+_PATIENT = "COALESCE(NULLIF(TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')), ''), {fallback})"
+
+
+def get_billing_overview_entries(db: Session, target_date: str, card: str):
+    """Rows behind one Billing Overview card for the day (dues: all dates).
+
+    net_billed: bills raised that day (any module).
+    receipts:   every payment taken against a bill that day -- OP registration, lab, pharmacy,
+                discharge and Billing's own receipts all write invoice_payments -- plus advance
+                deposits (receipts not yet tied to a bill). Refund rows are excluded.
+    refunds:    refunds paid that day: negative invoice payments (cancelled services) plus
+                refund vouchers (advances returned).
+    dues:       bills with a balance outstanding, all dates.
+    """
+    if card not in OVERVIEW_CARDS:
+        raise HTTPException(status_code=400, detail="Unknown overview card.")
+    paid_day = _IST_DAY.format(col="ip.created_at")
+    receipt_day = _IST_DAY.format(col="fr.created_at")
+    with legacy_sql.get_connection(db) as conn:
+        cursor = conn.cursor()
+        if card == "net_billed":
+            cursor.execute(
+                f"""
+                SELECT i.created_at AS at, i.patient_id, {_PATIENT.format(fallback="i.patient_name")} AS patient_name,
+                       i.invoice_no AS reference, i.module AS detail, i.total_amount AS amount
+                FROM invoices i LEFT JOIN patients p ON p.patient_id = i.patient_id
+                WHERE {_IST_DAY.format(col="i.created_at")}
+                ORDER BY i.created_at DESC
+                """, (target_date,))
+        elif card in ("receipts", "refunds"):
+            sign = ">" if card == "receipts" else "<"
+            receipt_types = "('advance')" if card == "receipts" else "('refund_voucher')"
+            cursor.execute(
+                f"""
+                SELECT ip.created_at AS at, i.patient_id, {_PATIENT.format(fallback="i.patient_name")} AS patient_name,
+                       COALESCE(ip.receipt_no, i.invoice_no) AS reference,
+                       i.module || ' · ' || COALESCE(ip.payment_mode, '-') AS detail, ABS(ip.amount) AS amount
+                FROM invoice_payments ip
+                JOIN invoices i ON i.id = ip.invoice_id
+                LEFT JOIN financial_receipts fr ON fr.id = ip.canonical_receipt_id
+                LEFT JOIN patients p ON p.patient_id = i.patient_id
+                WHERE {paid_day} AND ip.amount {sign} 0 AND COALESCE(fr.is_reversed, FALSE) = FALSE
+                UNION ALL
+                SELECT fr.created_at, fr.patient_id, {_PATIENT.format(fallback="fr.patient_id")},
+                       fr.receipt_no, CASE WHEN fr.receipt_type = 'advance' THEN 'Advance deposit' ELSE 'Refund voucher' END,
+                       fr.total_amount
+                FROM financial_receipts fr LEFT JOIN patients p ON p.patient_id = fr.patient_id
+                WHERE {receipt_day} AND fr.receipt_type IN {receipt_types} AND fr.is_reversed = FALSE
+                ORDER BY at DESC
+                """, (target_date, target_date))
+        else:
+            cursor.execute(
+                f"""
+                SELECT i.created_at AS at, i.patient_id, {_PATIENT.format(fallback="i.patient_name")} AS patient_name,
+                       i.invoice_no AS reference, i.module AS detail, i.due_amount AS amount
+                FROM invoices i LEFT JOIN patients p ON p.patient_id = i.patient_id
+                WHERE i.due_amount > 0
+                ORDER BY i.created_at DESC
+                """)
+        rows = []
+        for r in cursor.fetchall():
+            r = dict(r)
+            at = r.get("at")
+            rows.append({
+                "at": at.isoformat(sep=" ", timespec="minutes") if hasattr(at, "isoformat") else (str(at) if at else None),
+                "patient_id": r.get("patient_id"),
+                "patient_name": r.get("patient_name") or r.get("patient_id") or "Walk-in",
+                "reference": r.get("reference"),
+                "detail": r.get("detail"),
+                "amount": float(quantize_dec(to_decimal(r.get("amount")))),
+            })
+        return rows
+
+
 def get_billing_overview_stats(db: Session, target_date: str = None, cashier: str = None, counter: str = None):
     if not target_date:
         target_date = current_ist_datetime().strftime("%Y-%m-%d")
-
-    with legacy_sql.get_connection(db) as conn:
-        cursor = conn.cursor()
-
-        # Net billed today: sum of invoices created on target_date
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(total_amount), 0)
-            FROM invoices
-            WHERE DATE(timezone('Asia/Kolkata', CAST(created_at AS timestamptz))) = DATE(?)
-            """,
-            (target_date,)
-        )
-        net_billed = to_decimal(cursor.fetchone()[0])
-
-        # Receipts today: incoming bill_payment and advance receipts ONLY (excludes refund vouchers)
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(total_amount), 0)
-            FROM financial_receipts
-            WHERE DATE(timezone('Asia/Kolkata', CAST(created_at AS timestamptz))) = DATE(?)
-              AND receipt_type IN ('bill_payment', 'advance')
-              AND is_reversed = FALSE
-            """,
-            (target_date,)
-        )
-        receipts_today = to_decimal(cursor.fetchone()[0])
-
-        # Refunds today: paid refund vouchers
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(total_amount), 0)
-            FROM financial_receipts
-            WHERE DATE(timezone('Asia/Kolkata', CAST(created_at AS timestamptz))) = DATE(?)
-              AND receipt_type = 'refund_voucher'
-              AND is_reversed = FALSE
-            """,
-            (target_date,)
-        )
-        refunds_today = to_decimal(cursor.fetchone()[0])
-
-        # Outstanding patient dues across all dates
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(due_amount), 0)
-            FROM invoices
-            WHERE due_amount > 0
-            """
-        )
-        dues_total = to_decimal(cursor.fetchone()[0])
-
-        return {
-            "target_date": target_date,
-            "net_billed": float(net_billed),
-            "receipts_today": float(receipts_today),
-            "refunds_today": float(refunds_today),
-            "net_collections": float(quantize_dec(receipts_today - refunds_today)),
-            "outstanding_dues": float(dues_total),
-        }
+    totals = {}
+    for card in OVERVIEW_CARDS:
+        totals[card] = sum((to_decimal(r["amount"]) for r in get_billing_overview_entries(db, target_date, card)), D_ZERO)
+    return {
+        "target_date": target_date,
+        "net_billed": float(quantize_dec(totals["net_billed"])),
+        "receipts_today": float(quantize_dec(totals["receipts"])),
+        "refunds_today": float(quantize_dec(totals["refunds"])),
+        "net_collections": float(quantize_dec(totals["receipts"] - totals["refunds"])),
+        "outstanding_dues": float(quantize_dec(totals["dues"])),
+    }
 
 
 def get_billing_worklist(db: Session, tab: str = "pending_payments", department: str = None, visit_type: str = None, q: str = None):

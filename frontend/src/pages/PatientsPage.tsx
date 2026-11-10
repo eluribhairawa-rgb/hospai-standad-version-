@@ -1,4 +1,5 @@
-import { normalizePhoneNumber, normalizeSearchQuery } from "../lib/phone";
+import { normalizeSearchQuery, validateMobileByCountry } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import MarkdownReport from "../components/MarkdownReport";
@@ -620,6 +621,7 @@ type PatientEditForm = {
   allergies: string;
   symptoms: string;
   phone: string;
+  phone_country_code: string;
   address: string;
 };
 
@@ -640,6 +642,7 @@ const toEditForm = (patient: Patient): PatientEditForm => {
     allergies: patient.allergies || "",
     symptoms: patient.symptoms || "",
     phone: patient.phone || "",
+    phone_country_code: patient.phone_country_code || "+91",
     address: patient.address || "",
   };
 };
@@ -848,6 +851,12 @@ function PatientDetail({
       return;
     }
 
+    const phoneError = validateMobileByCountry(editForm.phone, editForm.phone_country_code, true);
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError });
+      return;
+    }
+
     let age: number | null = null;
     let weight: number | null = null;
     let height: number | null = null;
@@ -873,6 +882,7 @@ function PatientDetail({
       allergies: editForm.allergies.trim(),
       symptoms: editForm.symptoms.trim(),
       phone: editForm.phone.trim(),
+      phone_country_code: editForm.phone_country_code,
       address: editForm.address.trim(),
     };
 
@@ -1468,7 +1478,12 @@ function PatientDetail({
                 <option value="Other">Other</option>
               </Select>
               <p className="muted">Phone</p>
-              <Input value={editForm.phone} onChange={(event) => setEditForm({ ...editForm, phone: normalizePhoneNumber(event.target.value, "+91") })} />
+              <PhoneInput
+                required
+                countryCode={editForm.phone_country_code}
+                value={editForm.phone}
+                onChange={({ countryCode, value }) => setEditForm({ ...editForm, phone_country_code: countryCode, phone: value })}
+              />
               <p className="muted">Weight (kg)</p>
               <Input value={editForm.weight} onChange={(event) => setEditForm({ ...editForm, weight: event.target.value })} />
               <p className="muted">Height (cm)</p>

@@ -100,18 +100,24 @@ def pharmacy_suppliers_list(db: Session = Depends(get_db), user: dict = Depends(
     return {"suppliers": rows_to_dicts(lq.list_pharmacy_suppliers(db))}
 
 
+def _normalize_supplier_phone(payload):
+    """Validate the supplier's phone for its country (phone.py rules) and store it as
+    local digits plus phone_country_code."""
+    if "phone" not in payload:
+        return
+    from phone import validate_phone
+    digits, code, error = validate_phone(payload.get("phone"), payload.get("phone_country_code"), label="Supplier phone")
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    payload["phone"] = digits
+    payload["phone_country_code"] = code if digits else None
+
+
 @router.post("/suppliers")
 def pharmacy_suppliers_create(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                                user: dict = Depends(require_permissions("pharmacy.write"))):
     validate_required_fields(payload, ["supplier_name"])
-    phone = payload.get("phone")
-    if phone:
-        digits = re.sub(r"\D", "", str(phone))
-        if len(digits) > 10:
-            digits = digits[:10]
-        if digits and len(digits) != 10:
-            raise HTTPException(status_code=400, detail="Mobile number must be exactly 10 digits")
-        payload["phone"] = digits
+    _normalize_supplier_phone(payload)
     supplier_id = lq.create_pharmacy_supplier(db, payload)
     log_audit_event(db, user, client_ip(request), "create", "pharmacy_suppliers", str(supplier_id), {"supplier_name": payload.get("supplier_name")})
     return {"supplier_id": supplier_id}
@@ -120,14 +126,7 @@ def pharmacy_suppliers_create(request: Request, payload: dict = Body(...), db: S
 @router.put("/suppliers/{supplier_id}")
 def pharmacy_suppliers_update(supplier_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                                user: dict = Depends(require_permissions("pharmacy.write"))):
-    phone = payload.get("phone")
-    if phone:
-        digits = re.sub(r"\D", "", str(phone))
-        if len(digits) > 10:
-            digits = digits[:10]
-        if digits and len(digits) != 10:
-            raise HTTPException(status_code=400, detail="Mobile number must be exactly 10 digits")
-        payload["phone"] = digits
+    _normalize_supplier_phone(payload)
     if not lq.update_pharmacy_supplier(db, supplier_id, payload):
         raise HTTPException(status_code=404, detail="Supplier not found")
     log_audit_event(db, user, client_ip(request), "update", "pharmacy_suppliers", str(supplier_id), {})

@@ -1,4 +1,5 @@
-import { normalizePhoneNumber, normalizeSearchQuery } from "../lib/phone";
+import { formatPhone, normalizeSearchQuery, splitStoredPhone } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
 import { useEffect, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import StatCard from "../components/StatCard";
@@ -131,76 +132,27 @@ function ModuleAccessPanel({ selectedModules, onChange }: ModuleAccessPanelProps
   );
 }
 
-const COUNTRIES = [
-  { code: "+91", name: "India", min: 10, max: 10 },
-  { code: "+1", name: "USA/Canada", min: 10, max: 10 },
-  { code: "+44", name: "UK", min: 10, max: 11 },
-  { code: "+61", name: "Australia", min: 9, max: 9 },
-  { code: "+49", name: "Germany", min: 10, max: 11 },
-  { code: "+33", name: "France", min: 9, max: 9 },
-  { code: "+65", name: "Singapore", min: 8, max: 8 },
-  { code: "+971", name: "UAE", min: 9, max: 9 },
-  { code: "+966", name: "Saudi Arabia", min: 9, max: 9 },
-];
-
-function PhoneInput({ value, onChange, required }: { value: string; onChange: (val: string) => void; required?: boolean }) {
-  const parsePhone = (val: string) => {
-    if (!val) return { code: "+91", num: "" };
-    for (const c of COUNTRIES) {
-      if (val.startsWith(c.code + " ")) {
-        return { code: c.code, num: val.substring(c.code.length + 1).replace(/\D/g, "") };
-      }
-    }
-    for (const c of COUNTRIES) {
-      if (val.startsWith(c.code)) {
-        return { code: c.code, num: val.substring(c.code.length).replace(/\D/g, "") };
-      }
-    }
-    return { code: "+91", num: val.replace(/\D/g, "") };
-  };
-
-  const parsed = parsePhone(value);
-  const code = parsed.code;
-  const num = parsed.num;
-
-  const handleCodeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const c = e.target.value;
-    onChange(`${c} ${num}`);
-  };
-
-  const handleNumChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const n = normalizePhoneNumber(e.target.value, code);
-    const c = COUNTRIES.find(c => c.code === code) || COUNTRIES[0];
-    if (n.length > c.max) return;
-    onChange(`${code} ${n}`);
-  };
-
-  const country = COUNTRIES.find(c => c.code === code) || COUNTRIES[0];
-  const isValid = !num || (num.length >= country.min && num.length <= country.max);
-
+/** Staff phones are kept in the form as "+971 501234567" and split into number + country code when saved. */
+function StaffPhoneInput({ value, onChange, required }: { value: string; onChange: (val: string) => void; required?: boolean }) {
+  const parts = splitStoredPhone(value);
   return (
-    <div style={{ display: "flex", gap: "0.4rem", position: "relative" }}>
-      <Select value={code} onChange={handleCodeChange} style={{ width: "135px", flexShrink: 0 }}>
-        {COUNTRIES.map(c => (
-          <option key={c.name} value={c.code}>{c.name} ({c.code})</option>
-        ))}
-      </Select>
-      <Input 
-        value={num} 
-        onChange={handleNumChange} 
-        placeholder="Enter Mobile Number"
-        required={required}
-        pattern={`^\\d{${country.min},${country.max}}$`}
-        title={`Please enter ${country.min}${country.min !== country.max ? ` to ${country.max}` : ''} digits`}
-        style={{ borderColor: !isValid && num ? "red" : undefined, width: "100%" }}
-      />
-      {num && !isValid && (
-        <span style={{ color: "red", fontSize: "0.7rem", position: "absolute", bottom: "-18px", right: "4px" }}>
-          Requires {country.min}{country.min !== country.max ? `-${country.max}` : ''} digits
-        </span>
-      )}
-    </div>
+    <PhoneInput
+      required={required}
+      countryCode={parts.countryCode}
+      value={parts.value}
+      onChange={({ countryCode, value: digits }) => onChange(`${countryCode} ${digits}`)}
+    />
   );
+}
+
+/** Form strings -> the API's phone / phone_country_code and emergency_contact / emergency_contact_country_code. */
+function staffPhoneFields(phone?: string, emergency?: string) {
+  const p = splitStoredPhone(phone);
+  const e = splitStoredPhone(emergency);
+  return {
+    phone: p.value, phone_country_code: p.value ? p.countryCode : null,
+    emergency_contact: e.value, emergency_contact_country_code: e.value ? e.countryCode : null,
+  };
 }
 
 type DoctorOption = { doctor_name: string; department?: string };
@@ -286,7 +238,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       return;
     }
     try {
-      const payload = { ...form, doctor_name: isDoctorRole(form.job_role) ? form.doctor_name.trim() : "" };
+      const payload = { ...form, ...staffPhoneFields(form.phone, form.emergency_contact), doctor_name: isDoctorRole(form.job_role) ? form.doctor_name.trim() : "" };
       const res = await apiFetch<{ success: boolean; message: string }>("/api/employees", { method: "POST", body: JSON.stringify(payload) });
       if (res.success) {
         setNotice({ type: "success", message: res.message });
@@ -343,9 +295,9 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
     setEditForm({
       full_name: employee.full_name || "",
       email: employee.email || "",
-      phone: employee.phone || "",
+      phone: formatPhone(employee.phone_country_code, employee.phone) || employee.phone || "",
       address: employee.address || "",
-      emergency_contact: employee.emergency_contact || "",
+      emergency_contact: formatPhone(employee.emergency_contact_country_code, employee.emergency_contact) || employee.emergency_contact || "",
       status: employee.status || "active",
       job_role: employee.job_role || "",
       doctor_name: employee.doctor_name || "",
@@ -360,7 +312,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       return;
     }
     try {
-      const payload = { ...editForm, doctor_name: isDoctorRole(editForm.job_role) ? (editForm.doctor_name || "").trim() : "" };
+      const payload = { ...editForm, ...staffPhoneFields(editForm.phone, editForm.emergency_contact), doctor_name: isDoctorRole(editForm.job_role) ? (editForm.doctor_name || "").trim() : "" };
       await apiFetch(`/api/employees/${employeeId}`, { method: "PUT", body: JSON.stringify(payload) });
       setNotice({ type: "success", message: "Employee updated successfully." });
       setEditingId(null);
@@ -423,7 +375,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                       <p>Username: {emp.username}</p>
                       <p>Full Name: {emp.full_name || "-"}</p>
                       <p>Email: {emp.email || "-"}</p>
-                      <p>Phone: {emp.phone || "-"}</p>
+                      <p>Phone: {formatPhone(emp.phone_country_code, emp.phone) || emp.phone || "-"}</p>
                       <p>Address: {emp.address || "-"}</p>
                     </div>
                     <div>
@@ -436,7 +388,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                       <p>Department: {emp.department || "-"}</p>
                       <p>Status: <Badge variant={emp.status === "active" ? "default" : "destructive"}>{emp.status || "-"}</Badge></p>
                       <p>Date Joined: {formatDate(emp.date_joined)}</p>
-                      <p>Emergency Contact: {emp.emergency_contact || "-"}</p>
+                      <p>Emergency Contact: {formatPhone(emp.emergency_contact_country_code, emp.emergency_contact) || emp.emergency_contact || "-"}</p>
                     </div>
                   </div>
 
@@ -453,7 +405,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                         <Label>
                           Phone
                           <div>
-                            <PhoneInput 
+                            <StaffPhoneInput 
                               value={editForm.phone || ""} 
                               onChange={(val) => setEditForm((p) => ({ ...p, phone: val }))} 
                             />
@@ -499,7 +451,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                         <Label className="span-3">
                           Emergency Contact
                           <div>
-                            <PhoneInput 
+                            <StaffPhoneInput 
                               value={editForm.emergency_contact || ""} 
                               onChange={(val) => setEditForm((p) => ({ ...p, emergency_contact: val }))} 
                             />
@@ -540,7 +492,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
               <Label>
                 Phone
                 <div>
-                  <PhoneInput 
+                  <StaffPhoneInput 
                     value={form.phone} 
                     onChange={(val) => setForm((p) => ({ ...p, phone: val }))} 
                     required 
@@ -575,7 +527,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
               <Label className="span-3">
                 Emergency Contact
                 <div>
-                  <PhoneInput 
+                  <StaffPhoneInput 
                     value={form.emergency_contact} 
                     onChange={(val) => setForm((p) => ({ ...p, emergency_contact: val }))} 
                   />

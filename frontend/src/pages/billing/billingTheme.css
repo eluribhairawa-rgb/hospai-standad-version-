@@ -808,3 +808,12 @@
 .billing-sidebar-mode .sidebar-tab.active .sidebar-tab-icon {
   color: #14b8a6 !important;
 }
+
+/* Summary cards open the records behind them */
+.billing-kpi-card-clickable { text-align: left; font: inherit; color: inherit; cursor: pointer; width: 100%; transition: border-color 0.15s, box-shadow 0.15s; }
+.billing-kpi-card-clickable:hover:not(:disabled) { border-color: #5eead4; box-shadow: 0 4px 14px rgba(15, 118, 110, 0.12); }
+.billing-kpi-card-clickable:focus-visible { outline: 2px solid #0f766e; outline-offset: 2px; }
+.billing-kpi-card-clickable:disabled { cursor: progress; opacity: 0.8; }
+.billing-detail-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.billing-detail-table th { text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; background: #fff; }
+.billing-detail-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #334155; }

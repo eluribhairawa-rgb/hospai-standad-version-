@@ -72,6 +72,28 @@ def dashboard_hospital_summary(date: str | None = None, db: Session = Depends(ge
     return lq.get_hospital_dashboard_summary(db, selected_date=date)
 
 
+@router.get("/dashboard/revenue-breakdown")
+def dashboard_revenue_breakdown(date: str | None = None, period: str = "today", db: Session = Depends(get_db),
+                                user: dict = Depends(require_hospital_overview("patients.read"))):
+    """Revenue by module (OP, IP, Pharmacy, Lab) for the day or month to date; rows add up to the total."""
+    import revenue_details
+    try:
+        return revenue_details.revenue_breakdown(db, date, period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/dashboard/revenue-details")
+def dashboard_revenue_details(category: str, date: str | None = None, period: str = "today", db: Session = Depends(get_db),
+                              user: dict = Depends(require_hospital_overview("patients.read"))):
+    """Patient-level payments / sales behind one revenue row (or the bills still due)."""
+    import revenue_details
+    try:
+        return revenue_details.revenue_details(db, date, period, category)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.get("/dashboard/my")
 def dashboard_my(date: str | None = None, db: Session = Depends(get_db),
                  user: dict = Depends(require_permissions("patients.read")),
@@ -106,10 +128,20 @@ def doctors_history_list(doctor_name: str | None = None, from_date: str | None =
     return {"history": rows_to_dicts(rows)}
 
 
+def _registered_patient(db, patient_id, hospital_id):
+    """The patient with exactly this UHID in the current hospital, or None."""
+    row = db.execute(text(
+        "SELECT patient_id, TRIM(COALESCE(name, '') || ' ' || COALESCE(last_name, '')) AS patient_name "
+        "FROM patients WHERE patient_id = :pid AND hospital_id = :hid"),
+        {"pid": patient_id, "hid": hospital_id}).fetchone()
+    return dict(row._mapping) if row else None
+
+
 @router.post("/appointments")
 def appointments_create(request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
-                         user: dict = Depends(require_permissions("patients.write"))):
-    validate_required_fields(payload, ["patient_name", "visit_type", "appointment_date", "consultation_fee"])
+                         user: dict = Depends(require_permissions("patients.write")),
+                         hospital_id: int = Depends(current_hospital_id)):
+    validate_required_fields(payload, ["patient_name", "visit_type", "appointment_date"])
     own_doctor = security.scoped_doctor_name(user)
     if own_doctor:
         # A doctor login can only add patients to their own queue.
@@ -117,12 +149,23 @@ def appointments_create(request: Request, payload: dict = Body(...), db: Session
     vitals_err = _validate_vitals_in_notes(payload.get("notes"))
     if vitals_err:
         raise HTTPException(status_code=400, detail=vitals_err)
+
+    # The UHID must belong to a registered patient; the registered name is what gets booked.
+    patient_id = str(payload.get("patient_id") or "").strip()
+    if patient_id:
+        registered = _registered_patient(db, patient_id, hospital_id)
+        if not registered:
+            raise HTTPException(status_code=400, detail=f"UHID {patient_id} is not a registered patient. Register the patient first.")
+        payload["patient_id"] = registered["patient_id"]
+        payload["patient_name"] = registered["patient_name"] or payload.get("patient_name")
+
+    # The fee always comes from the Doctor Scheduling master (op_fees.py); the amount sent is ignored.
+    import op_fees
     try:
-        consultation_fee = float(payload.get("consultation_fee") or payload.get("amount") or 0)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Consultation Fee must be numeric.")
-    if consultation_fee < 0:
-        raise HTTPException(status_code=400, detail="Consultation Fee is mandatory and must be a valid amount (>=0).")
+        consultation_fee, fee_kind = op_fees.resolve_consultation_fee(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    payload["consultation_fee"] = consultation_fee
 
     appointment_date_str = str(payload.get("appointment_date") or "")
     if appointment_date_str:

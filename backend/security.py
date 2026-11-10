@@ -386,6 +386,8 @@ def add_employee(db: Session, data: dict, hospital_id: Optional[int] = None) -> 
         status=data.get("status", "active"),
         address=data.get("address", ""),
         emergency_contact=data.get("emergency_contact", ""),
+        phone_country_code=data.get("phone_country_code"),
+        emergency_contact_country_code=data.get("emergency_contact_country_code"),
         doctor_name=data.get("doctor_name"),
     )
     db.add(user)
@@ -400,6 +402,28 @@ def check_username_exists(db: Session, username: str, hospital_id: Optional[int]
 
 
 # ---------------------------------------------------------------- signup --
+
+def normalize_user_phones(data: dict, partial: bool = False):
+    """Validate a staff member's phone and emergency contact for their countries.
+
+    Returns (fields, error): fields holds phone / phone_country_code and
+    emergency_contact / emergency_contact_country_code ready to store. With
+    partial=True only the numbers present in `data` are returned.
+    """
+    from phone import validate_phone
+    fields = {}
+    for key, code_key, label in (("phone", "phone_country_code", "Phone"),
+                                 ("emergency_contact", "emergency_contact_country_code", "Emergency contact")):
+        if partial and key not in data:
+            continue
+        digits, code, error = validate_phone(data.get(key), data.get(code_key), required=False, label=label)
+        if error:
+            return {}, error
+        fields[key] = digits
+        fields[code_key] = code if digits else None
+    return fields, None
+
+
 
 def signup_employee(db: Session, data: dict, allow_admin_creation: bool = True, hospital_id: Optional[int] = None) -> dict:
     scoped_hospital_id = hospital_id if hospital_id is not None else resolve_hospital_id(db)
@@ -416,7 +440,9 @@ def signup_employee(db: Session, data: dict, allow_admin_creation: bool = True, 
     user_type = requested_user_type if allow_admin_creation else "normal"
     module_access = normalize_module_access(data.get("module_access"), user_type, data.get("access_role"), data.get("role"))
 
-    from phone import normalize_phone_number
+    phones, phone_error = normalize_user_phones(data)
+    if phone_error:
+        return {"success": False, "message": phone_error}
 
     employee_data = {
         "username": data["username"],
@@ -428,12 +454,11 @@ def signup_employee(db: Session, data: dict, allow_admin_creation: bool = True, 
         "job_role": data.get("job_role"),
         "full_name": data.get("full_name"),
         "email": data.get("email"),
-        "phone": normalize_phone_number(data.get("phone") or "", "+91"),
+        **phones,
         "department": data.get("department"),
         "employee_id": employee_id,
         "status": "active",
         "address": data.get("address", ""),
-        "emergency_contact": normalize_phone_number(data.get("emergency_contact") or "", "+91"),
         "doctor_name": linked_doctor_name(data.get("job_role"), data.get("doctor_name")),
     }
 
@@ -469,6 +494,10 @@ def signup_hospital_admin(db: Session, data: dict, hospital_id: Optional[int] = 
     if db.query(Users).filter(Users.username == username, Users.hospital_id == scoped_hospital_id).first():
         return {"success": False, "message": "Username already exists"}
 
+    phones, phone_error = normalize_user_phones(data)
+    if phone_error:
+        return {"success": False, "message": phone_error}
+
     employee_id = generate_employee_id(db, hospital_id=scoped_hospital_id)
     employee_data = {
         "username": username,
@@ -478,12 +507,11 @@ def signup_hospital_admin(db: Session, data: dict, hospital_id: Optional[int] = 
         "job_role": data.get("job_role") or "Hospital Admin",
         "full_name": data.get("full_name") or "Hospital Admin",
         "email": data.get("email"),
-        "phone": data.get("phone"),
+        **phones,
         "department": data.get("department") or "Administration",
         "employee_id": employee_id,
         "status": "active",
         "address": data.get("address", ""),
-        "emergency_contact": data.get("emergency_contact", ""),
         "user_type": "super_admin",
         "module_access": list(ASSIGNABLE_MODULES),
     }

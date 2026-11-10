@@ -495,6 +495,7 @@ _REQUEST_SELECT = """
     SELECT r.id, r.template_id, t.name AS template_name, t.survey_type, r.patient_id,
            CONCAT_WS(' ', p.name, p.middle_name, p.last_name) AS patient_name, p.age, p.gender,
            COALESCE(NULLIF(r.phone, ''), NULLIF(p.phone, ''), p.family_mobile) AS phone,
+           CASE WHEN NULLIF(p.phone, '') IS NOT NULL THEN p.phone_country_code ELSE p.family_country_code END AS patient_phone_country_code,
            r.encounter_type, r.encounter_id, r.encounter_label, r.doctor_name, r.department,
            r.whatsapp_template_id, r.message, r.status, r.send_count, r.sent_at, r.sent_by,
            r.completed_at, r.cancelled_at, r.created_by, r.created_at,

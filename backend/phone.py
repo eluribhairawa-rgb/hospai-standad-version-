@@ -57,3 +57,40 @@ def normalize_search_query(value: str, selected_country_code: str = "+91") -> st
 
     # Otherwise it's a name or ID — pass through unchanged
     return value
+
+
+def clean_country_code(code: str | None) -> str:
+    """A supported dialling code ('+971'), or '+91' for anything unknown or blank."""
+    value = str(code or "").strip()
+    if value and not value.startswith("+"):
+        value = "+" + re.sub(r"\D", "", value)
+    return value if value in COUNTRY_CODE_RULES else "+91"
+
+
+def validate_phone(value, country_code: str | None = "+91", required: bool = False, label: str = "Mobile number",
+                   landline: bool = False):
+    """Normalise a phone number for its country and check its length.
+
+    Returns (digits, country_code, error): digits is the local number without the
+    country code ("" when blank); error is None when the number is valid (or blank
+    and not required). Used by every endpoint that saves a phone number.
+    """
+    code = clean_country_code(country_code)
+    raw = "" if value is None else str(value)
+    digits = normalize_phone_number(raw, code)
+    if not digits:
+        return "", code, (f"{label} is required." if required else None)
+    if code == "+91" and len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]  # trunk prefix: 09876543210
+    # Helplines and landlines (1800 toll-free, city numbers) vary in length: 6-15 digits.
+    rule = {**COUNTRY_CODE_RULES[code], "min": 6, "max": 15} if landline else COUNTRY_CODE_RULES[code]
+    if not rule["min"] <= len(digits) <= rule["max"]:
+        size = rule["min"] if rule["min"] == rule["max"] else f"{rule['min']}-{rule['max']}"
+        return digits, code, f"{label} for {rule['label']} must be {size} digits."
+    return digits, code, None
+
+
+def to_international(digits: str, country_code: str | None) -> str:
+    """'501234567', '+971' -> '971501234567' (the form wa.me and SMS gateways expect)."""
+    local = re.sub(r"\D", "", digits or "")
+    return (re.sub(r"\D", "", clean_country_code(country_code)) + local) if local else ""

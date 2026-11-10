@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
 import { apiFetch, reportError } from "../../lib/api";
 import type { Notice, Patient } from "../../types";
@@ -215,12 +216,13 @@ export const buildQuery = (params: Record<string, string | number | null | undef
 export const patientFullName = (p?: Partial<Patient> | null) =>
   p ? [p.name, p.middle_name, p.last_name].filter(Boolean).join(" ") : "";
 
-export const cleanPhoneForWhatsApp = (rawPhone?: string | null): string => {
+/** Phone -> the number wa.me expects. "+971 501234567" keeps its own code; a local number
+ *  gets countryCode (default +91, the code every number had before codes were stored). */
+export const cleanPhoneForWhatsApp = (rawPhone?: string | null, countryCode?: string | null): string => {
   if (!rawPhone) return "";
-  let digits = rawPhone.replace(/[^0-9]/g, "");
-  if (digits.startsWith("0")) digits = digits.substring(1);
-  if (digits.length === 10) return "91" + digits;
-  return digits;
+  const parts = splitStoredPhone(rawPhone, countryCode);
+  const local = parts.value.startsWith("0") ? parts.value.substring(1) : parts.value;
+  return toWhatsAppNumber(parts.countryCode, local);
 };
 
 export const openWhatsApp = (phone: string | null | undefined, message: string) => {

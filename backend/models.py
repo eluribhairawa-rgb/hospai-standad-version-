@@ -273,6 +273,8 @@ class DiagOrders(Base):
     patient_id: Mapped[Optional[str]] = mapped_column(Text)
     walkin_name: Mapped[Optional[str]] = mapped_column(Text)
     walkin_mobile: Mapped[Optional[str]] = mapped_column(Text)
+    # Added by migrations_phone_country_codes.sql
+    walkin_country_code: Mapped[Optional[str]] = mapped_column(Text)
     walkin_age: Mapped[Optional[str]] = mapped_column(Text)
     walkin_gender: Mapped[Optional[str]] = mapped_column(Text)
     appointment_id: Mapped[Optional[int]] = mapped_column(Integer)
@@ -1662,6 +1664,10 @@ class Patients(Base):
     nationality: Mapped[Optional[str]] = mapped_column(Text)
     email: Mapped[Optional[str]] = mapped_column(Text)
     emergency_mobile: Mapped[Optional[str]] = mapped_column(Text)
+    # Added by migrations_patient_phone_country.sql
+    phone_country_code: Mapped[Optional[str]] = mapped_column(Text)
+    family_country_code: Mapped[Optional[str]] = mapped_column(Text)
+    emergency_country_code: Mapped[Optional[str]] = mapped_column(Text)
     medical_history: Mapped[Optional[str]] = mapped_column(Text)
     current_medication: Mapped[Optional[str]] = mapped_column(Text)
     blood_group: Mapped[Optional[str]] = mapped_column(Text)
@@ -1853,6 +1859,8 @@ class PharmacySuppliers(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'::text"))
     contact_person: Mapped[Optional[str]] = mapped_column(Text)
     phone: Mapped[Optional[str]] = mapped_column(Text)
+    # Added by migrations_phone_country_codes.sql
+    phone_country_code: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     gst_number: Mapped[Optional[str]] = mapped_column(Text)
     drug_license_no: Mapped[Optional[str]] = mapped_column(Text)
@@ -2062,6 +2070,9 @@ class Users(Base):
     status: Mapped[Optional[str]] = mapped_column(Text, server_default=text("'active'::text"))
     address: Mapped[Optional[str]] = mapped_column(Text)
     emergency_contact: Mapped[Optional[str]] = mapped_column(Text)
+    # Added by migrations_phone_country_codes.sql
+    phone_country_code: Mapped[Optional[str]] = mapped_column(Text)
+    emergency_contact_country_code: Mapped[Optional[str]] = mapped_column(Text)
     doctor_name: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     hospital_id: Mapped[Optional[int]] = mapped_column(Integer)

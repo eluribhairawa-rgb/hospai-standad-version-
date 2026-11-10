@@ -1,4 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
+import PhoneInput from "../../components/PhoneInput";
+import { splitStoredPhone, toWhatsAppNumber, validateMobileByCountry } from "../../lib/phone";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Modal } from "../../components/ui";
 import { apiFetch, reportError, getHospitalCode } from "../../lib/api";
@@ -37,6 +39,7 @@ type Supplier = {
   id: number;
   supplier_name: string;
   phone?: string;
+  phone_country_code?: string | null;
   gst_number?: string;
 };
 
@@ -240,6 +243,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
   // WhatsApp Share Dialog State
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
   const [whatsAppPhone, setWhatsAppPhone] = useState("");
+  const [whatsAppPhoneCode, setWhatsAppPhoneCode] = useState("+91");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [whatsAppTitle, setWhatsAppTitle] = useState("Share via WhatsApp");
   const [whatsAppRecipient, setWhatsAppRecipient] = useState("");
@@ -248,18 +252,25 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
     title: string;
     recipientName?: string;
     recipientPhone?: string;
+    recipientCountryCode?: string | null;
     message: string;
   }) => {
     setWhatsAppTitle(opts.title);
     setWhatsAppRecipient(opts.recipientName || "");
-    setWhatsAppPhone(opts.recipientPhone || "");
+    const recipient = splitStoredPhone(opts.recipientPhone, opts.recipientCountryCode);
+    setWhatsAppPhone(recipient.value);
+    setWhatsAppPhoneCode(recipient.countryCode);
     setWhatsAppMessage(opts.message);
     setWhatsAppModalOpen(true);
   };
 
   const handleSendWhatsApp = () => {
-    const digits = whatsAppPhone.replace(/[^0-9]/g, "");
-    const countryCoded = digits ? (digits.length === 10 ? `91${digits}` : digits) : "";
+    const phoneError = whatsAppPhone ? validateMobileByCountry(whatsAppPhone, whatsAppPhoneCode, false) : null;
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError });
+      return;
+    }
+    const countryCoded = toWhatsAppNumber(whatsAppPhoneCode, whatsAppPhone);
     const url = countryCoded
       ? `https://wa.me/${countryCoded}?text=${encodeURIComponent(whatsAppMessage)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsAppMessage)}`;
@@ -1453,7 +1464,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                               openWhatsAppDialog({
                                 title: `Share PR #${pr.pr_no} via WhatsApp`,
                                 recipientName: sup?.supplier_name || "Supplier",
-                                recipientPhone: sup?.phone || "",
+                                recipientPhone: sup?.phone || "", recipientCountryCode: sup?.phone_country_code,
                                 message: text,
                               });
                             }}
@@ -1594,7 +1605,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                               openWhatsAppDialog({
                                 title: `Share PO-${po.id} via WhatsApp`,
                                 recipientName: sup?.supplier_name || po.supplier_name || "Supplier",
-                                recipientPhone: sup?.phone || "",
+                                recipientPhone: sup?.phone || "", recipientCountryCode: sup?.phone_country_code,
                                 message: text,
                               });
                             }}
@@ -1927,7 +1938,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                   openWhatsAppDialog({
                     title: "Share Purchase Requisition via WhatsApp",
                     recipientName: sup?.supplier_name || "Supplier",
-                    recipientPhone: sup?.phone || "",
+                    recipientPhone: sup?.phone || "", recipientCountryCode: sup?.phone_country_code,
                     message: text,
                   });
                 }}
@@ -2058,11 +2069,11 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
               <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                 WhatsApp Mobile Number:
               </label>
-              <Input
-                type="text"
-                placeholder="10-digit mobile number (e.g. 9876543210) or leave blank"
+              <PhoneInput
+                countryCode={whatsAppPhoneCode}
                 value={whatsAppPhone}
-                onChange={(e) => setWhatsAppPhone(e.target.value)}
+                placeholder="Mobile number, or leave blank"
+                onChange={({ countryCode, value }) => { setWhatsAppPhoneCode(countryCode); setWhatsAppPhone(value); }}
               />
               <span style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "3px", display: "block" }}>
                 {whatsAppRecipient ? `Recipient: ${whatsAppRecipient}` : "Leave blank to pick any contact or group directly in WhatsApp"}

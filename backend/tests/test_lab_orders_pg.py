@@ -465,6 +465,9 @@ class LabServiceOrderDbTests(unittest.TestCase):
 
         paged = self.call(api.diag_order_history, q=tag, page=2, page_size=2, scope=None, user=TECH)
         self.assertEqual((len(paged["orders"]), paged["total"]), (1, 3))
+        inv_no = lq.get_invoice_by_id(self.db, lq.get_diag_order(self.db, visit)["invoice_id"])["invoice_no"]
+        by_invoice = self.call(api.diag_order_history, q=inv_no.lower(), scope=None, user=TECH)
+        self.assertEqual([o["id"] for o in by_invoice["orders"]], [visit])
         self.assertRejected(api.diag_order_history, date_from="09/11/2026", scope=None, user=TECH)
         self.assertRejected(api.diag_order_history, service_type="WARD", scope=None, user=TECH)
 

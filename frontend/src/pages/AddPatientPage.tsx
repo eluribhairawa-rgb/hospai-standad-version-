@@ -6,6 +6,16 @@ import { printViaIframe } from "../lib/printViaIframe";
 import { calculateAgeFromDob } from "../lib/format";
 import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
 import { Modal } from "../components/ui";
+import { COUNTRY_CODE_RULES } from "../lib/phone";
+import PhoneInput from "../components/PhoneInput";
+
+const COUNTRY_OPTIONS = Object.values(COUNTRY_CODE_RULES).map((r) => r.label);
+
+/** Digits allowed for a mobile under the chosen country option ("UAE (+971)" -> 9). */
+function primaryDigitLimit(countryOption: string): number {
+  const code = countryOption.match(/\+\d+/)?.[0] || "+91";
+  return (COUNTRY_CODE_RULES[code] || COUNTRY_CODE_RULES["+91"]).max;
+}
 
 type Props = {
   onCreate?: (
@@ -177,6 +187,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const [newProviderName, setNewProviderName] = useState("");
   const [newProviderContact, setNewProviderContact] = useState("");
   const [newProviderPhone, setNewProviderPhone] = useState("");
+  const [newProviderPhoneCode, setNewProviderPhoneCode] = useState("+91");
   const [savingProvider, setSavingProvider] = useState(false);
   const [noAllergies, setNoAllergies] = useState(false);
   const [allergies, setAllergies] = useState("");
@@ -254,6 +265,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           name: newProviderName.trim(),
           contact_person: newProviderContact.trim() || undefined,
           contact_phone: newProviderPhone.trim() || undefined,
+          contact_phone_country_code: newProviderPhone.trim() ? newProviderPhoneCode : undefined,
         }),
       });
       setInsuranceProviders((prev) => [...prev, res.provider].sort((a, b) => a.name.localeCompare(b.name)));
@@ -427,8 +439,9 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       setNotice({ type: "warning", message: "Primary mobile number is required." });
       return null;
     }
-    if (cleanPrimaryPhone.length !== 10) {
-      setNotice({ type: "warning", message: "Primary mobile number must be exactly 10 digits." });
+    const primaryRule = COUNTRY_CODE_RULES[primaryCodeMatch] || COUNTRY_CODE_RULES["+91"];
+    if (cleanPrimaryPhone.length !== primaryRule.max) {
+      setNotice({ type: "warning", message: `${primaryRule.label} mobile number must be exactly ${primaryRule.max} digits.` });
       return null;
     }
     if (primaryCodeMatch === "+91" && !/^[6-9]\d{9}$/.test(cleanPrimaryPhone)) {
@@ -439,8 +452,9 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     const cleanAltPhone = altPhone.trim() ? altPhone.replace(/\D/g, "") : "";
     const altCodeMatch = altCountryCode.match(/\+\d+/)?.[0] || "+91";
     if (cleanAltPhone) {
-      if (cleanAltPhone.length !== 10) {
-        setNotice({ type: "warning", message: "Alternate mobile number must be exactly 10 digits (or leave it blank)." });
+      const altRule = COUNTRY_CODE_RULES[altCodeMatch] || COUNTRY_CODE_RULES["+91"];
+      if (cleanAltPhone.length !== altRule.max) {
+        setNotice({ type: "warning", message: `${altRule.label} alternate mobile must be exactly ${altRule.max} digits (or leave it blank).` });
         return null;
       }
       if (altCodeMatch === "+91" && !/^[6-9]\d{9}$/.test(cleanAltPhone)) {
@@ -1675,20 +1689,21 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             <div style={{ display: "flex", gap: "8px" }}>
               <select
                 value={primaryCountryCode}
-                onChange={(e) => setPrimaryCountryCode(e.target.value)}
+                onChange={(e) => {
+                  setPrimaryCountryCode(e.target.value);
+                  // A number that is too long for the newly chosen country is trimmed to its length.
+                  setPrimaryPhone((p) => p.slice(0, primaryDigitLimit(e.target.value)));
+                }}
                 style={{ width: "135px", height: "42px", borderRadius: "8px", border: "1px solid #cbd5e1", background: "#f8fafc", padding: "0 8px", fontSize: "12.5px", fontWeight: 500, color: "#334155" }}
               >
-                <option value="India (+91)">India (+91)</option>
-                <option value="UAE (+971)">UAE (+971)</option>
-                <option value="US (+1)">US (+1)</option>
-                <option value="UK (+44)">UK (+44)</option>
+                {COUNTRY_OPTIONS.map((label) => <option key={label} value={label}>{label}</option>)}
               </select>
               <input
                 type="tel"
                 value={primaryPhone}
-                onChange={(e) => setPrimaryPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                placeholder="Mobile number"
-                maxLength={10}
+                onChange={(e) => setPrimaryPhone(e.target.value.replace(/\D/g, "").slice(0, primaryDigitLimit(primaryCountryCode)))}
+                placeholder={`${primaryDigitLimit(primaryCountryCode)}-digit mobile`}
+                maxLength={primaryDigitLimit(primaryCountryCode)}
                 inputMode="numeric"
                 pattern="[0-9]*"
                 className="pharmacy-rx-search-input"
@@ -1704,20 +1719,20 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             <div style={{ display: "flex", gap: "8px" }}>
               <select
                 value={altCountryCode}
-                onChange={(e) => setAltCountryCode(e.target.value)}
+                onChange={(e) => {
+                  setAltCountryCode(e.target.value);
+                  setAltPhone((p) => p.slice(0, primaryDigitLimit(e.target.value)));
+                }}
                 style={{ width: "135px", height: "42px", borderRadius: "8px", border: "1px solid #cbd5e1", background: "#f8fafc", padding: "0 8px", fontSize: "12.5px", fontWeight: 500, color: "#334155" }}
               >
-                <option value="India (+91)">India (+91)</option>
-                <option value="UAE (+971)">UAE (+971)</option>
-                <option value="US (+1)">US (+1)</option>
-                <option value="UK (+44)">UK (+44)</option>
+                {COUNTRY_OPTIONS.map((label) => <option key={label} value={label}>{label}</option>)}
               </select>
               <input
                 type="tel"
                 value={altPhone}
-                onChange={(e) => setAltPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                onChange={(e) => setAltPhone(e.target.value.replace(/\D/g, "").slice(0, primaryDigitLimit(altCountryCode)))}
                 placeholder="Alternate mobile"
-                maxLength={10}
+                maxLength={primaryDigitLimit(altCountryCode)}
                 inputMode="numeric"
                 pattern="[0-9]*"
                 className="pharmacy-rx-search-input"
@@ -2697,12 +2712,12 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
                 Contact Phone (optional)
               </label>
-              <input
-                type="text"
+              <PhoneInput
+                landline
+                countryCode={newProviderPhoneCode}
                 value={newProviderPhone}
-                onChange={(e) => setNewProviderPhone(e.target.value)}
                 placeholder="Support / claims contact number"
-                style={{ height: "42px", padding: "0 14px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
+                onChange={({ countryCode, value }) => { setNewProviderPhoneCode(countryCode); setNewProviderPhone(value); }}
               />
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" }}>

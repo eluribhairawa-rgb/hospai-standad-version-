@@ -21,27 +21,23 @@ from export_utils import generate_pdf, generate_word
 router = APIRouter(prefix="/api", tags=["patients"])
 STORAGE = ObjectStorage()
 
-_COUNTRY_PHONE_RULES = {
-    "+91": ("India", 10), "+1": ("USA/Canada", 10), "+44": ("United Kingdom", 10),
-    "+971": ("UAE", 9), "+61": ("Australia", 9), "+65": ("Singapore", 8), "+974": ("Qatar", 8),
-    "+966": ("Saudi Arabia", 9), "+968": ("Oman", 8), "+965": ("Kuwait", 8), "+880": ("Bangladesh", 10),
-    "+94": ("Sri Lanka", 9), "+977": ("Nepal", 10),
-}
-
-
 def _normalize_phone_for_country(value, country_code=None, required=False, field_label="Mobile number"):
-    from phone import normalize_phone_number
-    code = str(country_code or "+91").strip() or "+91"
-    val = str(value) if value is not None else ""
-    digits = normalize_phone_number(val, code)
-    if not digits:
-        return ("", f"{field_label} is required.") if required else ("", None)
-    country_name, exact_len = _COUNTRY_PHONE_RULES.get(code, _COUNTRY_PHONE_RULES["+91"])
-    if code == "+91" and len(digits) == 11 and digits.startswith("0"):
-        digits = digits[1:]
-    if len(digits) != exact_len:
-        return digits, f"{country_name} {code} mobile number must be exactly {exact_len} digits."
-    return digits, None
+    """(digits, error) for a phone checked against its country's length (rules in phone.py)."""
+    from phone import validate_phone
+    digits, _code, error = validate_phone(value, country_code, required=required, label=field_label)
+    return digits, error
+
+
+def _primary_country_code(payload):
+    """The dialling code the primary mobile was validated against (unknown codes fall back to +91)."""
+    from phone import clean_country_code
+    return clean_country_code(payload.get("phone_country_code") or payload.get("primary_country_code"))
+
+
+def _secondary_country_codes(payload):
+    """Dialling codes for the alternate (family) and emergency mobiles, normalised."""
+    from phone import clean_country_code
+    return clean_country_code(payload.get("family_country_code")), clean_country_code(payload.get("emergency_country_code"))
 
 
 def _validate_patient_registration_payload(payload, is_update=False):
@@ -126,10 +122,16 @@ def insurance_providers_create(request: Request, payload: dict = Body(...), db: 
                                 user: dict = Depends(require_permissions("patients.write"))):
     validate_required_fields(payload, ["name"])
     try:
+        from phone import validate_phone
+        contact_digits, contact_code, contact_error = validate_phone(
+            payload.get("contact_phone"), payload.get("contact_phone_country_code"), label="Contact phone", landline=True)
+        if contact_error:
+            raise HTTPException(status_code=400, detail=contact_error)
         provider = lq.create_insurance_provider(
             db, payload.get("name"),
             contact_person=payload.get("contact_person"),
-            contact_phone=payload.get("contact_phone"),
+            contact_phone=contact_digits or None,
+            contact_phone_country_code=contact_code,
             notes=payload.get("notes"),
             username=user.get("username"),
         )
@@ -181,10 +183,13 @@ def patients_create(request: Request, payload: dict = Body(...), db: Session = D
         "allergy_status": allergy_status,
         "symptoms": payload.get("symptoms") if payload.get("symptoms") else None,
         "phone": normalized_phone,
+        "phone_country_code": _primary_country_code(payload),
         "address": str(payload.get("address") or "").strip() if payload.get("address") else None,
         "emergency_contact": str(payload.get("emergency_contact") or "").strip() if payload.get("emergency_contact") else None,
         "emergency_relation": str(payload.get("emergency_relation") or "").strip() if payload.get("emergency_relation") else None,
         "family_mobile": normalized_family_mobile or None,
+        "family_country_code": _secondary_country_codes(payload)[0] if normalized_family_mobile else None,
+        "emergency_country_code": _secondary_country_codes(payload)[1] if normalized_emergency_mobile else None,
         "marital_status": str(payload.get("marital_status") or "").strip() or None,
         "nationality": str(payload.get("nationality") or "").strip() or None,
         "email": str(payload.get("email") or "").strip() or None,
@@ -438,10 +443,14 @@ def patients_update(patient_id: str, request: Request, payload: dict = Body(...)
         raise HTTPException(status_code=400, detail={"error": "Patient validation failed.", "fields": validation_errors})
 
     payload["phone"] = normalized_phone
+    payload["phone_country_code"] = _primary_country_code(payload)
+    family_code, emergency_code = _secondary_country_codes(payload)
     if normalized_family_mobile:
         payload["family_mobile"] = normalized_family_mobile
+        payload["family_country_code"] = family_code
     if normalized_emergency_mobile:
         payload["emergency_mobile"] = normalized_emergency_mobile
+        payload["emergency_country_code"] = emergency_code
 
     allergy_text = str(payload.get("allergies") or "").strip()
     no_known_allergies = bool(payload.get("no_known_allergies"))

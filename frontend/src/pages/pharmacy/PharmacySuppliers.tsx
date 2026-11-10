@@ -4,6 +4,8 @@ import { Button, Input, Modal } from "../../components/ui";
 import { apiFetch, reportError } from "../../lib/api";
 import { downloadCsv } from "../../lib/csvExport";
 import type { Notice } from "../../types";
+import PhoneInput from "../../components/PhoneInput";
+import { formatPhone, splitStoredPhone, validateMobileByCountry } from "../../lib/phone";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -15,6 +17,7 @@ type Supplier = {
   supplier_name: string;
   contact_person?: string;
   phone?: string;
+  phone_country_code?: string | null;
   email?: string;
   gst_number?: string;
   drug_license_no?: string;
@@ -44,6 +47,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
   const [formName, setFormName] = useState("");
   const [formContact, setFormContact] = useState("");
   const [formPhone, setFormPhone] = useState("");
+  const [formPhoneCode, setFormPhoneCode] = useState("+91");
   const [formEmail, setFormEmail] = useState("");
   const [formGst, setFormGst] = useState("");
   const [formDrugLic, setFormDrugLic] = useState("");
@@ -110,6 +114,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
     setFormName("");
     setFormContact("");
     setFormPhone("");
+    setFormPhoneCode("+91");
     setFormEmail("");
     setFormGst("");
     setFormDrugLic("");
@@ -122,7 +127,8 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
     setEditingSupplier(s);
     setFormName(s.supplier_name);
     setFormContact(s.contact_person || "");
-    setFormPhone(s.phone || "");
+    setFormPhone(splitStoredPhone(s.phone, s.phone_country_code).value);
+    setFormPhoneCode(splitStoredPhone(s.phone, s.phone_country_code).countryCode);
     setFormEmail(s.email || "");
     setFormGst(s.gst_number || "");
     setFormDrugLic(s.drug_license_no || "");
@@ -136,9 +142,9 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
       setNotice({ type: "warning", message: "Supplier Name is required." });
       return;
     }
-    const cleanPhone = formPhone.replace(/\D/g, "");
-    if (formPhone.trim() && cleanPhone.length !== 10) {
-      setNotice({ type: "warning", message: "Mobile number must be exactly 10 digits." });
+    const phoneError = validateMobileByCountry(formPhone, formPhoneCode, false);
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError });
       return;
     }
 
@@ -148,6 +154,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
         supplier_name: formName,
         contact_person: formContact,
         phone: formPhone,
+        phone_country_code: formPhone ? formPhoneCode : null,
         email: formEmail,
         gst_number: formGst,
         drug_license_no: formDrugLic,
@@ -284,7 +291,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
                       {s.contact_person || "-"}
                     </td>
                     <td style={{ padding: "0.6rem 0.75rem", color: "#475569" }}>
-                      {s.phone || "-"}
+                      {formatPhone(s.phone_country_code, s.phone) || s.phone || "-"}
                     </td>
                     <td style={{ padding: "0.6rem 0.75rem", color: "#64748b", fontFamily: "monospace" }}>
                       {s.gst_number || "-"}
@@ -379,17 +386,12 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
 
               <div>
                 <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
-                  Mobile / Phone (10 digits):
+                  Mobile / Phone:
                 </label>
-                <Input
+                <PhoneInput
+                  countryCode={formPhoneCode}
                   value={formPhone}
-                  onChange={(e) => {
-                    const clean = e.target.value.replace(/\D/g, "").slice(0, 10);
-                    setFormPhone(clean);
-                  }}
-                  maxLength={10}
-                  placeholder="10-digit mobile number"
-                  inputMode="numeric"
+                  onChange={({ countryCode, value }) => { setFormPhoneCode(countryCode); setFormPhone(value); }}
                 />
               </div>
 

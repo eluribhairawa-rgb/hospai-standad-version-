@@ -1,4 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
+import PhoneInput from "../../components/PhoneInput";
+import { splitStoredPhone, toWhatsAppNumber, validateMobileByCountry } from "../../lib/phone";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Modal } from "../../components/ui";
 import { apiFetch, reportError } from "../../lib/api";
@@ -83,6 +85,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
   // WhatsApp Dialog State
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
   const [whatsAppPhone, setWhatsAppPhone] = useState("");
+  const [whatsAppPhoneCode, setWhatsAppPhoneCode] = useState("+91");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
   const [whatsAppTitle, setWhatsAppTitle] = useState("Share Purchase Requisition via WhatsApp");
   const [whatsAppRecipient, setWhatsAppRecipient] = useState("");
@@ -91,18 +94,25 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
     title: string;
     recipientName?: string;
     recipientPhone?: string;
+    recipientCountryCode?: string | null;
     message: string;
   }) => {
     setWhatsAppTitle(opts.title);
     setWhatsAppRecipient(opts.recipientName || "");
-    setWhatsAppPhone(opts.recipientPhone || "");
+    const recipient = splitStoredPhone(opts.recipientPhone, opts.recipientCountryCode);
+    setWhatsAppPhone(recipient.value);
+    setWhatsAppPhoneCode(recipient.countryCode);
     setWhatsAppMessage(opts.message);
     setWhatsAppModalOpen(true);
   };
 
   const handleSendWhatsApp = () => {
-    const digits = whatsAppPhone.replace(/[^0-9]/g, "");
-    const countryCoded = digits ? (digits.length === 10 ? `91${digits}` : digits) : "";
+    const phoneError = whatsAppPhone ? validateMobileByCountry(whatsAppPhone, whatsAppPhoneCode, false) : null;
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError });
+      return;
+    }
+    const countryCoded = toWhatsAppNumber(whatsAppPhoneCode, whatsAppPhone);
     const url = countryCoded
       ? `https://wa.me/${countryCoded}?text=${encodeURIComponent(whatsAppMessage)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsAppMessage)}`;
@@ -347,8 +357,10 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
       ].join("\n");
 
       // 3. Open WhatsApp link directly
-      const digits = supplierPhone.replace(/[^0-9]/g, "");
-      const countryCoded = digits ? (digits.length === 10 ? `91${digits}` : digits) : "";
+      const supplierCountryCode = matched?.phone
+        ? (matched as { phone_country_code?: string | null }).phone_country_code
+        : (item as { supplier_phone_country_code?: string | null }).supplier_phone_country_code;
+      const countryCoded = toWhatsAppNumber(splitStoredPhone(supplierPhone, supplierCountryCode).countryCode, splitStoredPhone(supplierPhone, supplierCountryCode).value);
       const waUrl = countryCoded
         ? `https://wa.me/${countryCoded}?text=${encodeURIComponent(messageText)}`
         : `https://api.whatsapp.com/send?text=${encodeURIComponent(messageText)}`;
@@ -359,6 +371,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
         title: `Share PR #${res.pr_no} via WhatsApp`,
         recipientName: supplierName,
         recipientPhone: supplierPhone,
+        recipientCountryCode: supplierCountryCode,
         message: messageText,
       });
 
@@ -1136,11 +1149,11 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
               <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                 WhatsApp Mobile Number:
               </label>
-              <Input
-                type="text"
-                placeholder="10-digit mobile number (e.g. 9876543210) or leave blank"
+              <PhoneInput
+                countryCode={whatsAppPhoneCode}
                 value={whatsAppPhone}
-                onChange={(e) => setWhatsAppPhone(e.target.value)}
+                placeholder="Mobile number, or leave blank"
+                onChange={({ countryCode, value }) => { setWhatsAppPhoneCode(countryCode); setWhatsAppPhone(value); }}
               />
               <span style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "3px", display: "block" }}>
                 {whatsAppRecipient ? `Recipient: ${whatsAppRecipient}` : "Leave blank to choose any contact or group in WhatsApp"}

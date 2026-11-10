@@ -421,6 +421,7 @@ def build_order_payload(data):
     else:
         payload.update({
             "sale_type": "EXTERNAL", "walkin_name": data.get("walkin_name"), "walkin_mobile": data.get("walkin_mobile"),
+            "walkin_country_code": data.get("walkin_country_code"),
             "walkin_age": data.get("walkin_age"), "walkin_gender": data.get("walkin_gender"),
         })
     return service_type, payload
@@ -676,9 +677,10 @@ def list_order_history(db, service_type=None, date_from=None, date_to=None, sear
         clauses.append(
             "(LOWER(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) LIKE ? OR LOWER(COALESCE(o.walkin_name, '')) LIKE ? "
             "OR LOWER(COALESCE(o.patient_id, '')) LIKE ? OR COALESCE(o.walkin_mobile, p.phone, '') LIKE ? OR LOWER(o.order_no) LIKE ? "
-            "OR EXISTS (SELECT 1 FROM diag_order_items s WHERE s.order_id = o.id AND LOWER(s.service_name) LIKE ?))"
+            "OR EXISTS (SELECT 1 FROM diag_order_items s WHERE s.order_id = o.id AND LOWER(s.service_name) LIKE ?) "
+            "OR EXISTS (SELECT 1 FROM invoices iv WHERE iv.id = o.invoice_id AND LOWER(iv.invoice_no) LIKE ?))"
         )
-        params.extend([like] * 6)
+        params.extend([like] * 7)
     if allowed_patient_ids is not None:
         clauses.append("o.patient_id = ANY(?)")
         params.append(sorted(allowed_patient_ids))

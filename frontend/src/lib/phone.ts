@@ -93,3 +93,35 @@ export function normalizeSearchQuery(value: string, selectedCountryCode: string 
   // Otherwise it's a name or ID — pass through unchanged
   return value;
 }
+
+/** A supported dialling code, or "+91" when blank or unknown. */
+export function cleanCountryCode(code?: string | null): string {
+  const value = String(code || "").trim();
+  const withPlus = value && !value.startsWith("+") ? `+${value.replace(/\D/g, "")}` : value;
+  return COUNTRY_CODE_RULES[withPlus] ? withPlus : "+91";
+}
+
+/**
+ * A stored phone plus its stored country code -> what PhoneInput edits. Older records may
+ * hold "+971 501234567" in the number itself; that prefix wins over the default code.
+ */
+export function splitStoredPhone(value?: string | null, storedCode?: string | null): { countryCode: string; value: string } {
+  const raw = String(value || "").trim();
+  if (raw.startsWith("+")) {
+    const match = COUNTRY_CODES.slice().sort((a, b) => b.length - a.length).find((c) => raw.replace(/\s/g, "").startsWith(c));
+    if (match) return { countryCode: match, value: raw.replace(/\s/g, "").slice(match.length).replace(/\D/g, "") };
+  }
+  return { countryCode: cleanCountryCode(storedCode), value: raw.replace(/\D/g, "") };
+}
+
+/** "+971", "501234567" -> "971501234567": the number wa.me links expect. */
+export function toWhatsAppNumber(countryCode: string, digits: string): string {
+  const local = (digits || "").replace(/\D/g, "");
+  return local ? `${cleanCountryCode(countryCode).replace(/\D/g, "")}${local}` : "";
+}
+
+/** "+971", "501234567" -> "+971 501234567" for display and printouts. */
+export function formatPhone(countryCode: string | null | undefined, digits: string | null | undefined): string {
+  const local = String(digits || "").replace(/\D/g, "");
+  return local ? `${cleanCountryCode(countryCode)} ${local}` : "";
+}

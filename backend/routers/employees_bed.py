@@ -55,7 +55,10 @@ def employees_get(employee_id: str, db: Session = Depends(get_db), user: dict = 
 @router.put("/employees/{employee_id}")
 def employees_update(employee_id: str, payload: dict = Body(...), db: Session = Depends(get_db),
                       user: dict = Depends(require_permissions("admin.users.update")), hospital_id: int = Depends(current_hospital_id)):
-    if not lq.update_employee(db, employee_id, payload, hospital_id=hospital_id):
+    phones, phone_error = security.normalize_user_phones(payload, partial=True)
+    if phone_error:
+        raise HTTPException(status_code=400, detail=phone_error)
+    if not lq.update_employee(db, employee_id, {**payload, **phones}, hospital_id=hospital_id):
         raise HTTPException(status_code=404, detail="Employee not found")
     return {"status": "ok"}
 

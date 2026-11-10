@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { cleanCountryCode, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError, getHospitalCode } from "../lib/api";
 import { API_BASE } from "../lib/constants";
@@ -162,6 +163,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   const [patientAge, setPatientAge] = useState("");
   const [patientGender, setPatientGender] = useState("Male");
   const [patientPhone, setPatientPhone] = useState("");
+  const [patientPhoneCode, setPatientPhoneCode] = useState("+91");
   const [doctorName, setDoctorNameState] = useState(scopedDoctor || "Dr. Rajesh Sharma, MD");
   const setDoctorName = (name: string) => setDoctorNameState(scopedDoctor || name);
   const [department, setDepartment] = useState("General Medicine");
@@ -682,6 +684,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     setPatientUhid(patient.uhid);
     setPatientName(patient.name);
     setPatientPhone(patient.phone || "");
+    setPatientPhoneCode(cleanCountryCode((patient as { phone_country_code?: string | null }).phone_country_code));
     setVisitType(patient.visitType || "OP Consultation");
 
     if (patient.doctor && patient.doctor !== "-") {
@@ -1055,8 +1058,8 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       `Wishing you good health & a speedy recovery! Valid electronic prescription.`,
     ].filter(Boolean).join("\n");
 
-    const digits = (patientPhone || "").replace(/[^0-9]/g, "");
-    const countryCoded = digits ? (digits.length === 10 ? `91${digits}` : digits) : "";
+    const stored = splitStoredPhone(patientPhone, patientPhoneCode);
+    const countryCoded = toWhatsAppNumber(stored.countryCode, stored.value);
     const url = countryCoded
       ? `https://wa.me/${countryCoded}?text=${encodeURIComponent(text)}`
       : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
@@ -1134,6 +1137,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     setPatientAge(p.age ? String(p.age) : "");
     setPatientGender(p.gender || "Male");
     setPatientPhone(p.phone || "");
+    setPatientPhoneCode(cleanCountryCode(p.phone_country_code));
     setVisitType(p.latest_visit_type || "OP Consultation");
     setAppointmentId(null);
     setAppointmentToken("Walk-in / Registered");

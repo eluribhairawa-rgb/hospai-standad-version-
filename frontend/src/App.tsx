@@ -416,7 +416,7 @@ function SidebarTab({ label, pageId, icon, active, disabled = false, hint, onCli
 const PAGE_SUBTITLES: Record<string, string> = {
   "diag-overview": "Live orders, collection, processing and TAT status at a glance.",
   "emergency-worklist": "Active Emergency patients, triage priority and disposition.",
-  "diag-orders-billing": "Register services and manage patient payments.",
+  "diag-orders-billing": "Manage lab orders and generate invoices.",
   "diag-laboratory": "Orders, samples and reports in one workspace.",
   "diag-imaging": "Appointments, examinations and signed reports.",
   "diag-reports-approval": "Review, authorize and release patient reports.",
@@ -991,6 +991,7 @@ function App() {
     const adminFullName = ((form.elements.namedItem("admin_full_name") as HTMLInputElement)?.value || "").trim();
     const adminEmail = ((form.elements.namedItem("admin_email") as HTMLInputElement)?.value || "").trim();
     const adminPhone = ((form.elements.namedItem("admin_phone") as HTMLInputElement)?.value || "").trim();
+    const adminPhoneCountryCode = ((form.elements.namedItem("admin_phone_country_code") as HTMLInputElement)?.value || "+91").trim();
 
     try {
       const response = await fetch(`${API_BASE}/api/auth/setup-admin`, {
@@ -1002,6 +1003,7 @@ function App() {
           full_name: adminFullName,
           email: adminEmail,
           phone: adminPhone,
+          phone_country_code: adminPhoneCountryCode,
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -1553,6 +1555,9 @@ function App() {
               <div className="module-topbar-breadcrumb">
                 <span className="breadcrumb-root" onClick={() => window.history.back()}>HospAI</span>
                 <span className="breadcrumb-sep">/</span>
+                {NAV_ITEMS.find((item) => item.id === page)?.group === "lab-diagnostics" && (
+                  <><span className="breadcrumb-active">Lab &amp; Diagnostics</span><span className="breadcrumb-sep">/</span></>
+                )}
                 <span className="breadcrumb-active">{page === "admin" ? "Admin" : NAV_ITEMS.find((item) => item.id === page)?.label || "Dashboard"}</span>
               </div>
             </div>

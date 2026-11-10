@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import PhoneInput from "../components/PhoneInput";
+import { cleanCountryCode, toWhatsAppNumber, validateMobileByCountry } from "../lib/phone";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
@@ -57,6 +59,7 @@ export default function LabDiagnosticsReportsHistoryPage({ setNotice, onNavigate
   const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
   const [whatsAppRecipient, setWhatsAppRecipient] = useState<WhatsAppRecipient>("patient");
   const [whatsAppPhone, setWhatsAppPhone] = useState("");
+  const [whatsAppPhoneCode, setWhatsAppPhoneCode] = useState("+91");
   const [whatsAppMessage, setWhatsAppMessage] = useState("");
 
   const load = async () => {
@@ -101,6 +104,7 @@ export default function LabDiagnosticsReportsHistoryPage({ setNotice, onNavigate
     if (!selected) return;
     setWhatsAppRecipient("patient");
     setWhatsAppPhone(selected.order_item?.patient?.phone || "");
+    setWhatsAppPhoneCode(cleanCountryCode(selected.order_item?.patient?.phone_country_code));
     setWhatsAppMessage(buildWhatsAppMessage(selected, selected.content || {}));
     setWhatsAppModalOpen(true);
   };
@@ -108,15 +112,16 @@ export default function LabDiagnosticsReportsHistoryPage({ setNotice, onNavigate
   const selectWhatsAppRecipient = (recipient: WhatsAppRecipient) => {
     setWhatsAppRecipient(recipient);
     setWhatsAppPhone(recipient === "patient" ? selected?.order_item?.patient?.phone || "" : "");
+    setWhatsAppPhoneCode(recipient === "patient" ? cleanCountryCode(selected?.order_item?.patient?.phone_country_code) : "+91");
   };
 
   const sendWhatsApp = () => {
-    const digits = whatsAppPhone.replace(/[^0-9]/g, "");
-    if (digits.length < 10) {
-      setNotice({ type: "warning", message: "Enter a valid 10-digit mobile number." });
+    const phoneError = validateMobileByCountry(whatsAppPhone, whatsAppPhoneCode, true);
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError });
       return;
     }
-    const countryCoded = digits.length === 10 ? `91${digits}` : digits;
+    const countryCoded = toWhatsAppNumber(whatsAppPhoneCode, whatsAppPhone);
     window.open(`https://wa.me/${countryCoded}?text=${encodeURIComponent(whatsAppMessage)}`, "_blank");
     setNotice({ type: "success", message: "WhatsApp chat launched with report summary." });
     setWhatsAppModalOpen(false);
@@ -287,7 +292,8 @@ export default function LabDiagnosticsReportsHistoryPage({ setNotice, onNavigate
           </div>
           <div>
             <Label>WhatsApp number</Label>
-            <Input value={whatsAppPhone} onChange={(e) => setWhatsAppPhone(e.target.value)} placeholder="10-digit mobile number" />
+            <PhoneInput required countryCode={whatsAppPhoneCode} value={whatsAppPhone}
+              onChange={({ countryCode, value }) => { setWhatsAppPhoneCode(countryCode); setWhatsAppPhone(value); }} />
           </div>
           <div>
             <Label>Message preview</Label>
