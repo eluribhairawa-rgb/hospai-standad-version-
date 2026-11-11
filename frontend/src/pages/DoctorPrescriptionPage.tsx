@@ -89,22 +89,6 @@ const WhatsAppIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-const COMMON_LAB_TESTS = [
-  "Complete Blood Count (CBC)",
-  "Lipid Profile",
-  "Liver Function Test (LFT)",
-  "Kidney Function Test (KFT)",
-  "Urine Routine & Microscopic",
-  "Fasting Blood Sugar (FBS)",
-  "Post Prandial Blood Sugar (PPBS)",
-  "HbA1c (Glycated Hemoglobin)",
-  "Thyroid Profile (T3, T4, TSH)",
-  "Serum Creatinine & Urea",
-  "Chest X-Ray PA View",
-  "12-Lead ECG",
-  "Ultrasound Whole Abdomen",
-];
-
 const DEFAULT_FREQUENCIES: string[] = [
   "1-0-1",
   "1-0-0",
@@ -3202,29 +3186,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                 value={labTests}
                 onChange={(e) => setLabTests(e.target.value)}
               />
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "5px" }}>
-                {COMMON_LAB_TESTS.slice(0, 5).map((test) => (
-                  <button
-                    key={test}
-                    type="button"
-                    onClick={() => {
-                      const cur = labTests ? `${labTests}, ${test}` : test;
-                      setLabTests(cur);
-                    }}
-                    style={{
-                      background: "#f1f5f9",
-                      color: "#475569",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "10px",
-                      padding: "2px 8px",
-                      fontSize: "11px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    + {test}
-                  </button>
-                ))}
-              </div>
               {suggestedLabTests.length > 0 && (
                 <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", marginTop: "6px" }}>
                   <span style={{ fontSize: "11px", fontWeight: 700, color: "#5b21b6" }}>✨ Usually advised for this diagnosis:</span>
