@@ -948,6 +948,26 @@ const activeDepartments = (data.departments || []).filter((department) => {
   };
 
   const updateAppointmentStatus = async (appointmentId: number, status: string) => {
+    if (status === "in_consultation") {
+      const appt = appointments.find((a) => a.id === appointmentId);
+      const doc = appt?.doctor_name?.trim();
+      if (doc) {
+        const existing = appointments.find(
+          (a) =>
+            a.id !== appointmentId &&
+            a.status === "in_consultation" &&
+            a.doctor_name &&
+            a.doctor_name.trim().toLowerCase() === doc.toLowerCase()
+        );
+        if (existing) {
+          setNotice({
+            type: "error",
+            message: "Already a patient is present in consultation.",
+          });
+          return;
+        }
+      }
+    }
     try {
       await apiFetch(`/api/appointments/${appointmentId}`, {
         method: "PUT",

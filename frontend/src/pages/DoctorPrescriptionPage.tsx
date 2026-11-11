@@ -1076,6 +1076,27 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
 
   // Select patient from queue
   const handleSelectPatient = async (patient: QueueItem) => {
+    // Enforce single active consultation limit per doctor
+    if (patient.status === "Waiting") {
+      const targetDoctor = (patient.doctor && patient.doctor !== "-") ? patient.doctor : doctorName;
+      if (targetDoctor) {
+        const alreadyInConsultation = queue.find(
+          (item) =>
+            item.status === "In Consultation" &&
+            item.appointmentId !== patient.appointmentId &&
+            item.doctor &&
+            item.doctor.trim().toLowerCase() === targetDoctor.trim().toLowerCase()
+        );
+        if (alreadyInConsultation) {
+          setNotice({
+            type: "error",
+            message: "Already a patient is present in consultation.",
+          });
+          return;
+        }
+      }
+    }
+
     setActiveQueueItem(patient);
     setAppointmentId(patient.appointmentId || null);
     setAppointmentToken(patient.token);
@@ -1118,8 +1139,12 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
           )
         );
         setActiveQueueItem((prev) => (prev ? { ...prev, status: "In Consultation" } : prev));
-      } catch {
-        // silent
+      } catch (err: any) {
+        setNotice({
+          type: "error",
+          message: err?.message || "Already a patient is present in consultation.",
+        });
+        return;
       }
     }
 

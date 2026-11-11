@@ -280,10 +280,10 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
   }, [queue]);
 
   // Update Status handler
-  const handleStatusChange = async (id: string, newStatus: QueueStatus) => {
+  const handleStatusChange = async (id: string, newStatus: QueueStatus): Promise<boolean> => {
     const item = queue.find((q) => q.id === id);
     setOpenStatusDropdownId(null);
-    if (!item || item.status === newStatus) return;
+    if (!item || item.status === newStatus) return false;
 
     // Completed is terminal -- a finished consultation can't be reopened or sent back to waiting.
     if (item.status === "Completed") {
@@ -291,7 +291,28 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
         type: "error",
         message: `Token ${item.token} (${item.name}) is already completed. Its status can no longer be changed.`,
       });
-      return;
+      return false;
+    }
+
+    // Enforce single active consultation limit per doctor
+    if (newStatus === "In Consultation") {
+      const targetDoctor = item.doctor && item.doctor !== "-" ? item.doctor : "";
+      if (targetDoctor) {
+        const existingActive = queue.find(
+          (q) =>
+            q.id !== id &&
+            q.status === "In Consultation" &&
+            q.doctor &&
+            q.doctor.trim().toLowerCase() === targetDoctor.trim().toLowerCase()
+        );
+        if (existingActive) {
+          setNotice({
+            type: "error",
+            message: "Already a patient is present in consultation.",
+          });
+          return false;
+        }
+      }
     }
 
     // Persist first; only reflect the change on screen once the backend accepts it.
@@ -307,12 +328,12 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
           method: "PUT",
           body: JSON.stringify({ status: backendStatus }),
         });
-      } catch (err) {
+      } catch (err: any) {
         setNotice({
           type: "error",
-          message: err instanceof Error && err.message ? err.message : "Could not update queue status. Please try again.",
+          message: err?.message || (err instanceof Error ? err.message : "Could not update queue status. Please try again."),
         });
-        return;
+        return false;
       }
     }
 
@@ -323,6 +344,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
       type: "success",
       message: `Token ${item?.token || ""} (${item?.name || "Patient"}) status updated to ${newStatus}.`,
     });
+    return true;
   };
 
   // Workflow Action Handler (No voice/audio):
@@ -330,19 +352,40 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
   // - When status is "In Consultation": Clicking "Completed" moves patient to "Completed"
   const handleWorkflowAction = async (patient: QueueItem) => {
     if (patient.status === "Waiting") {
+      const targetDoctor = patient.doctor && patient.doctor !== "-" ? patient.doctor : "";
+      if (targetDoctor) {
+        const existingActive = queue.find(
+          (q) =>
+            q.id !== patient.id &&
+            q.status === "In Consultation" &&
+            q.doctor &&
+            q.doctor.trim().toLowerCase() === targetDoctor.trim().toLowerCase()
+        );
+        if (existingActive) {
+          setNotice({
+            type: "error",
+            message: "Already a patient is present in consultation.",
+          });
+          return;
+        }
+      }
       setCallingId(patient.id);
       setTimeout(() => setCallingId(null), 1200);
-      await handleStatusChange(patient.id, "In Consultation");
-      setNotice({
-        type: "success",
-        message: `Patient ${patient.name} (${patient.token}) moved to In Consultation.`,
-      });
+      const ok = await handleStatusChange(patient.id, "In Consultation");
+      if (ok) {
+        setNotice({
+          type: "success",
+          message: `Patient ${patient.name} (${patient.token}) moved to In Consultation.`,
+        });
+      }
     } else if (patient.status === "In Consultation") {
-      await handleStatusChange(patient.id, "Completed");
-      setNotice({
-        type: "success",
-        message: `Consultation for ${patient.name} (${patient.token}) completed. Patient carries physical prescription paper to Pharmacy / Lab.`,
-      });
+      const ok = await handleStatusChange(patient.id, "Completed");
+      if (ok) {
+        setNotice({
+          type: "success",
+          message: `Consultation for ${patient.name} (${patient.token}) completed. Patient carries physical prescription paper to Pharmacy / Lab.`,
+        });
+      }
     }
   };
 
@@ -407,9 +450,30 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
   const handleModalWorkflowAction = async () => {
     if (!detailsPatient) return;
     const current = detailsPatient;
-    await handleWorkflowAction(current);
+    if (current.status === "Waiting") {
+      const targetDoctor = current.doctor && current.doctor !== "-" ? current.doctor : "";
+      if (targetDoctor) {
+        const existingActive = queue.find(
+          (q) =>
+            q.id !== current.id &&
+            q.status === "In Consultation" &&
+            q.doctor &&
+            q.doctor.trim().toLowerCase() === targetDoctor.trim().toLowerCase()
+        );
+        if (existingActive) {
+          setNotice({
+            type: "error",
+            message: "Already a patient is present in consultation.",
+          });
+          return;
+        }
+      }
+    }
     const nextStatus: QueueStatus = current.status === "Waiting" ? "In Consultation" : current.status === "In Consultation" ? "Completed" : current.status;
-    setDetailsPatient((prev) => (prev ? { ...prev, status: nextStatus } : null));
+    const ok = await handleStatusChange(current.id, nextStatus);
+    if (ok) {
+      setDetailsPatient((prev) => (prev ? { ...prev, status: nextStatus } : null));
+    }
   };
 
   return (

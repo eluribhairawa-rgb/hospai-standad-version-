@@ -2884,6 +2884,23 @@ def update_appointment(db, appointment_id, data):
 
         if "status" in data:
             validate_appointment_transition(existing["status"], data.get("status"))
+            new_status = str(data.get("status") or "").strip().lower()
+            if new_status in ("in_consultation", "in consultation", "consulting") and (existing["status"] or "").strip().lower() not in ("in_consultation", "in consultation", "consulting"):
+                target_doctor = (data.get("doctor_name") or existing.get("doctor_name") or "").strip()
+                if target_doctor:
+                    cursor.execute(
+                        """
+                        SELECT id, patient_name, token_no FROM appointments
+                        WHERE LOWER(TRIM(doctor_name)) = LOWER(TRIM(?))
+                          AND status IN ('in_consultation', 'in consultation', 'consulting')
+                          AND id != ?
+                        LIMIT 1
+                        """,
+                        (target_doctor, appointment_id),
+                    )
+                    already_active = cursor.fetchone()
+                    if already_active:
+                        raise ValueError("Already a patient is present in consultation.")
 
         doctor_name = (data.get("doctor_name", existing["doctor_name"]) or "").strip()
         department = (data.get("department", existing["department"]) or "").strip()
