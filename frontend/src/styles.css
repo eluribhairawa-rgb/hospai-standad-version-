@@ -14550,15 +14550,15 @@ label,
 .optv-doc-wrap{min-width:0}
 .optv-doc{font-size:clamp(18px,1.6vw,30px);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .optv-spec{font-size:clamp(13px,1.05vw,20px);opacity:.9;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.optv-card-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:1vh 1.2vw;text-align:center}
-.optv-lbl{font-size:clamp(12px,1.05vw,20px);font-weight:700;letter-spacing:4px;color:#64748b;text-transform:uppercase}
-.optv-token{margin-top:.8vh;font-size:clamp(16px,1.4vw,26px);font-weight:800;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);padding:4px 20px;border-radius:999px}
-.optv-name{margin-top:1vh;font-weight:900;line-height:1.1;max-width:100%;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.optv-name.optv-none{font-size:clamp(18px,1.8vw,34px);color:#94a3b8;font-weight:700}
+.optv-card-body{flex:1;min-height:0;container-type:size;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:1vh 1.2vw;text-align:center}
+.optv-lbl{font-size:min(clamp(12px,1.05vw,20px),9cqh);font-weight:700;letter-spacing:4px;color:#64748b;text-transform:uppercase}
+.optv-token{margin-top:3cqh;font-size:min(clamp(16px,1.4vw,26px),11cqh);font-weight:800;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);padding:4px 20px;border-radius:999px}
+.optv-name{margin-top:3cqh;font-weight:900;line-height:1.25;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.optv-name.optv-none{font-size:min(clamp(18px,1.8vw,34px),7cqw,16cqh);color:#94a3b8;font-weight:700}
 .optv-card-foot{padding:1vh;text-align:center;font-size:clamp(12px,1vw,19px);font-weight:600;color:#475569;background:#f1f5f9}
 .optv-footer{background:#14b8a6;color:#04201d;font-size:clamp(14px,1.25vw,24px);font-weight:700;padding:1.4vh 3vw;display:flex;gap:2vw;white-space:nowrap;overflow:hidden}
 .optv-page{margin-left:auto}
 .opq-tv-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:10px;border:1px solid #00828a;background:#00828a;color:#fff;font-weight:700;font-size:.9rem;cursor:pointer}
 .opq-tv-btn:hover{background:#006d74}
 .optv-doc-lbl{font-size:clamp(11px,.85vw,16px);font-weight:700;letter-spacing:3px;text-transform:uppercase;opacity:.85}
-.optv-uhid{margin-top:.8vh;font-size:clamp(14px,1.3vw,26px);font-weight:700;color:#334155;font-variant-numeric:tabular-nums;letter-spacing:1px}
+.optv-uhid{margin-top:2cqh;font-size:min(clamp(14px,1.3vw,26px),11cqh,5cqw);font-weight:700;color:#334155;font-variant-numeric:tabular-nums;letter-spacing:1px}

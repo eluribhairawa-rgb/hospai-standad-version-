@@ -142,12 +142,11 @@ export default function OpQueueTvDisplay({ onClose }: Props) {
   const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 2 : 3;
   const rows = Math.max(1, Math.ceil(n / cols));
 
+  // Size the name from the card's own box (container units) so it always fits on one line.
   const nameSize = (name: string) => {
-    const len = name.length;
-    if (len <= 14) return "clamp(28px, 3.6vw, 64px)";
-    if (len <= 20) return "clamp(24px, 3vw, 54px)";
-    if (len <= 28) return "clamp(20px, 2.4vw, 44px)";
-    return "clamp(18px, 1.9vw, 36px)";
+    const len = Math.max(6, name.length);
+    const byWidth = Math.min(12, 150 / len); // ~0.6em per glyph across ~90% of the card width
+    return `min(${byWidth.toFixed(2)}cqw, 22cqh)`;
   };
 
   return (
