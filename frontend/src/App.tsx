@@ -646,14 +646,14 @@ function App() {
     const currentPermissions = resolvePermissions(currentUser);
     const candidatePages = [
       "dashboard",
-      "patients",
-      "add",
+      "op-desk",
       "pre-booking",
+      "add",
       "op-queue-management",
       "doctor-prescription",
-      "patient-journey",
-      "op-desk",
       "readmit",
+      "patients",
+      "patient-journey",
       "doctors-history",
       "billing-overview",
       "billing-module-collections",

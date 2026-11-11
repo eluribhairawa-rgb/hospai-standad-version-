@@ -34,14 +34,14 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "analytics", label: "Analysis", group: "overview", module: "analytics", permission: "reports.read", deniedHint: "You do not have permission to access this module." },
 
   // 2. OP Management
-  { id: "patients", label: "Patients", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
-  { id: "add", label: "Patient Registration", group: "op-management", module: "patient-registration", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
+  { id: "op-desk", label: "Doctor Scheduling", group: "op-management", module: "doctor-scheduling", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "pre-booking", label: "Pre-booking", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access Pre-booking." },
+  { id: "add", label: "Patient Registration", group: "op-management", module: "patient-registration", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
   { id: "op-queue-management", label: "Queue Management", group: "op-management", module: "queue-management", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "doctor-prescription", label: "Doctor Prescription", group: "op-management", module: "doctor-prescription", permission: "patients.read", deniedHint: "You do not have permission to access Doctor Prescription." },
-  { id: "patient-journey", label: "Patient Journey", group: "op-management", module: "consultation", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
-  { id: "op-desk", label: "Doctor Scheduling", group: "op-management", module: "doctor-scheduling", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "readmit", label: "Follow-up / Re-visit", group: "op-management", module: "follow-up", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
+  { id: "patients", label: "Patients", group: "op-management", module: "patients", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
+  { id: "patient-journey", label: "Patient Journey", group: "op-management", module: "consultation", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
   { id: "doctors-history", label: "Doctors History", group: "op-management", module: "doctors-history", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
 
   // 3. Emergency / Casualty
