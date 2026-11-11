@@ -14529,3 +14529,36 @@ label,
 .opq-uhid-btn { flex: none; padding: 0 12px; border-radius: 8px; border: 1px solid #0f766e; background: #f0fdfa; color: #0f766e; font-weight: 700; cursor: pointer; }
 .opq-uhid-btn:disabled { opacity: 0.6; cursor: progress; }
 .opq-modal-input[readonly] { background: #f1f5f9; color: #334155; }
+
+/* ===== OP Queue TV display (waiting-hall screen) ===== */
+.optv-root{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;overflow:hidden;font-family:"Segoe UI",Roboto,Arial,sans-serif;color:#fff;background:linear-gradient(160deg,#0a2540 0%,#0d3b66 55%,#0a2540 100%)}
+.optv-header{position:relative;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:1.6vh 3vw;background:rgba(255,255,255,.06);border-bottom:2px solid rgba(255,255,255,.12)}
+.optv-brand{display:flex;align-items:center;gap:1vw;min-width:0}
+.optv-logo{width:clamp(40px,3.4vw,64px);height:clamp(40px,3.4vw,64px);border-radius:16px;background:#14b8a6;display:grid;place-items:center;font-size:clamp(26px,2.2vw,40px);font-weight:800;flex-shrink:0}
+.optv-brand h1{font-size:clamp(20px,2vw,38px);font-weight:800;color:#fff;margin:0}
+.optv-brand p{font-size:clamp(13px,1vw,20px);color:#9cc7e8;margin:2px 0 0}
+.optv-title{font-size:clamp(18px,1.8vw,34px);font-weight:800;letter-spacing:3px;color:#5eead4;text-transform:uppercase;text-align:center}
+.optv-clock{text-align:right;flex-shrink:0}
+.optv-time{font-size:clamp(24px,2.4vw,46px);font-weight:800;font-variant-numeric:tabular-nums}
+.optv-date{font-size:clamp(12px,1vw,20px);color:#9cc7e8}
+.optv-close{position:absolute;top:8px;right:10px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(255,255,255,.12);color:#fff;font-size:14px;cursor:pointer;opacity:0;transition:opacity .2s}
+.optv-root:hover .optv-close,.optv-close:focus{opacity:1}
+.optv-grid{flex:1;min-height:0;display:grid;gap:1.6vw;padding:2.4vh 3vw}
+.optv-empty{flex:1;display:grid;place-items:center;font-size:clamp(22px,2.4vw,44px);color:#9cc7e8;font-weight:700}
+.optv-card{min-width:0;min-height:0;background:#fff;color:#0b2a45;border-radius:22px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+.optv-card-top{padding:1.4vh 1.4vw;background:var(--c);color:#fff}
+.optv-doc-wrap{min-width:0}
+.optv-doc{font-size:clamp(18px,1.6vw,30px);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.optv-spec{font-size:clamp(13px,1.05vw,20px);opacity:.9;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.optv-card-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:1vh 1.2vw;text-align:center}
+.optv-lbl{font-size:clamp(12px,1.05vw,20px);font-weight:700;letter-spacing:4px;color:#64748b;text-transform:uppercase}
+.optv-token{margin-top:.8vh;font-size:clamp(16px,1.4vw,26px);font-weight:800;color:var(--c);background:color-mix(in srgb,var(--c) 12%,#fff);padding:4px 20px;border-radius:999px}
+.optv-name{margin-top:1vh;font-weight:900;line-height:1.1;max-width:100%;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.optv-name.optv-none{font-size:clamp(18px,1.8vw,34px);color:#94a3b8;font-weight:700}
+.optv-card-foot{padding:1vh;text-align:center;font-size:clamp(12px,1vw,19px);font-weight:600;color:#475569;background:#f1f5f9}
+.optv-footer{background:#14b8a6;color:#04201d;font-size:clamp(14px,1.25vw,24px);font-weight:700;padding:1.4vh 3vw;display:flex;gap:2vw;white-space:nowrap;overflow:hidden}
+.optv-page{margin-left:auto}
+.opq-tv-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:10px;border:1px solid #00828a;background:#00828a;color:#fff;font-weight:700;font-size:.9rem;cursor:pointer}
+.opq-tv-btn:hover{background:#006d74}
+.optv-doc-lbl{font-size:clamp(11px,.85vw,16px);font-weight:700;letter-spacing:3px;text-transform:uppercase;opacity:.85}
+.optv-uhid{margin-top:.8vh;font-size:clamp(14px,1.3vw,26px);font-weight:700;color:#334155;font-variant-numeric:tabular-nums;letter-spacing:1px}

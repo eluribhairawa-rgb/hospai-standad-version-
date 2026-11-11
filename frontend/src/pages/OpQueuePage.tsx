@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { Modal } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
+import OpQueueTvDisplay from "./OpQueueTvDisplay";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -40,6 +41,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
   // Queue list state -- starts empty and is populated from the real
   // /api/appointments fetch below; never seeded with fabricated patients.
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [showTv, setShowTv] = useState(false);
 
   // Filters state
   const [selectedDate, setSelectedDate] = useState(() => new Date().toLocaleDateString("en-CA"));
@@ -478,6 +480,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
 
   return (
     <div className="opq-page-root">
+      {showTv && <OpQueueTvDisplay onClose={() => setShowTv(false)} />}
       {/* Top Header Row */}
       <div className="opq-top-row">
         <div className="opq-top-left">
@@ -510,6 +513,13 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
 
         {/* Top-Right: Date Picker */}
         <div className="opq-top-right">
+          <button type="button" className="opq-tv-btn" onClick={() => setShowTv(true)} title="Open waiting-hall TV screen (next patient per doctor)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="7" width="20" height="13" rx="2" />
+              <polyline points="17 2 12 7 7 2" />
+            </svg>
+            TV Display
+          </button>
           <div className="opq-date-pill">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00828a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
