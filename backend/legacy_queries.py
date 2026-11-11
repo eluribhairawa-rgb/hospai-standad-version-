@@ -7472,7 +7472,21 @@ def get_pharmacy_summary(db):
         cursor.execute("""
             SELECT ps.id, ps.patient_id, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) AS patient_name, ps.medicine_name, ps.quantity,
                    ps.unit_price, ps.amount, ps.billing_type, ps.payment_mode, ps.sold_at,
-                   ps.invoice_id, ps.admission_id
+                   ps.invoice_id, ps.admission_id,
+                   COALESCE(
+                       (SELECT pi.purchase_price 
+                        FROM pharmacy_inventory pi 
+                        WHERE LOWER(TRIM(pi.medicine_name)) = LOWER(TRIM(ps.medicine_name)) 
+                          AND pi.purchase_price > 0 
+                        ORDER BY pi.id DESC LIMIT 1),
+                       (SELECT gri.purchase_price 
+                        FROM goods_receipt_items gri 
+                        JOIN goods_receipts gr ON gr.id = gri.grn_id 
+                        WHERE LOWER(TRIM(gri.medicine_name)) = LOWER(TRIM(ps.medicine_name)) 
+                          AND gr.status = 'verified' AND gri.purchase_price > 0 
+                        ORDER BY gr.received_date DESC NULLS LAST, gri.id DESC LIMIT 1),
+                       0.0
+                   ) AS cost_price
             FROM pharmacy_sales ps
             LEFT JOIN patients p ON p.patient_id = ps.patient_id
             ORDER BY ps.sold_at DESC
@@ -7494,6 +7508,14 @@ def get_pharmacy_summary(db):
 
             ref = f"SALE-{r['id']}" if not r["invoice_id"] else f"INV-{r['invoice_id']}"
             sold_time_str = str(r["sold_at"])[:16] if r["sold_at"] else ""
+            qty = float(r["quantity"] or 1)
+            unit_sale = float(r["unit_price"] or 0)
+            sale_amount = float(r["amount"] if r["amount"] is not None else (qty * unit_sale))
+            unit_cost = float(r["cost_price"] or 0)
+            total_cost = round(qty * unit_cost, 2)
+            profit = round(sale_amount - total_cost, 2)
+            margin_pct = round((profit / sale_amount * 100), 1) if sale_amount > 0 else 0.0
+
             recent_transactions.append({
                 "reference": ref,
                 "patient_name": r["patient_name"] or (r["patient_id"] or "Walk-in"),
@@ -7501,7 +7523,13 @@ def get_pharmacy_summary(db):
                 "type": tx_type,
                 "medicine_name": r["medicine_name"],
                 "medicine_count": 1,
-                "amount": float(r["amount"] or 0),
+                "quantity": qty,
+                "cost_price": unit_cost,
+                "total_cost": total_cost,
+                "sale_price": unit_sale,
+                "amount": sale_amount,
+                "profit": profit,
+                "profit_margin_pct": margin_pct,
                 "payment_status": pay_status,
                 "user": "Pharmacist",
                 "date_time": sold_time_str,

@@ -48,6 +48,12 @@ type RecentTransaction = {
   user: string;
   date_time: string;
   status: string;
+  cost_price?: number;
+  total_cost?: number;
+  sale_price?: number;
+  profit?: number;
+  profit_margin_pct?: number;
+  quantity?: number;
 };
 
 type PharmacySummary = {
@@ -1585,7 +1591,9 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                 <th style={{ padding: "8px 10px" }}>UHID / IP / ER</th>
                 <th style={{ padding: "8px 10px" }}>Type</th>
                 <th style={{ padding: "8px 10px" }}>Medicine</th>
-                <th style={{ padding: "8px 10px", textAlign: "right" }}>Amount</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Cost Price</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Sale Price</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Profits</th>
                 <th style={{ padding: "8px 10px" }}>Payment / Status</th>
                 <th style={{ padding: "8px 10px" }}>Date / Time</th>
               </tr>
@@ -1622,10 +1630,63 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                       </span>
                     </td>
                     <td style={{ padding: "8px 10px", color: "#334155" }}>
-                      {t.medicine_name}
+                      <div style={{ fontWeight: 600 }}>{t.medicine_name}</div>
+                      {t.quantity != null && t.quantity > 1 && (
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>Qty: {t.quantity}</div>
+                      )}
                     </td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
-                      ₹{t.amount.toFixed(2)}
+                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 600, color: "#334155" }}>
+                        ₹{(t.total_cost ?? (t.cost_price ? t.cost_price * (t.quantity || 1) : 0)).toFixed(2)}
+                      </div>
+                      {t.cost_price != null && t.cost_price > 0 && (t.quantity || 1) > 1 && (
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>
+                          ₹{t.cost_price.toFixed(2)}/u
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                        ₹{t.amount.toFixed(2)}
+                      </div>
+                      {t.sale_price != null && t.sale_price > 0 && (t.quantity || 1) > 1 && (
+                        <div style={{ fontSize: "11px", color: "#64748b" }}>
+                          ₹{t.sale_price.toFixed(2)}/u
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" }}>
+                      {(() => {
+                        const cost = t.total_cost ?? (t.cost_price ? t.cost_price * (t.quantity || 1) : 0);
+                        const profit = t.profit ?? (t.amount - cost);
+                        const isPositive = profit > 0;
+                        const isNegative = profit < 0;
+                        const color = isPositive ? "#15803d" : isNegative ? "#dc2626" : "#64748b";
+                        const bg = isPositive ? "#f0fdf4" : isNegative ? "#fef2f2" : "#f8fafc";
+                        const border = isPositive ? "#bbf7d0" : isNegative ? "#fecaca" : "#e2e8f0";
+                        return (
+                          <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end" }}>
+                            <span
+                              style={{
+                                fontWeight: 700,
+                                fontSize: "12px",
+                                color: color,
+                                background: bg,
+                                border: `1px solid ${border}`,
+                                padding: "2px 7px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              {isPositive ? `+₹${profit.toFixed(2)}` : isNegative ? `-₹${Math.abs(profit).toFixed(2)}` : `₹0.00`}
+                            </span>
+                            {t.profit_margin_pct != null && isPositive && (
+                              <span style={{ fontSize: "10px", color: "#16a34a", marginTop: "2px", fontWeight: 600 }}>
+                                +{t.profit_margin_pct.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: "8px 10px" }}>
                       <span style={{ fontSize: "11px", color: "#475569", fontWeight: 500 }}>
@@ -1640,7 +1701,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
               })}
               {(!summary?.recent_transactions || summary.recent_transactions.length === 0) && (
                 <tr>
-                  <td colSpan={8} style={{ padding: "18px 8px", textAlign: "center", color: "#94a3b8" }}>
+                  <td colSpan={10} style={{ padding: "18px 8px", textAlign: "center", color: "#94a3b8" }}>
                     No recent pharmacy transactions.
                   </td>
                 </tr>
