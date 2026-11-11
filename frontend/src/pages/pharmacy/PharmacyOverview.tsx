@@ -5,6 +5,8 @@ import { apiFetch, reportError } from "../../lib/api";
 import type { Notice, Patient } from "../../types";
 import DateCalendarPicker, { toIsoDate, parseIsoDate } from "../../components/DateCalendarPicker";
 import { DonutChart } from "../../components/charts";
+import { printViaIframe } from "../../lib/printViaIframe";
+import { buildPrintDocumentHtml } from "../../lib/printTemplates";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -490,6 +492,158 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
     }
     return max * 1.15;
   }, [chartBars]);
+
+  // Print Recent Pharmacy Operations report
+  const handlePrintRecentOperations = () => {
+    const transactions = summary?.recent_transactions || [];
+    if (transactions.length === 0) {
+      setNotice({ type: "info", message: "No recent pharmacy operations to print." });
+      return;
+    }
+
+    let totalCostSum = 0;
+    let totalSaleSum = 0;
+    let totalProfitSum = 0;
+
+    const rows = transactions.map((t) => {
+      const qty = t.quantity || 1;
+      const cost = t.total_cost ?? (t.cost_price ? t.cost_price * qty : 0);
+      const sale = t.amount || 0;
+      const profit = t.profit ?? (sale - cost);
+      const margin = t.profit_margin_pct ?? (sale > 0 ? (profit / sale) * 100 : 0);
+
+      totalCostSum += cost;
+      totalSaleSum += sale;
+      totalProfitSum += profit;
+
+      const medicineCell = qty > 1 ? `${t.medicine_name} (Qty: ${qty})` : t.medicine_name;
+      const costCell = (t.cost_price != null && t.cost_price > 0 && qty > 1)
+        ? `₹${cost.toFixed(2)} (₹${t.cost_price.toFixed(2)}/u)`
+        : `₹${cost.toFixed(2)}`;
+      const saleCell = (t.sale_price != null && t.sale_price > 0 && qty > 1)
+        ? `₹${sale.toFixed(2)} (₹${t.sale_price.toFixed(2)}/u)`
+        : `₹${sale.toFixed(2)}`;
+      const profitCell = profit > 0
+        ? `+₹${profit.toFixed(2)} (+${margin.toFixed(1)}%)`
+        : profit < 0
+        ? `-₹${Math.abs(profit).toFixed(2)} (${margin.toFixed(1)}%)`
+        : `₹0.00`;
+
+      return [
+        t.reference || "-",
+        t.patient_name || "-",
+        t.uhid || "-",
+        t.type || "-",
+        medicineCell,
+        costCell,
+        saleCell,
+        profitCell,
+        t.payment_status || "-",
+        t.date_time || "-",
+      ];
+    });
+
+    const overallMargin = totalSaleSum > 0 ? (totalProfitSum / totalSaleSum) * 100 : 0;
+
+    try {
+      const html = buildPrintDocumentHtml({
+        title: "Recent Pharmacy Operations",
+        subtitleLines: [
+          "HospAI · Pharmacy Operations & Financial Audit Log",
+          "Unified audit log across OP Dispensations, Inpatient Issues, and Emergency Orders",
+          `Report Date: ${dateRange === toIsoDate(new Date()) ? `Today (${dateRange})` : dateRange}`,
+          `Records: ${transactions.length}`,
+          `Generated: ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
+        ],
+        meta: [
+          { label: "Total Operations", value: `${transactions.length} records` },
+          { label: "Total Cost Price", value: `₹${totalCostSum.toFixed(2)}` },
+          { label: "Total Sale Price", value: `₹${totalSaleSum.toFixed(2)}` },
+          {
+            label: "Total Net Profit",
+            value: `${totalProfitSum >= 0 ? "+" : ""}₹${totalProfitSum.toFixed(2)} (${overallMargin.toFixed(1)}%)`,
+          },
+        ],
+        columns: [
+          "Reference",
+          "Patient",
+          "UHID / IP / ER",
+          "Type",
+          "Medicine",
+          "Cost Price",
+          "Sale Price",
+          "Profits",
+          "Payment / Status",
+          "Date / Time",
+        ],
+        rows,
+        totals: [
+          { label: "Total Cost Price", value: `₹${totalCostSum.toFixed(2)}` },
+          { label: "Total Sale Price", value: `₹${totalSaleSum.toFixed(2)}` },
+          {
+            label: "Total Net Profit",
+            value: `${totalProfitSum >= 0 ? "+" : ""}₹${totalProfitSum.toFixed(2)} (${overallMargin.toFixed(1)}% margin)`,
+            grand: true,
+          },
+        ],
+        emptyMessage: "No recent pharmacy operations recorded.",
+      });
+
+      printViaIframe(html, "__hospai_pharmacy_recent_ops_frame__");
+    } catch (error) {
+      setNotice({
+        type: "error",
+        message: error instanceof Error ? error.message : "Unable to print recent operations.",
+      });
+    }
+  };
+
+  // WhatsApp share for Recent Pharmacy Operations
+  const handleWhatsAppShareRecentOperations = () => {
+    const transactions = summary?.recent_transactions || [];
+    if (transactions.length === 0) {
+      setNotice({ type: "info", message: "No recent pharmacy operations to share." });
+      return;
+    }
+
+    let totalCost = 0;
+    let totalSale = 0;
+    let totalProfit = 0;
+    transactions.forEach((t) => {
+      const qty = t.quantity || 1;
+      const c = t.total_cost ?? (t.cost_price ? t.cost_price * qty : 0);
+      const s = t.amount || 0;
+      totalCost += c;
+      totalSale += s;
+      totalProfit += (t.profit ?? (s - c));
+    });
+
+    const lines = [
+      `*HospAI Pharmacy - Recent Operations Report*`,
+      `Date: ${dateRange}`,
+      `Total Operations: ${transactions.length}`,
+      `Total Sales: ₹${totalSale.toFixed(2)}`,
+      `Total Cost: ₹${totalCost.toFixed(2)}`,
+      `Total Profits: ${totalProfit >= 0 ? "+" : ""}₹${totalProfit.toFixed(2)}`,
+      `----------------------------------------`,
+      `*Recent Operations:*`,
+      ...transactions.slice(0, 10).map((t, idx) => {
+        const qty = t.quantity || 1;
+        const c = t.total_cost ?? (t.cost_price ? t.cost_price * qty : 0);
+        const s = t.amount || 0;
+        const p = t.profit ?? (s - c);
+        return `${idx + 1}. [${t.reference}] ${t.patient_name || "Walk-in"} - ${t.medicine_name} (Qty: ${qty}) | Sale: ₹${s.toFixed(2)} | Profit: ${p >= 0 ? "+" : ""}₹${p.toFixed(2)}`;
+      }),
+      transactions.length > 10 ? `...and ${transactions.length - 10} more operations.` : "",
+      `----------------------------------------`,
+      `Generated by HospAI Pharmacy Management`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({ type: "success", message: "WhatsApp opened with Recent Pharmacy Operations." });
+  };
 
   return (
     <div
@@ -1564,7 +1718,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
           boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
           <div>
             <h2 style={{ fontSize: "14px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
               Recent Pharmacy Operations
@@ -1573,13 +1727,81 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
               Unified audit log across OP Dispensations, Inpatient Issues, and Emergency Orders
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => onNavigate("pharmacy-reports")}
-            style={{ fontSize: "11.5px", color: "#00828a", fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}
-          >
-            All Reports →
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <button
+              type="button"
+              onClick={handlePrintRecentOperations}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#0f172a",
+                background: "#ffffff",
+                border: "1px solid #cbd5e1",
+                borderRadius: "6px",
+                padding: "5px 12px",
+                cursor: "pointer",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#f1f5f9";
+                e.currentTarget.style.borderColor = "#94a3b8";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#ffffff";
+                e.currentTarget.style.borderColor = "#cbd5e1";
+              }}
+              title="Print Recent Pharmacy Operations"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#00828a" }}>
+                <polyline points="6 9 6 2 18 2 18 9" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect x="6" y="14" width="12" height="8" />
+              </svg>
+              <span>Print</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleWhatsAppShareRecentOperations}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "#166534",
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                borderRadius: "6px",
+                padding: "5px 12px",
+                cursor: "pointer",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#dcfce7";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#f0fdf4";
+              }}
+              title="Share Recent Operations on WhatsApp"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#16a34a" }}>
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+              </svg>
+              <span>WhatsApp</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate("pharmacy-reports")}
+              style={{ fontSize: "11.5px", color: "#00828a", fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}
+            >
+              All Reports →
+            </button>
+          </div>
         </div>
 
         <div style={{ overflowX: "auto" }}>
