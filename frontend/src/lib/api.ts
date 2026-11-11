@@ -75,6 +75,13 @@ export async function apiFetch<T = any>(path: string, options: RequestInit & { c
     }
     
     let message = payload.error || payload.message;
+    if (!message && payload.detail) {
+      if (typeof payload.detail === "string") {
+        message = payload.detail;
+      } else if (typeof payload.detail === "object") {
+        message = payload.detail.message || payload.detail.error || payload.detail.detail;
+      }
+    }
     if (payload.fields && typeof payload.fields === "object") {
       const fieldMsgs = Object.values(payload.fields).filter(Boolean);
       if (fieldMsgs.length > 0) {

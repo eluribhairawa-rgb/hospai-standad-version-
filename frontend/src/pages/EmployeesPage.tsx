@@ -514,6 +514,10 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                   <JobTitleOptions current={form.job_role} />
                 </Select>
               </Label>
+              <Label>
+                Department
+                <Input value={form.department || ""} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} placeholder="e.g. Cardiology, Nursing, Front Desk" />
+              </Label>
               {isDoctorRole(form.job_role) && (
                 <DoctorNameField id="add-doctor" value={form.doctor_name} doctors={doctors} onChange={pickDoctorForAdd} />
               )}

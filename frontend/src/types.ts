@@ -543,6 +543,7 @@ export interface SignupForm {
   module_access: ModuleId[];
   job_role: string;
   doctor_name: string;
+  department?: string;
   address: string;
   emergency_contact: string;
 }

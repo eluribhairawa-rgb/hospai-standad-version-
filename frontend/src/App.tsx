@@ -1865,7 +1865,7 @@ function App() {
           <PharmacySettings key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
         )}
 
-        {page === "employees" && hasPermission("admin.users.read") && <EmployeesPage key={pageKeys[page] || 0} setNotice={setNotice} canWriteEmployees={hasPermission("admin.users.update")} />}
+        {page === "employees" && hasPermission("admin.users.read") && <EmployeesPage key={pageKeys[page] || 0} setNotice={setNotice} canWriteEmployees={hasPermission("admin.users.update") || hasPermission("admin.users.create")} />}
 
         {page === "admin" && hasPermission("admin.users.create") && <AdminPage key={pageKeys[page] || 0} setNotice={setNotice} />}
 

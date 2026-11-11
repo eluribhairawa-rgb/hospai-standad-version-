@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
@@ -85,6 +86,12 @@ MODULE_PERMISSION_MAP = {
         "diag.imaging", "diag.report", "diag.authorize", "diag.catalogue", "diag.qc",
         "patients.read",
     },
+    "employees": {
+        "admin.users.create",
+        "admin.users.read",
+        "admin.users.update",
+        "admin.users.deactivate",
+    },
 }
 
 ADMIN_PERMISSIONS = {
@@ -110,14 +117,14 @@ ADMIN_PERMISSIONS = {
     "diag.qc",
     "reach.read",
     "reach.write",
-}
-
-SUPER_ADMIN_PERMISSIONS = ADMIN_PERMISSIONS | {
     "admin.users.create",
     "admin.users.read",
     "admin.users.update",
     "admin.users.deactivate",
     "admin.users.roles.manage",
+}
+
+SUPER_ADMIN_PERMISSIONS = ADMIN_PERMISSIONS | {
     "admin.credentials.issue",
     "admin.credentials.reset",
     "admin.sessions.revoke",
@@ -350,11 +357,29 @@ def set_hospital_status(db: Session, hospital_code: str, status: str, reason: Op
 # -------------------------------------------------------------- employees --
 
 def generate_employee_id(db: Session, hospital_id: Optional[int] = None) -> str:
-    query = db.query(Users)
+    query = db.query(Users.employee_id)
     if hospital_id is not None:
         query = query.filter(Users.hospital_id == hospital_id)
-    count = query.count()
-    return f"EMP{count + 1:04d}"
+    existing_ids = {str(row[0]) for row in query.all() if row[0]}
+
+    max_num = 0
+    for emp_id in existing_ids:
+        match = re.search(r"EMP(\d+)$", str(emp_id), re.IGNORECASE)
+        if match:
+            try:
+                num = int(match.group(1))
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                pass
+
+    next_num = max_num + 1
+    candidate = f"EMP{next_num:04d}"
+    while candidate in existing_ids:
+        next_num += 1
+        candidate = f"EMP{next_num:04d}"
+
+    return candidate
 
 
 def check_if_first_user(db: Session, hospital_id: Optional[int] = None) -> bool:

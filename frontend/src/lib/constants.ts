@@ -212,7 +212,7 @@ export const MODULE_PERMISSIONS: Record<ModuleId, string[]> = {
   emergency: ["patients.read", "patients.write"],
   "patient-reach-ai": ["patients.read", "reach.read", "reach.write"],
   settings: [],
-  employees: ["admin.users.read", "admin.users.update"],
+  employees: ["admin.users.create", "admin.users.read", "admin.users.update", "admin.users.deactivate"],
   // Legacy stored values remain supported.
   lab: ["lab.read", "lab.write"],
   ot: ["ot.read", "ot.write"],
@@ -378,6 +378,7 @@ export const EMPTY_SIGNUP_FORM: SignupForm = {
   module_access: [...DEFAULT_MODULE_ACCESS],
   job_role: "",
   doctor_name: "",
+  department: "",
   address: "",
   emergency_contact: "",
 };
