@@ -6,6 +6,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { FiClock, FiTrash2 } from "react-icons/fi";
 import { Button, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import PatientSearchPicker from "../components/PatientSearchPicker";
+import PartnerLabManager from "../components/lab/PartnerLabManager";
+import type { PartnerLab } from "../components/lab/PartnerLabManager";
 import PhoneInput from "../components/PhoneInput";
 import { validateMobileByCountry } from "../lib/phone";
 import { apiFetch, reportError } from "../lib/api";
@@ -71,6 +73,13 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
 
   // ---- type specific ----
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [labManagerOpen, setLabManagerOpen] = useState(false);
+  const handlePartnerLabsChanged = (labs: PartnerLab[], added?: PartnerLab) => {
+    const active = labs.filter((v) => (v.status || "active") === "active");
+    setVendors(active);
+    // Keep selections valid: a deactivated lab can no longer be chosen for a new order.
+    setVendorId((cur) => (added ? added.id : cur && !active.some((v) => v.id === cur) ? "" : cur));
+  };
   const [vendorId, setVendorId] = useState<number | "">("");
   const [address, setAddress] = useState("");
   const [visitAt, setVisitAt] = useState(() => toLocalInput(new Date(Date.now() + 2 * 3600 * 1000)));
@@ -354,11 +363,27 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
             <div className="lab-ob-patient-row" style={{ marginTop: "0.75rem" }}>
               <div className="lab-ob-span2"><Label>Referring doctor</Label><Input value={referringDoctor} onChange={(e) => setReferringDoctor(e.target.value)} placeholder="Optional" /></div>
               {serviceType === "OUTSOURCING" && (
-                <div className="lab-ob-span2"><Label>Partner laboratory *</Label>
+                <div className="lab-ob-span2">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <Label>Partner laboratory *</Label>
+                    <button
+                      type="button"
+                      onClick={() => setLabManagerOpen(true)}
+                      style={{ background: "none", border: "none", color: "#00828a", fontWeight: 700, fontSize: "12px", cursor: "pointer", padding: 0 }}
+                    >
+                      + Add / Manage
+                    </button>
+                  </div>
                   <Select value={vendorId} onChange={(e) => setVendorId(e.target.value ? Number(e.target.value) : "")}>
-                    <option value="">Select partner lab</option>
+                    <option value="">{vendors.length ? "Select partner lab" : "No partner labs yet: use + Add / Manage"}</option>
                     {vendors.map((v) => <option key={v.id} value={v.id}>{v.vendor_name}</option>)}
                   </Select>
+                  <PartnerLabManager
+                    open={labManagerOpen}
+                    onClose={() => setLabManagerOpen(false)}
+                    setNotice={setNotice}
+                    onChanged={handlePartnerLabsChanged}
+                  />
                 </div>
               )}
             </div>

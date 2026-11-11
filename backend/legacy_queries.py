@@ -8991,6 +8991,56 @@ def update_lab_vendor(db, vendor_id, data):
 
 
 
+def save_partner_lab(db, data, vendor_id=None):
+    """Create or edit a partner (outsourcing) laboratory. Names are unique
+    (case-insensitive). Labs are deactivated rather than deleted, so past
+    referrals and orders keep showing which lab they went to."""
+    name = str(data.get("vendor_name") or "").strip()
+    if vendor_id is None and not name:
+        raise ValueError("Enter the partner lab name.")
+    status = data.get("status")
+    if status is not None and status not in ("active", "inactive"):
+        raise ValueError("Status must be active or inactive.")
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        existing = None
+        if vendor_id is not None:
+            cursor.execute("SELECT * FROM lab_vendors WHERE id = ?", (vendor_id,))
+            existing = cursor.fetchone()
+            if not existing:
+                raise LookupError("Partner lab not found.")
+            if "vendor_name" in data and not name:
+                raise ValueError("The partner lab name cannot be empty.")
+        if name:
+            cursor.execute(
+                "SELECT id FROM lab_vendors WHERE LOWER(TRIM(vendor_name)) = LOWER(?) AND id <> ?",
+                (name, vendor_id or 0),
+            )
+            if cursor.fetchone():
+                raise ValueError(f"A partner lab named '{name}' already exists.")
+        clean = lambda key: (str(data.get(key) or "").strip() or None)
+        if existing is None:
+            cursor.execute(
+                "INSERT INTO lab_vendors (vendor_name, contact_person, phone, status) VALUES (?, ?, ?, ?) RETURNING id",
+                (name, clean("contact_person"), clean("phone"), status or "active"),
+            )
+            vendor_id = cursor.fetchone()["id"]
+        else:
+            cursor.execute(
+                "UPDATE lab_vendors SET vendor_name = ?, contact_person = ?, phone = ?, status = ? WHERE id = ?",
+                (
+                    name or existing["vendor_name"],
+                    clean("contact_person") if "contact_person" in data else existing["contact_person"],
+                    clean("phone") if "phone" in data else existing["phone"],
+                    status or existing["status"] or "active",
+                    vendor_id,
+                ),
+            )
+        conn.commit()
+        cursor.execute("SELECT * FROM lab_vendors WHERE id = ?", (vendor_id,))
+        return cursor.fetchone()
+
+
 def delete_lab_vendor(db, vendor_id):
     with get_connection(db) as conn:
         cursor = conn.cursor()

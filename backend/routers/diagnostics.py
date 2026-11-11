@@ -351,6 +351,31 @@ def diag_lab_vendors_for_referral(db: Session = Depends(get_audited_db), user: d
     return {"vendors": rows_to_dicts(lq.list_lab_vendors(db))}
 
 
+@router.post("/lab/vendors-list")
+def diag_partner_lab_create(request: Request, payload: dict = Body(...), db: Session = Depends(get_audited_db),
+                            user: dict = Depends(require_permissions("diag.order"))):
+    try:
+        vendor = lq.save_partner_lab(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    log_audit_event(db, user, client_ip(request), "create", "lab_vendors", str(vendor["id"]), {"vendor_name": vendor["vendor_name"]})
+    return {"vendor": dict(vendor)}
+
+
+@router.put("/lab/vendors-list/{vendor_id}")
+def diag_partner_lab_update(vendor_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_audited_db),
+                            user: dict = Depends(require_permissions("diag.order"))):
+    try:
+        vendor = lq.save_partner_lab(db, payload, vendor_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    log_audit_event(db, user, client_ip(request), "update", "lab_vendors", str(vendor_id),
+                    {k: payload.get(k) for k in ("vendor_name", "contact_person", "phone", "status") if k in payload})
+    return {"vendor": dict(vendor)}
+
+
 # --------------------------------------------------------------------- imaging --
 
 @router.get("/diag/imaging/worklist")
