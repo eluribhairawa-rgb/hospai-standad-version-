@@ -333,6 +333,27 @@ def pharmacy_insurance_cases_list(invoice_id: int | None = None, status: str | N
     return {"cases": rows_to_dicts(lq.list_insurance_claims(db, invoice_id=invoice_id, status=status))}
 
 
+@router.get("/insurance-claims")
+def pharmacy_insurance_claims_list(status: str | None = None, db: Session = Depends(get_db),
+                                   user: dict = Depends(require_permissions("pharmacy.read"))):
+    return {"claims": lq.list_pharmacy_insurance_claims(db, status=status)}
+
+
+@router.post("/insurance-cases/{claim_id}/close")
+def pharmacy_insurance_case_close(claim_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                                  user: dict = Depends(require_permissions("pharmacy.settle"))):
+    try:
+        res = lq.close_pharmacy_insurance_claim(db, claim_id, str(payload.get("outcome") or "").strip().lower(),
+                                                payload.get("reason"), user.get("username"))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    log_audit_event(db, user, client_ip(request), res["claim_status"], "insurance_claims", str(claim_id),
+                    {"patient_payable": res["patient_payable"], "reason": payload.get("reason")})
+    return res
+
+
 @router.put("/insurance-cases/{claim_id}")
 def pharmacy_insurance_case_update(claim_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                                     user: dict = Depends(require_permissions("pharmacy.settle"))):
@@ -372,12 +393,19 @@ def pharmacy_insurance_case_settle(claim_id: int, request: Request, payload: dic
     claim = lq.get_insurance_claim(db, claim_id)
     if not claim:
         raise HTTPException(status_code=404, detail="Insurance case not found")
+    if claim["claim_status"] in ("rejected", "closed"):
+        raise HTTPException(status_code=409, detail="This claim is already rejected/closed. Collect the balance from the patient on the invoice instead.")
     amount = float(payload["amount"])
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Settlement amount must be greater than zero.")
     settlement_status = claim["settlement_status"] or "unpaid"
     if claim["invoice_id"]:
-        payment_id = lq.record_invoice_payment(db, claim["invoice_id"], {
-            "amount": amount, "payment_mode": payload.get("payment_mode", "bank_transfer"), "gateway_ref": payload.get("reference"),
-        })
+        try:
+            payment_id = lq.record_invoice_payment(db, claim["invoice_id"], {
+                "amount": amount, "payment_mode": payload.get("payment_mode", "bank_transfer"), "gateway_ref": payload.get("reference"),
+            })
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         if payment_id is None:
             raise HTTPException(status_code=404, detail="Linked invoice not found")
         invoice = lq.get_invoice_by_id(db, claim["invoice_id"])

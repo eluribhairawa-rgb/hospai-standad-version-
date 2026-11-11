@@ -41,6 +41,7 @@ import PharmacyInventoryStock from "./pages/pharmacy/PharmacyInventoryStock";
 import PharmacyPurchasesGrn from "./pages/pharmacy/PharmacyPurchasesGrn";
 import PharmacySuppliers from "./pages/pharmacy/PharmacySuppliers";
 import PharmacyReports from "./pages/pharmacy/PharmacyReports";
+import PharmacyInsuranceClaims from "./pages/pharmacy/PharmacyInsuranceClaims";
 import PharmacyProfitAnalysis from "./pages/pharmacy/PharmacyProfitAnalysis";
 import PharmacySettings from "./pages/pharmacy/PharmacySettings";
 import LabDiagnosticsCataloguePage from "./pages/LabDiagnosticsCataloguePage";
@@ -123,7 +124,7 @@ const VALID_PAGE_IDS = new Set([
   "doctors-history", "emergency", "emergency-worklist", "employees", "hrms", "inpatient", "inpatient-patients", "insurance-desk", "ip-admission", "lab", "laboratory",
   "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients", "pre-booking",
   "pharmacy", "pharmacy-overview", "pharmacy-op-dispense", "pharmacy-ip-dispense", "pharmacy-inventory", "pharmacy-inventory-stock",
-  "pharmacy-purchases", "pharmacy-purchases-grn", "pharmacy-suppliers", "pharmacy-reports", "pharmacy-profit-analysis", "pharmacy-settings",
+  "pharmacy-purchases", "pharmacy-purchases-grn", "pharmacy-suppliers", "pharmacy-reports", "pharmacy-insurance-claims", "pharmacy-profit-analysis", "pharmacy-settings",
   "pharmacy-billing-insurance", "pharmacy-dispense", "pharmacy-emar",
   "pharmacy-inventory-batches", "pharmacy-inventory-expiry", "pharmacy-inventory-medicines",
   "pharmacy-inventory-transfers", "pharmacy-medication-orders",
@@ -195,6 +196,7 @@ const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   "pharmacy-purchases": "cart",
   "pharmacy-suppliers": "team",
   "pharmacy-reports": "chart",
+  "pharmacy-insurance-claims": "shield-check",
   "pharmacy-profit-analysis": "billing",
   "pharmacy-settings": "settings",
   "pharmacy-dispense": "pill",
@@ -1415,6 +1417,19 @@ function App() {
                 <span>Suppliers</span>
               </button>
 
+              {/* Insurance Claims (pharmacy insurance Due bills awaiting settlement) */}
+              <button
+                type="button"
+                className={`sidebar-tab ${page === "pharmacy-insurance-claims" ? "active" : ""}`}
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  navigateToPage("pharmacy-insurance-claims");
+                }}
+              >
+                <span className="sidebar-tab-icon"><SidebarIcon name="shield-check" /></span>
+                <span>Insurance Claims</span>
+              </button>
+
               {/* 7. Reports */}
               <button
                 type="button"
@@ -1860,6 +1875,9 @@ function App() {
         )}
         {(page === "pharmacy-suppliers" || page === "pharmacy-purchases-suppliers") && hasPermission("pharmacy.read") && (
           <PharmacySuppliers key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
+        )}
+        {page === "pharmacy-insurance-claims" && hasPermission("pharmacy.read") && (
+          <PharmacyInsuranceClaims key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />
         )}
         {page === "pharmacy-reports" && hasPermission("pharmacy.read") && (
           <PharmacyReports key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />

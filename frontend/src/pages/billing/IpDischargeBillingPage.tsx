@@ -889,6 +889,11 @@ export default function IpDischargeBillingPage({
                             + ₹{fmt(charges.pharmacy_insurance)} billed to insurance (Due on pharmacy claim, not charged to patient)
                           </div>
                         )}
+                        {Number(charges.insurance_shortfall_due || 0) > 0 && (
+                          <div style={{ fontSize: "0.75rem", color: "#b91c1c", marginTop: "2px", fontWeight: 600 }}>
+                            ₹{fmt(charges.insurance_shortfall_due)} from rejected / short-closed insurance claims is payable by the patient (collect in Pharmacy › Insurance Claims)
+                          </div>
+                        )}
                       </td>
                       <td style={{ fontWeight: 600 }}>₹{fmt(charges.pharmacy)}</td>
                       <td style={{ textAlign: "right" }}>

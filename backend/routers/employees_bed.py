@@ -280,18 +280,31 @@ def patient_movements_create(patient_id: str, request: Request, payload: dict = 
 
 # ------------------------------------------------------------------- bed --
 
-def _get_or_create_active_admission(db: Session, patient_id, hospital_id):
+def _get_or_create_active_admission(db: Session, patient_id, hospital_id, requested_admission_id=None):
+    """The admission a new bed belongs to: the one the caller names (if it is this
+    patient's and not discharged), else the patient's open admission, else a new
+    one. A discharged admission is never reused -- a new stay must not inherit an
+    old stay's bed, pharmacy and discharge charges."""
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()
+        if requested_admission_id:
+            cursor.execute(
+                "SELECT id, discharge_date FROM admissions WHERE id = ? AND patient_id = ? AND hospital_id = ?",
+                (requested_admission_id, patient_id, hospital_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="That admission does not belong to this patient.")
+            if row["discharge_date"]:
+                raise HTTPException(status_code=409, detail="That admission is already discharged. Create a new admission first.")
+            return row["id"]
         cursor.execute(
-            "SELECT id FROM admissions WHERE patient_id = ? AND hospital_id = ? AND discharge_date IS NULL ORDER BY admission_date DESC LIMIT 1",
-            (patient_id, hospital_id),
-        )
-        row = cursor.fetchone()
-        if row:
-            return row[0]
-        cursor.execute(
-            "SELECT id FROM admissions WHERE patient_id = ? AND hospital_id = ? ORDER BY admission_date DESC LIMIT 1",
+            """
+            SELECT id FROM admissions
+            WHERE patient_id = ? AND hospital_id = ? AND discharge_date IS NULL
+              AND COALESCE(notes, '') != 'Initial registration'
+            ORDER BY admission_date DESC LIMIT 1
+            """,
             (patient_id, hospital_id),
         )
         row = cursor.fetchone()
@@ -388,7 +401,7 @@ def allot_bed_api(request: Request, payload: dict = Body(...), db: Session = Dep
             if not cursor.fetchone():
                 raise HTTPException(status_code=404, detail="Patient not found")
 
-    admission_id = _get_or_create_active_admission(db, patient_id, hospital_id)
+    admission_id = _get_or_create_active_admission(db, patient_id, hospital_id, payload.get("admission_id"))
 
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()

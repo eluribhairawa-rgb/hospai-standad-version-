@@ -948,7 +948,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       age,
       gender,
       phone: primaryPhone,
-      phoneCountryCode: primaryPhoneCode,
+      phoneCountryCode: primaryCountryCode.match(/\+\d+/)?.[0] || "+91",
       address,
       visitType,
       doctor: selectedDoctor,
@@ -964,7 +964,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     }
 
     const targetPhone = (target as any).phone || primaryPhone;
-    const targetCode = (target as any).phoneCountryCode || (target as any).phone_country_code || primaryPhoneCode;
+    const targetCode = (target as any).phoneCountryCode || (target as any).phone_country_code || primaryCountryCode.match(/\+\d+/)?.[0] || "+91";
     const parts = splitStoredPhone(targetPhone, targetCode);
     const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
     const tokenPart = bookedAppointment?.tokenNo || (target as any).tokenNo;

@@ -176,6 +176,9 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMode, setPaymentMode] = useState<string>("cash");
   const [dispenseStockSource, setDispenseStockSource] = useState<"CASH" | "INSURANCE">("CASH");
+  const [insuranceVerifyRef, setInsuranceVerifyRef] = useState("");
+  const [verifyingInsurance, setVerifyingInsurance] = useState(false);
+  const isInsuranceSale = dispenseStockSource === "INSURANCE";
 
   // Partial Payment State
   const [paymentType, setPaymentType] = useState<"full" | "partial">("full");
@@ -218,9 +221,28 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     name: string;
     age?: string;
     phone?: string;
+    phone_country_code?: string;
     dob?: string;
   } | null>(null);
   const [printModalOpen, setPrintModalOpen] = useState(false);
+
+  const handleVerifyInsurance = async () => {
+    if (!selectedPatient?.patient_id) return;
+    setVerifyingInsurance(true);
+    try {
+      const res = await apiFetch<{ verified_by?: string }>(`/api/patients/${encodeURIComponent(selectedPatient.patient_id)}/verify-insurance`, {
+        method: "POST",
+        body: JSON.stringify({ reference: insuranceVerifyRef.trim() || undefined }),
+      });
+      setSelectedPatient((prev) => (prev ? { ...prev, insurance_verified: true, insurance_verified_by: res?.verified_by || null } : prev));
+      setInsuranceVerifyRef("");
+      setNotice({ type: "success", message: "Insurance eligibility recorded as verified." });
+    } catch (err: any) {
+      reportError(setNotice, err, "Could not record insurance verification.");
+    } finally {
+      setVerifyingInsurance(false);
+    }
+  };
 
   // Helper: auto calculate age when DOB is picked
   const handleDobChange = (dobVal: string) => {
@@ -808,6 +830,20 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
       setNotice({ type: "warning", message: "Cart is empty. Add medicines to dispense." });
       return;
     }
+    if (isInsuranceSale) {
+      if (saleMode !== "internal" || !selectedPatient) {
+        setNotice({ type: "warning", message: "Insurance billing needs a registered patient (UHID) with insurance on record." });
+        return;
+      }
+      if (!selectedPatient.insurance_provider || !selectedPatient.insurance_policy_no) {
+        setNotice({ type: "warning", message: "This patient has no insurance on record. Add it on the Patients page (Edit) first." });
+        return;
+      }
+      if (!selectedPatient.insurance_verified) {
+        setNotice({ type: "warning", message: "Verify this patient's insurance before dispensing against it." });
+        return;
+      }
+    }
 
     // Dispensing a loaded e-Rx: partial if any prescribed medicine isn't fully in the cart.
     const rxForDispense = saleMode === "internal" && loadedRx && selectedPatient?.patient_id === loadedRx.patientId ? loadedRx : null;
@@ -828,7 +864,11 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         remarks: remarks.trim() || undefined,
         billing_type: "CASH_OPD",
         stock_source: dispenseStockSource,
-        payment_mode: paymentMode,
+        // Insurance sales are billed as Due to the insurer; stock is deducted when the claim is settled.
+        payment_mode: isInsuranceSale ? "insurance" : paymentMode,
+        ...(isInsuranceSale && selectedPatient
+          ? { insurer_name: selectedPatient.insurance_provider, policy_no: selectedPatient.insurance_policy_no }
+          : {}),
         subtotal: cartTotals.subtotal,
         discount: cartTotals.totalDiscount,
         tax: cartTotals.totalTax,
@@ -867,6 +907,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
               name: customerName.trim(),
               age: customerAge.trim(),
               phone: customerPhone.trim(),
+              phone_country_code: customerCountryCode,
               dob: customerDob.trim(),
             }
           : null
@@ -941,7 +982,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
           { label: isExt ? "Sale Mode" : "UHID / Patient ID", value: customerIdentifier },
           ...(customerContact !== "-" ? [{ label: "Mobile Number", value: customerContact }] : []),
           { label: "Invoice Number", value: invoiceNumber },
-          { label: "Payment Mode", value: paymentMode.toUpperCase() },
+          { label: "Payment Mode", value: isInsuranceSale ? "INSURANCE (DUE)" : paymentMode.toUpperCase() },
           { label: "Date & Time", value: `${invoiceDate} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` },
         ],
         columns: ["Medicine Name", "Batch", "Source", "Qty", "Unit Price", "Discount", "Total"],
@@ -980,7 +1021,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
       `Invoice: ${invoiceNumber}`,
       `Customer / Patient: ${customerFullName}`,
       dispensedPatient?.patient_id ? `UHID: ${dispensedPatient.patient_id}` : "",
-      `Payment Mode: ${paymentMode.toUpperCase()}`,
+      `Payment Mode: ${isInsuranceSale ? "INSURANCE (DUE)" : paymentMode.toUpperCase()}`,
       `Total Amount: ₹${Number(total).toFixed(2)}`,
       dispenseResult.due_amount ? `Due Amount: ₹${Number(dispenseResult.due_amount).toFixed(2)}` : "",
       `----------------------------------------`,
@@ -1990,6 +2031,39 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     Insurance / Scheme Stock
                   </label>
                 </div>
+                {isInsuranceSale && (
+                  <div style={{ marginTop: "0.6rem", padding: "0.6rem 0.75rem", borderRadius: "6px", border: "1px solid #ddd6fe", background: "#f5f3ff", fontSize: "0.8rem", color: "#4c1d95" }}>
+                    {saleMode !== "internal" || !selectedPatient ? (
+                      <>Select a registered patient to bill insurance.</>
+                    ) : !selectedPatient.insurance_provider || !selectedPatient.insurance_policy_no ? (
+                      <>No insurance on record for this patient. Add it on the Patients page (Edit), then reload the patient.</>
+                    ) : (
+                      <>
+                        <div>
+                          <strong>{selectedPatient.insurance_provider}</strong> · Policy {selectedPatient.insurance_policy_no} ·{" "}
+                          {selectedPatient.insurance_verified ? <span style={{ color: "#15803d", fontWeight: 700 }}>Verified</span> : <span style={{ color: "#b45309", fontWeight: 700 }}>Not verified</span>}
+                        </div>
+                        {!selectedPatient.insurance_verified && (
+                          <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
+                            <input
+                              className="ui-input"
+                              value={insuranceVerifyRef}
+                              onChange={(e) => setInsuranceVerifyRef(e.target.value)}
+                              placeholder="Verification ref (TPA call / portal no.)"
+                              style={{ flex: 1, padding: "0.35rem 0.5rem", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "0.8rem" }}
+                            />
+                            <Button type="button" onClick={() => void handleVerifyInsurance()} disabled={verifyingInsurance}>
+                              {verifyingInsurance ? "Verifying..." : "Mark Verified"}
+                            </Button>
+                          </div>
+                        )}
+                        <div style={{ marginTop: "4px", color: "#6d28d9" }}>
+                          Billed to the insurer as <strong>Due</strong>; stock is deducted when the claim is settled.
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Action Button */}

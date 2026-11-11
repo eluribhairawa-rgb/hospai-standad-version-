@@ -732,6 +732,41 @@ def pay_approved_refund(db: Session, refund_id: int, payment_ref: str, user: dic
 # 4. IP DISCHARGE BILLING (Check B)
 # ==============================================================================
 
+def _admission_pharmacy_charges(cursor, admission_id, patient_id, adm_date):
+    """(patient pharmacy charges, insurance-billed pharmacy) for an admission.
+    Insurance-billed issues sit on their own Due pharmacy invoice / claim, so
+    they are never charged to the patient on the discharge bill."""
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(amount) FILTER (WHERE LOWER(COALESCE(payment_mode, '')) <> 'insurance'), 0),
+               COALESCE(SUM(amount) FILTER (WHERE LOWER(COALESCE(payment_mode, '')) = 'insurance'), 0)
+        FROM pharmacy_sales
+        WHERE admission_id = ?
+           OR (patient_id = ? AND billing_type = 'IPD_RUNNING')
+           OR (patient_id = ? AND sold_at >= ? AND admission_id IS NULL)
+        """,
+        (admission_id, patient_id, patient_id, adm_date),
+    )
+    row = cursor.fetchone()
+    pharm_gross = to_decimal(row[0])
+    pharmacy_insurance = quantize_dec(to_decimal(row[1]))
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(pr.quantity * ps.unit_price), 0)
+        FROM pharmacy_returns pr
+        JOIN pharmacy_sales ps ON ps.id = pr.original_sale_id
+        WHERE (ps.admission_id = ?
+               OR (ps.patient_id = ? AND ps.billing_type = 'IPD_RUNNING')
+               OR (ps.patient_id = ? AND ps.sold_at >= ? AND ps.admission_id IS NULL))
+          AND pr.status = 'released'
+          AND LOWER(COALESCE(ps.payment_mode, '')) <> 'insurance'
+        """,
+        (admission_id, patient_id, patient_id, adm_date),
+    )
+    pharm_returns = to_decimal(cursor.fetchone()[0])
+    return quantize_dec(max(D_ZERO, pharm_gross - pharm_returns)), pharmacy_insurance
+
+
 def get_ip_discharge_details(db: Session, admission_id: Any):
     """
     Consolidates admission charges without creating duplicate bills (Check B).
@@ -800,39 +835,20 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
             rate = to_decimal(b.get("amount_per_day") or 1000)
             bed_charges += quantize_dec(Decimal(stay_days) * rate)
 
-        # Pharmacy issues minus accepted returns
+        # Pharmacy issues minus accepted returns (insurance-billed issues kept separate)
         adm_date = adm["admission_date"]
+        pharmacy_net, pharmacy_insurance = _admission_pharmacy_charges(cursor, admission_id, patient_id, adm_date)
+        # Balance of rejected / short-closed pharmacy insurance claims: now the patient's to pay
+        # on the pharmacy invoice itself (shown here so the discharge desk collects it).
         cursor.execute(
             """
-            SELECT COALESCE(SUM(amount) FILTER (WHERE LOWER(COALESCE(payment_mode, '')) <> 'insurance'), 0),
-                   COALESCE(SUM(amount) FILTER (WHERE LOWER(COALESCE(payment_mode, '')) = 'insurance'), 0)
-            FROM pharmacy_sales
-            WHERE admission_id = ?
-               OR (patient_id = ? AND billing_type = 'IPD_RUNNING')
-               OR (patient_id = ? AND sold_at >= ? AND admission_id IS NULL)
+            SELECT COALESCE(SUM(i.due_amount), 0) FROM invoices i
+            WHERE i.id IN (SELECT DISTINCT ps.invoice_id FROM pharmacy_sales ps WHERE ps.admission_id = ? AND ps.invoice_id IS NOT NULL)
+              AND EXISTS (SELECT 1 FROM insurance_claims c WHERE c.invoice_id = i.id AND c.claim_status IN ('rejected', 'closed'))
             """,
-            (admission_id, patient_id, patient_id, adm_date)
+            (admission_id,),
         )
-        pharm_row = cursor.fetchone()
-        # Insurance-billed issues sit on their own Due pharmacy invoice / claim,
-        # so they are not charged to the patient here (no double billing).
-        pharm_gross = to_decimal(pharm_row[0])
-        pharmacy_insurance = quantize_dec(to_decimal(pharm_row[1]))
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(pr.quantity * ps.unit_price), 0)
-            FROM pharmacy_returns pr
-            JOIN pharmacy_sales ps ON ps.id = pr.original_sale_id
-            WHERE (ps.admission_id = ?
-                   OR (ps.patient_id = ? AND ps.billing_type = 'IPD_RUNNING')
-                   OR (ps.patient_id = ? AND ps.sold_at >= ? AND ps.admission_id IS NULL))
-              AND pr.status = 'released'
-              AND LOWER(COALESCE(ps.payment_mode, '')) <> 'insurance'
-            """,
-            (admission_id, patient_id, patient_id, adm_date)
-        )
-        pharm_returns = to_decimal(cursor.fetchone()[0])
-        pharmacy_net = quantize_dec(max(D_ZERO, pharm_gross - pharm_returns))
+        insurance_shortfall_due = quantize_dec(to_decimal(cursor.fetchone()[0]))
 
         # Diagnostics & Imaging
         cursor.execute(
@@ -1026,6 +1042,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
                 "consultations": float(consultation_charges),
                 "pharmacy": float(pharmacy_net),
                 "pharmacy_insurance": float(pharmacy_insurance),
+                "insurance_shortfall_due": float(insurance_shortfall_due),
                 "laboratory": float(lab_charges),
                 "imaging": float(imaging_charges),
                 "procedures": float(procedure_charges),
@@ -1090,23 +1107,8 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
             rate = to_decimal(b.get("amount_per_day") or 1000)
             bed_charges += quantize_dec(Decimal(stay_days) * rate)
 
-        # Pharmacy net
-        cursor.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM pharmacy_sales WHERE admission_id = ? AND LOWER(COALESCE(payment_mode, '')) <> 'insurance'",
-            (admission_id,),
-        )
-        pharm_gross = to_decimal(cursor.fetchone()[0])
-        cursor.execute(
-            """
-            SELECT COALESCE(SUM(pr.quantity * ps.unit_price), 0)
-            FROM pharmacy_returns pr
-            JOIN pharmacy_sales ps ON ps.id = pr.original_sale_id
-            WHERE ps.admission_id = ? AND pr.status = 'released' AND LOWER(COALESCE(ps.payment_mode, '')) <> 'insurance'
-            """,
-            (admission_id,)
-        )
-        pharm_returns = to_decimal(cursor.fetchone()[0])
-        pharmacy_net = quantize_dec(max(D_ZERO, pharm_gross - pharm_returns))
+        # Pharmacy net -- same rule as the discharge preview, so the finalised bill matches it
+        pharmacy_net, _pharmacy_insurance = _admission_pharmacy_charges(cursor, admission_id, adm["patient_id"], adm["admission_date"])
 
         # Diagnostics & Imaging
         cursor.execute(

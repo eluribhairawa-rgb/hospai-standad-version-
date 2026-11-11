@@ -1439,8 +1439,24 @@ def update_patient(db, patient_id, data, hospital_id=None):
                 scoped_hospital_id,
             ),
         )
+        updated = cursor.rowcount > 0
+
+        # Insurance is only touched when the caller sends it. A changed provider or
+        # policy needs a fresh eligibility check, so verification is reset.
+        if updated and ("insurance_provider" in data or "insurance_policy_no" in data):
+            new_provider = (str(data.get("insurance_provider") or "").strip() or None) if "insurance_provider" in data else current.get("insurance_provider")
+            new_policy = (str(data.get("insurance_policy_no") or "").strip() or None) if "insurance_policy_no" in data else current.get("insurance_policy_no")
+            if (new_provider, new_policy) != (current.get("insurance_provider"), current.get("insurance_policy_no")):
+                cursor.execute(
+                    """
+                    UPDATE patients SET insurance_provider = ?, insurance_policy_no = ?,
+                           insurance_verified = FALSE, insurance_verified_by = NULL, insurance_verified_at = NULL, insurance_verification_ref = NULL
+                    WHERE patient_id = ? AND hospital_id = ?
+                    """,
+                    (new_provider, new_policy, patient_id, scoped_hospital_id),
+                )
         conn.commit()
-        return cursor.rowcount > 0
+        return updated
 
 
 
@@ -1534,8 +1550,12 @@ def set_admission_payer(cursor, admission_id, payer, patient_id=None):
     )
     if patient_id and payer["payer_type"] == "insurance":
         cursor.execute(
-            "UPDATE patients SET insurance_provider = ?, insurance_policy_no = ? WHERE patient_id = ?",
-            (payer["insurance_provider"], payer["insurance_policy_no"], patient_id),
+            """
+            UPDATE patients SET insurance_provider = ?, insurance_policy_no = ?,
+                   insurance_verified = FALSE, insurance_verified_by = NULL, insurance_verified_at = NULL, insurance_verification_ref = NULL
+            WHERE patient_id = ? AND (insurance_provider IS DISTINCT FROM ? OR insurance_policy_no IS DISTINCT FROM ?)
+            """,
+            (payer["insurance_provider"], payer["insurance_policy_no"], patient_id, payer["insurance_provider"], payer["insurance_policy_no"]),
         )
 
 
@@ -4828,6 +4848,86 @@ def get_insurance_claim(db, claim_id):
         cursor.execute("SELECT * FROM insurance_claims WHERE id = ?", (claim_id,))
         return cursor.fetchone()
 
+
+
+def list_pharmacy_insurance_claims(db, status=None):
+    """Pharmacy insurance claims with their invoice position and whether the
+    stock for the issued medicines has been deducted yet."""
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        where = ["i.module = 'PHARMACY'"]
+        params = []
+        if status == "open":
+            where.append("c.claim_status NOT IN ('rejected', 'closed', 'settled') AND COALESCE(c.settlement_status, 'unpaid') <> 'paid'")
+        elif status == "closed":
+            where.append("(c.claim_status IN ('rejected', 'closed', 'settled') OR c.settlement_status = 'paid')")
+        cursor.execute(
+            f"""
+            SELECT c.id, c.invoice_id, c.patient_id, c.insurer_name, c.claim_amount, c.approved_amount, c.claim_status,
+                   c.settlement_status, c.patient_responsibility, c.membership_ref, c.authorization_ref, c.notes, c.submitted_at,
+                   i.invoice_no, i.total_amount, i.paid_amount, i.due_amount, i.payment_status,
+                   TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) AS patient_name,
+                   (SELECT MAX(ps.admission_id) FROM pharmacy_sales ps WHERE ps.invoice_id = c.invoice_id) AS admission_id,
+                   (SELECT COUNT(*) FROM pharmacy_sales ps WHERE ps.invoice_id = c.invoice_id AND COALESCE(ps.quantity, 0) > 0
+                      AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales'
+                                      AND sm.ref_id = ps.id AND sm.movement_type = 'dispense')) AS lines_awaiting_stock
+            FROM insurance_claims c
+            JOIN invoices i ON i.id = c.invoice_id
+            LEFT JOIN patients p ON p.patient_id = c.patient_id
+            WHERE {' AND '.join(where)}
+            ORDER BY c.submitted_at DESC, c.id DESC
+            LIMIT 500
+            """,
+            tuple(params),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        for r in rows:
+            r["stock_deducted"] = int(r.pop("lines_awaiting_stock") or 0) == 0
+        return rows
+
+
+def close_pharmacy_insurance_claim(db, claim_id, outcome, reason, username):
+    """Final decision on a pharmacy insurance claim that will not be (fully) paid.
+
+    outcome 'rejected': the insurer pays nothing more.
+    outcome 'closed':   final settlement -- whatever the insurer has paid so far is all it pays.
+
+    Either way the claim is finished, so the medicines' stock is deducted now
+    and the unpaid balance becomes the patient's responsibility on the same
+    pharmacy invoice (collected via the normal invoice payment)."""
+    if outcome not in ("rejected", "closed"):
+        raise ValueError("Outcome must be 'rejected' or 'closed'.")
+    if not str(reason or "").strip():
+        raise ValueError("A reason is required to reject or close a claim.")
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM insurance_claims WHERE id = ? FOR UPDATE", (claim_id,))
+        claim = cursor.fetchone()
+        if not claim:
+            raise LookupError("Insurance case not found")
+        if claim["claim_status"] in ("rejected", "closed", "settled") or claim["settlement_status"] == "paid":
+            raise ValueError("This claim is already finished.")
+        cursor.execute("SELECT total_amount, paid_amount FROM invoices WHERE id = ?", (claim["invoice_id"],))
+        inv = cursor.fetchone()
+        outstanding = round(max(0.0, float(inv["total_amount"] or 0) - float(inv["paid_amount"] or 0)), 2) if inv else 0.0
+        note = f"{outcome.title()} by {username or 'system'}: {str(reason).strip()}"
+        cursor.execute(
+            """
+            UPDATE insurance_claims
+            SET claim_status = ?, settlement_status = CASE WHEN COALESCE(settlement_status, 'unpaid') = 'part_paid' THEN 'adjusted' ELSE settlement_status END,
+                patient_responsibility = ?, notes = COALESCE(notes || ' | ', '') || ?
+            WHERE id = ?
+            """,
+            (outcome, outstanding, note, claim_id),
+        )
+        cursor.execute(
+            "UPDATE invoices SET payment_status = CASE WHEN ? > 0 THEN (CASE WHEN COALESCE(paid_amount, 0) > 0 THEN 'partial' ELSE 'due' END) ELSE 'paid' END, "
+            "notes = COALESCE(notes || ' | ', '') || ? WHERE id = ?",
+            (outstanding, f"Insurance {outcome}: Rs {outstanding:.2f} payable by patient", claim["invoice_id"]),
+        )
+        deduct_deferred_insurance_stock(cursor, claim["invoice_id"], username)
+        conn.commit()
+        return {"claim_id": claim_id, "claim_status": outcome, "patient_payable": outstanding}
 
 
 def list_insurance_claims(db, invoice_id=None, status=None):
@@ -13700,11 +13800,23 @@ def get_admission_clinical_history(db, identifier, hospital_id=None):
             JOIN diag_orders o ON o.id = oi.order_id
             WHERE o.admission_id = ? AND oi.discharge_invoice_id IS NOT NULL
             UNION
-            SELECT DISTINCT invoice_id AS iid FROM pharmacy_sales WHERE admission_id = ? AND invoice_id IS NOT NULL
+            SELECT DISTINCT ps.invoice_id AS iid FROM pharmacy_sales ps WHERE ps.admission_id = ? AND ps.invoice_id IS NOT NULL
+              -- an insurance invoice is the insurer's to pay until its claim is rejected/closed
+              AND NOT EXISTS (SELECT 1 FROM insurance_claims c WHERE c.invoice_id = ps.invoice_id
+                              AND c.claim_status NOT IN ('rejected', 'closed'))
             """,
             (adm_id, adm_id),
         )
         billing_invoice_ids = {r["iid"] for r in cursor.fetchall() if r["iid"]}
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(i.due_amount), 0) AS d FROM invoices i
+            WHERE i.id IN (SELECT DISTINCT ps.invoice_id FROM pharmacy_sales ps WHERE ps.admission_id = ? AND ps.invoice_id IS NOT NULL)
+              AND EXISTS (SELECT 1 FROM insurance_claims c WHERE c.invoice_id = i.id AND c.claim_status NOT IN ('rejected', 'closed'))
+            """,
+            (adm_id,),
+        )
+        insurance_due = float(cursor.fetchone()["d"] or 0)
         cursor.execute(
             "SELECT id FROM invoices WHERE LOWER(patient_id) = LOWER(?) AND module = 'IP' AND invoice_type = 'DISCHARGE'",
             (patient_id,),
@@ -13726,6 +13838,7 @@ def get_admission_clinical_history(db, identifier, hospital_id=None):
         return {
             "admission_id": f"ADM-{adm_id}",
             "raw_admission_id": adm_id,
+            "insurance_due": insurance_due,
             "patient_id": patient_id,
             "patient_name": patient_name,
             "patient_age": patient_age,

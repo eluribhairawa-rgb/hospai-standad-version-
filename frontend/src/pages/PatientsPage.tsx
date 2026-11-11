@@ -623,6 +623,8 @@ type PatientEditForm = {
   phone: string;
   phone_country_code: string;
   address: string;
+  insurance_provider: string;
+  insurance_policy_no: string;
 };
 
 const toEditForm = (patient: Patient): PatientEditForm => {
@@ -644,6 +646,8 @@ const toEditForm = (patient: Patient): PatientEditForm => {
     phone: patient.phone || "",
     phone_country_code: patient.phone_country_code || "+91",
     address: patient.address || "",
+    insurance_provider: patient.insurance_provider || "",
+    insurance_policy_no: patient.insurance_policy_no || "",
   };
 };
 
@@ -731,6 +735,13 @@ function PatientDetail({
     body: "",
   });
   const [editForm, setEditForm] = useState<PatientEditForm | null>(null);
+  const [insuranceProviderNames, setInsuranceProviderNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!editForm || insuranceProviderNames.length) return;
+    apiFetch<{ providers?: { name: string }[] }>("/api/insurance-providers")
+      .then((res) => setInsuranceProviderNames((res.providers || []).map((p) => p.name)))
+      .catch(() => {});
+  }, [editForm, insuranceProviderNames.length]);
   const [uploadDocType, setUploadDocType] = useState("document");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -850,6 +861,10 @@ function PatientDetail({
       setNotice({ type: "warning", message: "First name and last name are required." });
       return;
     }
+    if (editForm.insurance_provider.trim() && !editForm.insurance_policy_no.trim()) {
+      setNotice({ type: "warning", message: "Enter the insurance policy number, or set the provider to No insurance." });
+      return;
+    }
 
     const phoneError = validateMobileByCountry(editForm.phone, editForm.phone_country_code, true);
     if (phoneError) {
@@ -884,6 +899,8 @@ function PatientDetail({
       phone: editForm.phone.trim(),
       phone_country_code: editForm.phone_country_code,
       address: editForm.address.trim(),
+      insurance_provider: editForm.insurance_provider.trim(),
+      insurance_policy_no: editForm.insurance_provider.trim() ? editForm.insurance_policy_no.trim() : "",
     };
 
     setSaving(true);
@@ -1490,6 +1507,26 @@ function PatientDetail({
                 value={editForm.address}
                 placeholder="Enter complete address"
                 onChange={(event) => setEditForm({ ...editForm, address: event.target.value })}
+              />
+              <p className="muted">Insurance Provider</p>
+              <Select
+                value={editForm.insurance_provider}
+                onChange={(event) => setEditForm({ ...editForm, insurance_provider: event.target.value })}
+              >
+                <option value="">No insurance</option>
+                {(editForm.insurance_provider && !insuranceProviderNames.includes(editForm.insurance_provider)
+                  ? [editForm.insurance_provider, ...insuranceProviderNames]
+                  : insuranceProviderNames
+                ).map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </Select>
+              <p className="muted">Insurance Policy Number</p>
+              <Input
+                value={editForm.insurance_policy_no}
+                placeholder={editForm.insurance_provider ? "Policy / member ID" : "Select a provider first"}
+                disabled={!editForm.insurance_provider}
+                onChange={(event) => setEditForm({ ...editForm, insurance_policy_no: event.target.value })}
               />
               <p className="muted">Gender</p>
               <Select
