@@ -1502,7 +1502,44 @@ def ensure_not_currently_admitted(cursor, patient_id):
         )
 
 
-def add_admission(db, patient_id, notes="", hospital_id=None):
+def normalize_admission_payer(payload):
+    """Validate the payer fields of an admission. Returns a dict with
+    payer_type ('self' | 'insurance') and the insurance fields (None for self-pay)."""
+    payload = payload or {}
+    payer_type = str(payload.get("payer_type") or "self").strip().lower()
+    if payer_type in ("self-pay", "self_pay", "cash"):
+        payer_type = "self"
+    if payer_type not in ("self", "insurance"):
+        raise ValueError("Payer must be 'self' or 'insurance'.")
+    if payer_type == "self":
+        return {"payer_type": "self", "insurance_provider": None, "insurance_policy_no": None, "insurance_preauth_no": None}
+    provider = str(payload.get("insurance_provider") or "").strip()
+    policy_no = str(payload.get("insurance_policy_no") or "").strip()
+    if not provider or not policy_no:
+        raise ValueError("Insurance provider and policy number are required when the payer is insurance.")
+    return {
+        "payer_type": "insurance",
+        "insurance_provider": provider,
+        "insurance_policy_no": policy_no,
+        "insurance_preauth_no": str(payload.get("insurance_preauth_no") or "").strip() or None,
+    }
+
+
+def set_admission_payer(cursor, admission_id, payer, patient_id=None):
+    """Store the payer on the admission; for insurance also keep the patient's
+    current insurance on record (used by insurance verification)."""
+    cursor.execute(
+        "UPDATE admissions SET payer_type = ?, insurance_provider = ?, insurance_policy_no = ?, insurance_preauth_no = ? WHERE id = ?",
+        (payer["payer_type"], payer["insurance_provider"], payer["insurance_policy_no"], payer["insurance_preauth_no"], admission_id),
+    )
+    if patient_id and payer["payer_type"] == "insurance":
+        cursor.execute(
+            "UPDATE patients SET insurance_provider = ?, insurance_policy_no = ? WHERE patient_id = ?",
+            (payer["insurance_provider"], payer["insurance_policy_no"], patient_id),
+        )
+
+
+def add_admission(db, patient_id, notes="", hospital_id=None, payer=None):
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     with get_connection(db) as conn:
         cursor = conn.cursor()
@@ -1520,6 +1557,8 @@ def add_admission(db, patient_id, notes="", hospital_id=None):
             (scoped_hospital_id, patient_id, notes),
         )
         admission_id = cursor.fetchone()[0]
+        if payer:
+            set_admission_payer(cursor, admission_id, payer, patient_id)
         conn.commit()
         return admission_id
 
@@ -6412,7 +6451,7 @@ def _pending_insurance_qty(cursor, medicine_name):
         """
         SELECT COALESCE(SUM(ps.quantity), 0) AS qty FROM pharmacy_sales ps
         WHERE ps.medicine_name = ? AND LOWER(COALESCE(ps.payment_mode, '')) = 'insurance'
-          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id)
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id AND sm.movement_type = 'dispense')
         """,
         (medicine_name,),
     )
@@ -6427,7 +6466,8 @@ def deduct_deferred_insurance_stock(cursor, invoice_id, username):
         """
         SELECT ps.id, ps.medicine_name, ps.quantity, ps.stock_source FROM pharmacy_sales ps
         WHERE ps.invoice_id = ? AND LOWER(COALESCE(ps.payment_mode, '')) = 'insurance'
-          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id)
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id AND sm.movement_type = 'dispense')
+          AND COALESCE(ps.quantity, 0) > 0
         ORDER BY ps.id
         """,
         (invoice_id,),
@@ -6513,12 +6553,6 @@ def create_pharmacy_dispense(db, data, username):
     with get_connection(db) as conn:
         cursor = conn.cursor()
 
-        if stock_source == "INSURANCE" and patient_id:
-            cursor.execute("SELECT insurance_verified FROM patients WHERE patient_id = ?", (patient_id,))
-            prow = cursor.fetchone()
-            if not prow or not prow["insurance_verified"]:
-                raise ValueError("This patient's insurance has not been verified yet. Verify eligibility before dispensing against insurance.")
-
         if idempotency_key:
             cursor.execute(
                 "SELECT payload_hash, result_json FROM pharmacy_dispense_transactions WHERE idempotency_key = ?",
@@ -6538,6 +6572,33 @@ def create_pharmacy_dispense(db, data, username):
             adm_row = cursor.fetchone()
             if adm_row:
                 admission_id = adm_row["id"]
+
+        # Inpatient insurance: the payer recorded on the admission (provider,
+        # policy, pre-auth) is what the pharmacy bills and claims against.
+        admission_payer = None
+        if admission_id:
+            cursor.execute(
+                "SELECT payer_type, insurance_provider, insurance_policy_no, insurance_preauth_no FROM admissions WHERE id = ?",
+                (admission_id,),
+            )
+            admission_payer = cursor.fetchone()
+        insured_admission = bool(
+            admission_payer and admission_payer["payer_type"] == "insurance"
+            and admission_payer["insurance_provider"] and admission_payer["insurance_policy_no"]
+        )
+        if defer_stock and admission_id:
+            if not insured_admission:
+                raise ValueError(
+                    "This admission is marked Self-pay. Set the payer to Insurance (with provider and policy number) "
+                    "at IP Admission or IP Discharge Billing before dispensing against insurance."
+                )
+            stock_source = "INSURANCE"
+
+        if stock_source == "INSURANCE" and patient_id and not insured_admission:
+            cursor.execute("SELECT insurance_verified FROM patients WHERE patient_id = ?", (patient_id,))
+            prow = cursor.fetchone()
+            if not prow or not prow["insurance_verified"]:
+                raise ValueError("This patient's insurance has not been verified yet. Verify eligibility before dispensing against insurance.")
 
         sale_ids = []
         total_amount = 0.0
@@ -6689,9 +6750,11 @@ def create_pharmacy_dispense(db, data, username):
             )
             if is_insurance:
                 patient_responsibility = float(data.get("patient_responsibility") or 0)
-                insurer_name = str(data.get("insurer_name") or "Insurance / TPA").strip()
-                membership_ref = str(data.get("membership_ref") or data.get("policy_no") or "").strip()
-                authorization_ref = str(data.get("authorization_ref") or data.get("pre_auth_no") or data.get("preauth_no") or "").strip()
+                adm_ins = admission_payer if insured_admission else {}
+                insurer_name = str(data.get("insurer_name") or (adm_ins or {}).get("insurance_provider") or "Insurance / TPA").strip()
+                membership_ref = str(data.get("membership_ref") or data.get("policy_no") or (adm_ins or {}).get("insurance_policy_no") or "").strip()
+                authorization_ref = str(data.get("authorization_ref") or data.get("pre_auth_no") or data.get("preauth_no") or (adm_ins or {}).get("insurance_preauth_no") or "").strip()
+                claim_label = f"IP Pharmacy Claim - Admission #{admission_id}" if admission_id else "OP Pharmacy Claim"
                 dispense_paid_amount = 0.0
                 dispense_due_amount = total_amount
                 dispense_payment_status = "due"
@@ -6718,7 +6781,7 @@ def create_pharmacy_dispense(db, data, username):
                     """,
                     (
                         invoice_id, patient_id, insurer_name, total_amount,
-                        authorization_ref, data.get("notes") or f"OP Pharmacy Claim - Policy: {membership_ref or '-'}",
+                        authorization_ref, data.get("notes") or f"{claim_label} - Policy: {membership_ref or '-'}",
                         patient_responsibility, membership_ref, authorization_ref, sale_ids[0],
                     ),
                 )
@@ -6943,6 +7006,33 @@ def classify_legacy_batch(db, batch_id, stock_source, username):
 
 
 
+def _reduce_undeducted_insurance_sale(cursor, sale, quantity):
+    unit_price = float(sale["unit_price"] or 0)
+    if unit_price <= 0 and int(sale["quantity"] or 0) > 0:
+        unit_price = float(sale["amount"] or 0) / float(sale["quantity"])
+    reduce_amount = round(unit_price * quantity, 2)
+    new_qty = int(sale["quantity"]) - quantity
+    cursor.execute(
+        "UPDATE pharmacy_sales SET quantity = ?, amount = ? WHERE id = ?",
+        (new_qty, round(max(0.0, float(sale["amount"] or 0) - reduce_amount), 2), sale["id"]),
+    )
+    if sale.get("invoice_id") and reduce_amount > 0:
+        cursor.execute(
+            """
+            UPDATE invoices
+            SET subtotal = GREATEST(0, COALESCE(subtotal, 0) - ?), total_amount = GREATEST(0, COALESCE(total_amount, 0) - ?),
+                due_amount = GREATEST(0, COALESCE(due_amount, 0) - ?),
+                payment_status = CASE WHEN GREATEST(0, COALESCE(total_amount, 0) - ?) <= COALESCE(paid_amount, 0) THEN 'paid' ELSE payment_status END
+            WHERE id = ?
+            """,
+            (reduce_amount, reduce_amount, reduce_amount, reduce_amount, sale["invoice_id"]),
+        )
+        cursor.execute(
+            "UPDATE insurance_claims SET claim_amount = GREATEST(0, COALESCE(claim_amount, 0) - ?) WHERE invoice_id = ?",
+            (reduce_amount, sale["invoice_id"]),
+        )
+
+
 def create_pharmacy_return(db, data, username):
     """A return always lands back in the SAME source's quarantine, capped at
     issued-minus-already-returned. It never directly increases saleable
@@ -6981,6 +7071,19 @@ def create_pharmacy_return(db, data, username):
         remaining_returnable = int(sale["quantity"]) - int(already_returned)
         if quantity > remaining_returnable:
             raise ValueError(f"Cannot return more than {remaining_returnable} unit(s) for this issue.")
+
+        if str(sale.get("payment_mode") or "").lower() == "insurance":
+            cursor.execute(
+                "SELECT 1 FROM stock_movements WHERE ref_table = 'pharmacy_sales' AND ref_id = ? AND movement_type = 'dispense' LIMIT 1",
+                (original_sale_id,),
+            )
+            if not cursor.fetchone():
+                # Insurance sale whose stock was never deducted (claim not settled yet):
+                # the units are still counted in inventory, so the return only reduces
+                # the bill and the claim -- it must not add stock a second time.
+                _reduce_undeducted_insurance_sale(cursor, sale, quantity)
+                conn.commit()
+                return None
 
         # Find (or, if the original batch was fully consumed since, create) a
         # batch row for this medicine/source/batch to hold the quarantine.
@@ -8175,9 +8278,11 @@ def list_ward_indents(db, status=None, ward=None, patient_id=None, admission_id=
     with get_connection(db) as conn:
         cursor = conn.cursor()
         query = """
-            SELECT wi.*, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) AS patient_name
+            SELECT wi.*, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) AS patient_name,
+                   COALESCE(a.payer_type, 'self') AS payer_type, a.insurance_provider, a.insurance_policy_no, a.insurance_preauth_no
             FROM ward_indents wi
             LEFT JOIN patients p ON p.patient_id = wi.patient_id
+            LEFT JOIN admissions a ON a.id = wi.admission_id
             WHERE 1=1
         """
         params = []

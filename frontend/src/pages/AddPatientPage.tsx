@@ -536,6 +536,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         allergies: noAllergies ? "" : allergies.trim(),
         no_known_allergies: noAllergies,
         symptoms: (visitType === "OP" || visitType === "IP") ? (symptoms.trim() || undefined) : undefined,
+        insurance_provider: insuranceProvider.trim() || undefined,
+        insurance_policy_no: policyNumber.trim() || undefined,
       };
 
       if (onCreate) {

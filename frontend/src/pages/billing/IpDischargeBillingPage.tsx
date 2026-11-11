@@ -7,6 +7,8 @@ import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
 import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import "./billingTheme.css";
+import AdmissionPayerFields, { EMPTY_PAYER, payerError, payerLabel } from "../../components/AdmissionPayerFields";
+import type { AdmissionPayer } from "../../components/AdmissionPayerFields";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -67,6 +69,9 @@ export default function IpDischargeBillingPage({
 
   // Settlement Finalisation modal state
   const [finaliseModalOpen, setFinaliseModalOpen] = useState(false);
+  const [payerModalOpen, setPayerModalOpen] = useState(false);
+  const [payerDraft, setPayerDraft] = useState<AdmissionPayer>(EMPTY_PAYER);
+  const [savingPayer, setSavingPayer] = useState(false);
   const [discountAmount, setDiscountAmount] = useState<string>("500");
   const [paymentMode, setPaymentMode] = useState<string>("UPI");
   const [paymentAmount, setPaymentAmount] = useState<string>("");
@@ -457,6 +462,42 @@ export default function IpDischargeBillingPage({
   const payments = dischargeData?.payments || [];
   const advances = dischargeData?.advances || [];
 
+  const isInsurancePayer = admission?.payer_type === "insurance";
+  const isDischarged = Boolean(admission?.discharge_date);
+
+  const openPayerModal = () => {
+    setPayerDraft({
+      payer_type: isInsurancePayer ? "insurance" : "self",
+      insurance_provider: admission?.insurance_provider || (isInsurancePayer ? "" : patient?.insurance_provider || ""),
+      insurance_policy_no: admission?.insurance_policy_no || (isInsurancePayer ? "" : patient?.insurance_policy_no || ""),
+      insurance_preauth_no: admission?.insurance_preauth_no || "",
+    });
+    setPayerModalOpen(true);
+  };
+
+  const savePayer = async () => {
+    if (!admission?.id) return;
+    const problem = payerError(payerDraft);
+    if (problem) {
+      setNotice({ type: "warning", message: problem });
+      return;
+    }
+    setSavingPayer(true);
+    try {
+      await apiFetch(`/api/admissions/${admission.id}/payer`, {
+        method: "PUT",
+        body: JSON.stringify(payerDraft),
+      });
+      setNotice({ type: "success", message: `Payer for admission #${admission.id} set to ${payerLabel(payerDraft)}.` });
+      setPayerModalOpen(false);
+      await fetchDischarge(String(admission.id));
+    } catch (err: any) {
+      reportError(setNotice, err, "Could not update the payer.");
+    } finally {
+      setSavingPayer(false);
+    }
+  };
+
   const jumpToItemised = (category: "beds" | "pharmacy" | "laboratory" | "imaging" | "consultations") => {
     setActiveTab("itemised");
     setItemisedFilter(category);
@@ -843,6 +884,11 @@ export default function IpDischargeBillingPage({
                       </td>
                       <td style={{ color: "#64748b" }}>
                         {itemised.pharmacy?.length ? `${itemised.pharmacy.length} dispensed item(s)` : "Issued medicines"}
+                        {Number(charges.pharmacy_insurance || 0) > 0 && (
+                          <div style={{ fontSize: "0.75rem", color: "#6d28d9", marginTop: "2px" }}>
+                            + ₹{fmt(charges.pharmacy_insurance)} billed to insurance (Due on pharmacy claim, not charged to patient)
+                          </div>
+                        )}
                       </td>
                       <td style={{ fontWeight: 600 }}>₹{fmt(charges.pharmacy)}</td>
                       <td style={{ textAlign: "right" }}>
@@ -1427,19 +1473,37 @@ export default function IpDischargeBillingPage({
                   </svg>
                   Patient payer
                 </div>
-                <span
-                  style={{
-                    background: "#e0f2fe",
-                    color: "#0284c7",
-                    borderRadius: "9999px",
-                    padding: "2px 10px",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                  }}
-                >
-                  Self-pay
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span
+                    title={isInsurancePayer ? `Policy ${admission?.insurance_policy_no || "-"}${admission?.insurance_preauth_no ? ` · Pre-auth ${admission.insurance_preauth_no}` : ""}` : undefined}
+                    style={{
+                      background: isInsurancePayer ? "#ede9fe" : "#e0f2fe",
+                      color: isInsurancePayer ? "#6d28d9" : "#0284c7",
+                      borderRadius: "9999px",
+                      padding: "2px 10px",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {payerLabel(admission)}
+                  </span>
+                  {admission?.id && !isDischarged && (
+                    <button
+                      type="button"
+                      onClick={openPayerModal}
+                      style={{ background: "none", border: "none", color: "#00828a", fontWeight: 700, fontSize: "0.78rem", cursor: "pointer", padding: 0 }}
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
               </div>
+              {isInsurancePayer && (
+                <div style={{ marginTop: "-10px", marginBottom: "16px", fontSize: "0.78rem", color: "#64748b", textAlign: "right" }}>
+                  Policy {admission?.insurance_policy_no || "-"}
+                  {admission?.insurance_preauth_no ? ` · Pre-auth ${admission.insurance_preauth_no}` : ""}
+                </div>
+              )}
 
               {/* Action Buttons */}
               <button
@@ -1530,6 +1594,18 @@ export default function IpDischargeBillingPage({
       </div>
 
       {/* Modal: Review & Finalise Bill */}
+      {payerModalOpen && (
+        <Modal open={payerModalOpen} title="Payer for this Admission" onClose={() => setPayerModalOpen(false)}>
+          <div style={{ padding: "0.5rem 0" }}>
+            <AdmissionPayerFields value={payerDraft} onChange={setPayerDraft} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "18px" }}>
+              <Button variant="secondary" onClick={() => setPayerModalOpen(false)} disabled={savingPayer}>Cancel</Button>
+              <Button onClick={() => void savePayer()} disabled={savingPayer}>{savingPayer ? "Saving..." : "Save Payer"}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {finaliseModalOpen && (
         <Modal
           open={finaliseModalOpen}

@@ -8,6 +8,8 @@ import { Button, Input, Label, Modal } from "../components/ui";
 import PatientSearchPicker from "../components/PatientSearchPicker";
 import type { HospitalBed } from "./BedManagementPage";
 import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
+import AdmissionPayerFields, { EMPTY_PAYER, payerError, payerLabel } from "../components/AdmissionPayerFields";
+import type { AdmissionPayer } from "../components/AdmissionPayerFields";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -46,6 +48,8 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   const [reasonForAdmission, setReasonForAdmission] = useState("");
   const [expectedStay, setExpectedStay] = useState("3");
   const [notes, setNotes] = useState("");
+  // Who pays for this stay -- prefilled from the patient's insurance on record.
+  const [payer, setPayer] = useState<AdmissionPayer>(EMPTY_PAYER);
 
   // Bed Allocation
   const [wardFilter, setWardFilter] = useState("All Wards");
@@ -136,6 +140,20 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     setSelectedPatient(pat);
     setAdmittedRecord(null);
     setDoctorOrder(null);
+    setPayer(EMPTY_PAYER);
+    apiFetch<any>(`/api/patients/${encodeURIComponent(pat.uhid)}`)
+      .then((res) => {
+        const p = res?.patient || res;
+        if (p?.insurance_provider) {
+          setPayer({
+            payer_type: "insurance",
+            insurance_provider: p.insurance_provider || "",
+            insurance_policy_no: p.insurance_policy_no || "",
+            insurance_preauth_no: "",
+          });
+        }
+      })
+      .catch(() => {});
     setLoadingOrder(true);
     try {
       const res = await apiFetch<{ appointments?: any[] }>(
@@ -175,6 +193,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     setReasonForAdmission("");
     setExpectedStay("3");
     setNotes("");
+    setPayer(EMPTY_PAYER);
     setSelectedBedNo("");
   };
 
@@ -205,6 +224,11 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
       setNotice({ type: "warning", message: "Please enter the clinical reason for inpatient admission." });
       return;
     }
+    const payerProblem = payerError(payer);
+    if (payerProblem) {
+      setNotice({ type: "warning", message: payerProblem });
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -221,7 +245,13 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
 
       const admRes = await apiFetch<{ admission_id?: number }>(`/api/patients/${encodeURIComponent(selectedPatient.uhid)}/admissions`, {
         method: "POST",
-        body: JSON.stringify({ notes: noteLines.join(" | ") }),
+        body: JSON.stringify({
+          notes: noteLines.join(" | "),
+          payer_type: payer.payer_type,
+          insurance_provider: payer.insurance_provider.trim() || undefined,
+          insurance_policy_no: payer.insurance_policy_no.trim() || undefined,
+          insurance_preauth_no: payer.insurance_preauth_no.trim() || undefined,
+        }),
       });
 
       if (chosenBed) {
@@ -255,6 +285,9 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
         roomNo: chosenBed ? chosenBed.room_no : "-",
         triagePriority,
         reason: reasonForAdmission,
+        payer: payerLabel(payer),
+        policyNo: payer.payer_type === "insurance" ? payer.insurance_policy_no : "",
+        preauthNo: payer.payer_type === "insurance" ? payer.insurance_preauth_no : "",
       };
 
       setAdmittedRecord(confirmedRecord);
@@ -311,6 +344,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
             <div><strong>Room / Bed No:</strong> ${rec.roomNo || "-"} / <span style="font-size: 15px; font-weight: 800; color: #2563eb;">${rec.bedNo}</span></div>
             <div><strong>Acuity:</strong> ${rec.triagePriority || "Stable"}</div>
             <div><strong>Reason:</strong> ${rec.reason || "-"}</div>
+            <div><strong>Payer:</strong> ${rec.payer || "Self-pay"}${rec.policyNo ? ` (Policy ${rec.policyNo})` : ""}${rec.preauthNo ? ` · Pre-auth ${rec.preauthNo}` : ""}</div>
           </div>
         </div>
         <div style="text-align: center; margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 11px; color: #64748b;">
@@ -342,6 +376,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
       `Ward / Bed: ${rec.ward} · Bed ${rec.bedNo}`,
       rec.roomNo && rec.roomNo !== "-" ? `Room No: ${rec.roomNo}` : "",
       rec.triagePriority ? `Triage / Acuity: ${rec.triagePriority}` : "",
+      `Payer: ${rec.payer || "Self-pay"}${rec.policyNo ? ` (Policy ${rec.policyNo})` : ""}`,
       `----------------------------------------`,
       `Please report to the assigned ward nursing station with this confirmation slip.`,
       `HospAI 24x7 Inpatient Care Team`,
@@ -600,6 +635,15 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
           />
         </div>
 
+        {/* PAYER: Self-pay or Insurance */}
+        <div style={{ borderTop: "1.5px solid #e2e8f0", paddingTop: "20px", marginBottom: "22px" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#0f172a", margin: "0 0 2px" }}>Payer for this Admission</h3>
+          <p style={{ fontSize: "12px", color: "#64748b", margin: "0 0 12px" }}>
+            Choose who pays for this stay. Insurance on the patient's record is filled in automatically; it can be changed later at IP Discharge Billing.
+          </p>
+          <AdmissionPayerFields value={payer} onChange={setPayer} />
+        </div>
+
         {/* SECTION 6: HOSPITAL BED ALLOCATION */}
         <div style={{ borderTop: "1.5px solid #e2e8f0", paddingTop: "20px", marginTop: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "10px" }}>
@@ -815,6 +859,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
                 <div>Ward / Bed: <strong>{admittedRecord.ward} · {admittedRecord.bedNo}</strong></div>
                 <div>Department: <strong>{admittedRecord.department}</strong></div>
                 <div>Doctor: <strong>{admittedRecord.doctor}</strong></div>
+                <div>Payer: <strong>{admittedRecord.payer || "Self-pay"}{admittedRecord.policyNo ? ` (Policy ${admittedRecord.policyNo})` : ""}</strong></div>
               </div>
             </div>
 

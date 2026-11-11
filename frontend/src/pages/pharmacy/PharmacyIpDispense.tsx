@@ -23,6 +23,9 @@ type Inpatient = {
   admitted_at?: string;
   status: string;
   running_pharmacy_total?: number;
+  payer_type?: "self" | "insurance";
+  insurance_provider?: string | null;
+  insurance_policy_no?: string | null;
 };
 
 type WardIndentItem = {
@@ -51,6 +54,9 @@ type WardIndent = {
   bed_no: string;
   doctor_name?: string;
   prescription_id?: number | null;
+  payer_type?: "self" | "insurance";
+  insurance_provider?: string | null;
+  insurance_policy_no?: string | null;
   priority: "normal" | "urgent" | "stat";
   status: "pending" | "approved" | "processing" | "dispensed" | "cancelled" | "partially_issued";
   created_at: string;
@@ -226,6 +232,9 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
             doctor_name: a.doctor_name || "-",
             admitted_at: a.allocated_at || a.admission_date,
             status: "admitted",
+            payer_type: a.payer_type === "insurance" ? "insurance" : "self",
+            insurance_provider: a.insurance_provider,
+            insurance_policy_no: a.insurance_policy_no,
           });
         });
       }
@@ -471,6 +480,11 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
   // -------------------------------------------------------------
   // TAB 1 Actions: Direct IP Dispense
   // -------------------------------------------------------------
+  const isInsuredAdmission = selectedPatient?.payer_type === "insurance";
+  useEffect(() => {
+    setDirectStockSource(isInsuredAdmission ? "INSURANCE" : "CASH");
+  }, [selectedPatient?.admission_id, isInsuredAdmission]);
+
   const handleSelectPatient = (patient: Inpatient) => {
     setSelectedPatient(patient);
     setPatientSearchQuery("");
@@ -622,7 +636,9 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
 
       setNotice({
         type: "success",
-        message: `Successfully dispensed ${ipCart.length} medicine(s) to ${selectedPatient.patient_name}. Running charge added to IP Admission Account!`,
+        message: directStockSource === "INSURANCE"
+          ? `Dispensed ${ipCart.length} medicine(s) to ${selectedPatient.patient_name}, billed to insurance as Due${res?.invoice_no ? ` (${res.invoice_no})` : ""}. Stock is deducted when the insurance claim is settled.`
+          : `Successfully dispensed ${ipCart.length} medicine(s) to ${selectedPatient.patient_name}. Running charge added to IP Admission Account!`,
       });
 
       setDirectPrintModalOpen(true);
@@ -795,7 +811,8 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
         admission_id: selectedIndent.admission_id,
         indent_id: selectedIndent.id,
         billing_type: "IPD_RUNNING",
-        stock_source: chosenBatch.stock_source || "CASH",
+        stock_source: selectedIndent.payer_type === "insurance" ? "INSURANCE" : (chosenBatch.stock_source || "CASH"),
+        ...(selectedIndent.payer_type === "insurance" ? { payment_mode: "insurance" } : {}),
         items: [
           {
             batch_id: chosenBatch.id,
@@ -975,7 +992,7 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
 
     setReturnSubmitting(true);
     try {
-      await apiFetch("/api/pharmacy/returns", {
+      const retRes = await apiFetch<{ insurance_bill_reduced?: boolean }>("/api/pharmacy/returns", {
         method: "POST",
         body: JSON.stringify({
           original_sale_id: returnItem.id,
@@ -985,7 +1002,12 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
         }),
       });
 
-      setNotice({ type: "success", message: "IPD Return processed and credited to patient admission account." });
+      setNotice({
+        type: "success",
+        message: retRes?.insurance_bill_reduced
+          ? "Return processed: the insurance Due bill and claim were reduced. Stock was not yet deducted for this issue, so no stock is added back."
+          : "IPD Return processed and credited to patient admission account.",
+      });
       setReturnItem(null);
       setReturnReason("");
       setReturnQtyInput("1");
@@ -1682,7 +1704,7 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
                         }}
                         onClick={() => setDirectStockSource("CASH")}
                       >
-                        Cash Stock
+                        Self-pay
                       </button>
                       <button
                         type="button"
@@ -1697,15 +1719,27 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
                           color: directStockSource === "INSURANCE" ? "#00828a" : "#64748b",
                         }}
                         onClick={() => setDirectStockSource("INSURANCE")}
+                        disabled={!isInsuredAdmission}
+                        title={isInsuredAdmission ? undefined : "This admission is Self-pay. Set the payer to Insurance at IP Admission or IP Discharge Billing first."}
                       >
-                        Insurance Stock
+                        Insurance
                       </button>
                     </div>
                   </div>
 
                   {/* Notice banner */}
                   <div style={{ background: "#f8fafc", padding: "0.6rem 0.75rem", borderRadius: "6px", border: "1px solid #e2e8f0", marginBottom: "0.75rem", fontSize: "0.75rem", color: "#475569" }}>
-                    🏥 <strong>Inpatient Billing:</strong> Medicines will be charged to Admission #{selectedPatient.admission_id || selectedPatient.patient_id} as a running bill. Automatically reconciled at Discharge Settlement.
+                    {directStockSource === "INSURANCE" ? (
+                      <>
+                        🛡️ <strong>Insurance Billing:</strong> Billed to {selectedPatient.insurance_provider || "the insurer"}
+                        {selectedPatient.insurance_policy_no ? ` (Policy ${selectedPatient.insurance_policy_no})` : ""} as <strong>Due</strong>.
+                        Stock and stock value are deducted only when the insurance claim is settled.
+                      </>
+                    ) : (
+                      <>
+                        🏥 <strong>Inpatient Billing:</strong> Medicines will be charged to Admission #{selectedPatient.admission_id || selectedPatient.patient_id} as a running bill. Automatically reconciled at Discharge Settlement.
+                      </>
+                    )}
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>

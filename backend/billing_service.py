@@ -804,14 +804,20 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
         adm_date = adm["admission_date"]
         cursor.execute(
             """
-            SELECT COALESCE(SUM(amount), 0) FROM pharmacy_sales
+            SELECT COALESCE(SUM(amount) FILTER (WHERE LOWER(COALESCE(payment_mode, '')) <> 'insurance'), 0),
+                   COALESCE(SUM(amount) FILTER (WHERE LOWER(COALESCE(payment_mode, '')) = 'insurance'), 0)
+            FROM pharmacy_sales
             WHERE admission_id = ?
                OR (patient_id = ? AND billing_type = 'IPD_RUNNING')
                OR (patient_id = ? AND sold_at >= ? AND admission_id IS NULL)
             """,
             (admission_id, patient_id, patient_id, adm_date)
         )
-        pharm_gross = to_decimal(cursor.fetchone()[0])
+        pharm_row = cursor.fetchone()
+        # Insurance-billed issues sit on their own Due pharmacy invoice / claim,
+        # so they are not charged to the patient here (no double billing).
+        pharm_gross = to_decimal(pharm_row[0])
+        pharmacy_insurance = quantize_dec(to_decimal(pharm_row[1]))
         cursor.execute(
             """
             SELECT COALESCE(SUM(pr.quantity * ps.unit_price), 0)
@@ -821,6 +827,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
                    OR (ps.patient_id = ? AND ps.billing_type = 'IPD_RUNNING')
                    OR (ps.patient_id = ? AND ps.sold_at >= ? AND ps.admission_id IS NULL))
               AND pr.status = 'released'
+              AND LOWER(COALESCE(ps.payment_mode, '')) <> 'insurance'
             """,
             (admission_id, patient_id, patient_id, adm_date)
         )
@@ -935,6 +942,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
         cursor.execute(
             """
             SELECT ps.id, ps.sold_at AS sale_date, ps.medicine_name, ps.quantity, ps.unit_price, ps.amount,
+                   ps.payment_mode, (LOWER(COALESCE(ps.payment_mode, '')) = 'insurance') AS insurance_billed,
                    COALESCE(STRING_AGG(DISTINCT pi.batch_no, ', '), '') AS batch_number
             FROM pharmacy_sales ps
             LEFT JOIN stock_movements sm ON sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id
@@ -942,7 +950,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
             WHERE ps.admission_id = ?
                OR (ps.patient_id = ? AND ps.billing_type = 'IPD_RUNNING')
                OR (ps.patient_id = ? AND ps.sold_at >= ? AND ps.admission_id IS NULL)
-            GROUP BY ps.id, ps.sold_at, ps.medicine_name, ps.quantity, ps.unit_price, ps.amount
+            GROUP BY ps.id, ps.sold_at, ps.medicine_name, ps.quantity, ps.unit_price, ps.amount, ps.payment_mode
             ORDER BY ps.sold_at DESC LIMIT 100
             """,
             (admission_id, patient_id, patient_id, adm_date)
@@ -1017,6 +1025,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
                 "bed_nursing": float(bed_charges),
                 "consultations": float(consultation_charges),
                 "pharmacy": float(pharmacy_net),
+                "pharmacy_insurance": float(pharmacy_insurance),
                 "laboratory": float(lab_charges),
                 "imaging": float(imaging_charges),
                 "procedures": float(procedure_charges),
@@ -1082,14 +1091,17 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
             bed_charges += quantize_dec(Decimal(stay_days) * rate)
 
         # Pharmacy net
-        cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM pharmacy_sales WHERE admission_id = ?", (admission_id,))
+        cursor.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM pharmacy_sales WHERE admission_id = ? AND LOWER(COALESCE(payment_mode, '')) <> 'insurance'",
+            (admission_id,),
+        )
         pharm_gross = to_decimal(cursor.fetchone()[0])
         cursor.execute(
             """
             SELECT COALESCE(SUM(pr.quantity * ps.unit_price), 0)
             FROM pharmacy_returns pr
             JOIN pharmacy_sales ps ON ps.id = pr.original_sale_id
-            WHERE ps.admission_id = ? AND pr.status = 'released'
+            WHERE ps.admission_id = ? AND pr.status = 'released' AND LOWER(COALESCE(ps.payment_mode, '')) <> 'insurance'
             """,
             (admission_id,)
         )

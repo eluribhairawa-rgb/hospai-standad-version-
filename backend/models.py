@@ -2162,6 +2162,10 @@ class Admissions(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     hospital_id: Mapped[Optional[int]] = mapped_column(Integer)
     source_encounter_id: Mapped[Optional[int]] = mapped_column(Integer)
+    payer_type: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'self'::text"))
+    insurance_provider: Mapped[Optional[str]] = mapped_column(Text)
+    insurance_policy_no: Mapped[Optional[str]] = mapped_column(Text)
+    insurance_preauth_no: Mapped[Optional[str]] = mapped_column(Text)
 
     patient: Mapped['Patients'] = relationship('Patients', back_populates='admissions')
     documents: Mapped[list['Documents']] = relationship('Documents', back_populates='admission')

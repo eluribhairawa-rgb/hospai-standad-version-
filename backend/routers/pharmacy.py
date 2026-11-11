@@ -268,6 +268,11 @@ def pharmacy_returns_create(request: Request, payload: dict = Body(...), db: Ses
         return_id = lq.create_pharmacy_return(db, payload, user.get("username"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if return_id is None:
+        # Insurance issue whose stock was never deducted: the bill and claim were reduced instead.
+        log_audit_event(db, user, client_ip(request), "reduce_insurance_issue", "pharmacy_sales", str(payload.get("original_sale_id")),
+                        {"quantity": payload.get("quantity"), "reason": payload.get("reason")})
+        return {"return_id": None, "insurance_bill_reduced": True}
     log_audit_event(db, user, client_ip(request), "create", "pharmacy_returns", str(return_id), {})
     return {"return_id": return_id}
 

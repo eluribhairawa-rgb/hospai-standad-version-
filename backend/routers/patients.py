@@ -12,6 +12,7 @@ from deps import require_permissions, current_hospital_id, get_current_user
 from access_scope import patient_scope, filter_rows
 from common import rows_to_dicts, row_to_dict, validate_required_fields, log_audit_event, client_ip, normalize_payment_mode
 import legacy_queries as lq
+import legacy_sql
 import patient_journey
 import discharge_summary
 from storage import ObjectStorage
@@ -474,6 +475,28 @@ def admissions_list(patient_id: str, db: Session = Depends(get_db), user: dict =
     return {"admissions": rows_to_dicts(lq.get_admissions(db, patient_id, hospital_id=hospital_id))}
 
 
+@router.put("/admissions/{admission_id}/payer")
+def admission_payer_update(admission_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                           user: dict = Depends(require_permissions("patients.write")), hospital_id: int = Depends(current_hospital_id)):
+    try:
+        payer = lq.normalize_admission_payer(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    with legacy_sql.get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT patient_id, discharge_date FROM admissions WHERE id = ? AND hospital_id = ?", (admission_id, hospital_id))
+        adm = cursor.fetchone()
+        if not adm:
+            raise HTTPException(status_code=404, detail="Admission not found")
+        if adm["discharge_date"]:
+            raise HTTPException(status_code=409, detail="This admission is already discharged; its payer can no longer be changed.")
+        lq.set_admission_payer(cursor, admission_id, payer, adm["patient_id"])
+        conn.commit()
+    log_audit_event(db, user, client_ip(request), "update", "admissions", str(admission_id),
+                    {"payer_type": payer["payer_type"], "insurance_provider": payer["insurance_provider"]})
+    return {"status": "ok", **payer}
+
+
 @router.post("/patients/{patient_id}/admissions")
 def admissions_create(patient_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                        user: dict = Depends(require_permissions("patients.write")), hospital_id: int = Depends(current_hospital_id)):
@@ -485,10 +508,16 @@ def admissions_create(patient_id: str, request: Request, payload: dict = Body(..
         raise HTTPException(status_code=400, detail=vitals_err)
 
     try:
-        admission_id = lq.add_admission(db, patient_id, notes, hospital_id=hospital_id)
+        payer = lq.normalize_admission_payer(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        admission_id = lq.add_admission(db, patient_id, notes, hospital_id=hospital_id, payer=payer)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    log_audit_event(db, user, client_ip(request), "create", "admissions", str(admission_id), {"patient_id": patient_id})
+    log_audit_event(db, user, client_ip(request), "create", "admissions", str(admission_id),
+                    {"patient_id": patient_id, "payer_type": payer["payer_type"], "insurance_provider": payer["insurance_provider"]})
 
     review_fee = payload.get("review_fee")
     if review_fee:

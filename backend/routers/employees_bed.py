@@ -342,9 +342,11 @@ def get_bed_occupancy(db: Session = Depends(get_db), user: dict = Depends(requir
         cursor.execute(
             """
             SELECT b.id, b.patient_id, b.ward, b.room_no, b.bed_no, b.amount_per_day, b.total_days, b.total_amount, b.allocated_at,
-                   p.name, p.last_name, b.admission_id
+                   p.name, p.last_name, b.admission_id,
+                   a.payer_type, a.insurance_provider, a.insurance_policy_no, a.insurance_preauth_no
             FROM bed_allocations b JOIN patients p ON b.patient_id = p.patient_id
-            WHERE b.status = 'active' AND b.admission_id IN (SELECT id FROM admissions WHERE hospital_id = ?)
+            JOIN admissions a ON a.id = b.admission_id
+            WHERE b.status = 'active' AND a.hospital_id = ?
             ORDER BY b.allocated_at DESC
             """,
             (hospital_id,),
@@ -353,7 +355,8 @@ def get_bed_occupancy(db: Session = Depends(get_db), user: dict = Depends(requir
         occupied = [{
             "id": r[0], "patient_id": r[1], "ward": r[2], "room_no": r[3], "bed_no": r[4], "amount_per_day": r[5],
             "total_days": r[6], "total_amount": r[7], "allocated_at": r[8], "patient_name": f"{r[9]} {r[10]}".strip(),
-            "admission_id": r[11],
+            "admission_id": r[11], "payer_type": r[12] or "self", "insurance_provider": r[13],
+            "insurance_policy_no": r[14], "insurance_preauth_no": r[15],
         } for r in rows]
     return {"occupied": filter_rows(occupied, scope)}
 
