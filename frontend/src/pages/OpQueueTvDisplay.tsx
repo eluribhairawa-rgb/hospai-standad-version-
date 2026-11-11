@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 
 /**
@@ -38,12 +38,107 @@ const tokenSortKey = (token: string, id: number) => {
 
 const docLabel = (name: string) => (/^dr\.?\s/i.test(name) ? name : `Dr. ${name}`);
 
+const SOUND_KEY = "hospai_tv_sound_on";
+const readSoundPref = () => {
+  try {
+    return localStorage.getItem(SOUND_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+/** Short two-tone "ding-dong" before each announcement. */
+function playChime() {
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [880, 660].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.45;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.35, t + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.45);
+    });
+    window.setTimeout(() => void ctx.close().catch(() => undefined), 1500);
+  } catch {
+    // audio not available -- the spoken call still runs
+  }
+}
+
+/** Speak text with an English (India) voice when the browser has one. */
+function speak(text: string) {
+  if (!("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  const voices = window.speechSynthesis.getVoices();
+  const voice = voices.find((v) => v.lang === "en-IN") || voices.find((v) => v.lang.startsWith("en"));
+  if (voice) u.voice = voice;
+  u.lang = voice?.lang || "en-IN";
+  u.rate = 0.9;
+  window.speechSynthesis.speak(u);
+}
+
+const callText = (card: DoctorCard) =>
+  card.next ? `Token ${card.next.token}. ${card.next.name}. Please proceed to ${docLabel(card.doctor)}.` : "";
+
 export default function OpQueueTvDisplay({ onClose }: Props) {
   const [cards, setCards] = useState<DoctorCard[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [offline, setOffline] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [page, setPage] = useState(0);
+  const [soundOn, setSoundOn] = useState(readSoundPref);
+  const [calling, setCalling] = useState<string | null>(null);
+  const soundRef = useRef(soundOn);
+  const lastTokenRef = useRef<Map<string, string | null> | null>(null);
+  const callTimerRef = useRef<number | undefined>(undefined);
+
+  const announce = (card: DoctorCard) => {
+    if (!card.next) return;
+    setCalling(card.doctor);
+    window.clearTimeout(callTimerRef.current);
+    callTimerRef.current = window.setTimeout(() => setCalling(null), 9000);
+    playChime();
+    // Said twice, like a hospital PA, after the chime.
+    window.setTimeout(() => {
+      speak(callText(card));
+      speak(callText(card));
+    }, 950);
+  };
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    soundRef.current = next;
+    try {
+      localStorage.setItem(SOUND_KEY, next ? "1" : "0");
+    } catch {
+      // preference just isn't remembered
+    }
+    if (next) {
+      // This click also unlocks audio in the browser for later automatic calls.
+      playChime();
+      window.setTimeout(() => speak("Patient announcements on."), 950);
+    } else if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  // Load voices early (some browsers fill the list asynchronously); stop speaking on exit.
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.getVoices();
+    return () => {
+      window.speechSynthesis.cancel();
+      window.clearTimeout(callTimerRef.current);
+    };
+  }, []);
 
   // Live data: today's OP appointments, refreshed every few seconds.
   useEffect(() => {
@@ -86,6 +181,17 @@ export default function OpQueueTvDisplay({ onClose }: Props) {
           })
           .sort((a, b) => a.doctor.localeCompare(b.doctor));
         setCards(next);
+
+        // Announce doctors whose next patient changed since the last refresh
+        // (never on the first load, so opening the screen doesn't read everyone out).
+        const prev = lastTokenRef.current;
+        const current = new Map(next.map((c) => [c.doctor, c.next?.token ?? null]));
+        if (prev && soundRef.current) {
+          next.forEach((c) => {
+            if (c.next && prev.get(c.doctor) !== c.next.token) announce(c);
+          });
+        }
+        lastTokenRef.current = current;
         setOffline(false);
       } catch {
         if (!cancelled) setOffline(true);
@@ -166,6 +272,28 @@ export default function OpQueueTvDisplay({ onClose }: Props) {
             {now.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short", year: "numeric" })}
           </div>
         </div>
+        <button
+          type="button"
+          className={`optv-sound${soundOn ? " is-on" : ""}`}
+          onClick={toggleSound}
+          aria-pressed={soundOn}
+          title={soundOn ? "Announcements on: click to mute" : "Announcements off: click to call out the next patient"}
+        >
+          {soundOn ? (
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" />
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" />
+              <line x1="23" y1="9" x2="17" y2="15" />
+              <line x1="17" y1="9" x2="23" y2="15" />
+            </svg>
+          )}
+          <span>{soundOn ? "Sound On" : "Sound Off"}</span>
+        </button>
         <button type="button" className="optv-close" onClick={onClose} title="Exit TV display (Esc)">
           ✕
         </button>
@@ -181,8 +309,16 @@ export default function OpQueueTvDisplay({ onClose }: Props) {
           {visible.map((c, i) => {
             const accent = ACCENTS[(page * CARDS_PER_PAGE + i) % ACCENTS.length];
             return (
-              <div key={c.doctor} className={`optv-card${c.next ? "" : " is-empty"}`} style={{ ["--c" as any]: accent }}>
+              <div key={c.doctor} className={`optv-card${c.next ? "" : " is-empty"}${calling === c.doctor ? " is-calling" : ""}`} style={{ ["--c" as any]: accent }}>
                 <div className="optv-card-top">
+                  {c.next && (
+                    <button type="button" className="optv-recall" onClick={() => announce(c)} title={`Call ${c.next.name} again`} aria-label={`Call ${c.next.name} again`}>
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                    </button>
+                  )}
                   <div className="optv-doc-wrap">
                     <div className="optv-doc-lbl">Doctor</div>
                     <div className="optv-doc">{docLabel(c.doctor)}</div>

@@ -14562,3 +14562,13 @@ label,
 .opq-tv-btn:hover{background:#006d74}
 .optv-doc-lbl{font-size:clamp(11px,.85vw,16px);font-weight:700;letter-spacing:3px;text-transform:uppercase;opacity:.85}
 .optv-uhid{margin-top:2cqh;font-size:min(clamp(14px,1.3vw,26px),11cqh,5cqw);font-weight:700;color:#334155;font-variant-numeric:tabular-nums;letter-spacing:1px}
+
+.optv-sound{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1.5px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:#cbd5e1;font-weight:700;font-size:clamp(12px,.95vw,16px);cursor:pointer;flex-shrink:0;transition:background .2s,color .2s,border-color .2s}
+.optv-sound:hover{background:rgba(255,255,255,.16)}
+.optv-sound.is-on{background:#14b8a6;border-color:#14b8a6;color:#04201d}
+.optv-card-top{position:relative}
+.optv-recall{position:absolute;top:10px;right:10px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(255,255,255,.22);color:#fff;display:grid;place-items:center;cursor:pointer;opacity:.75;transition:opacity .2s,background .2s}
+.optv-recall:hover,.optv-recall:focus{opacity:1;background:rgba(255,255,255,.35)}
+.optv-card.is-calling{animation:optv-call-pulse 1.1s ease-in-out infinite;box-shadow:0 0 0 4px var(--c),0 18px 40px rgba(0,0,0,.35)}
+@keyframes optv-call-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
+@media (prefers-reduced-motion: reduce){.optv-card.is-calling{animation:none}}
