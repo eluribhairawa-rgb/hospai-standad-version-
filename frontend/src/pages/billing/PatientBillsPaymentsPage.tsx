@@ -25,7 +25,7 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
   const [targetDate, setTargetDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"unpaid" | "paid" | "all">("unpaid");
+  const [activeTab, setActiveTab] = useState<"all" | "paid" | "unpaid">("all");
 
   const [patientData, setPatientData] = useState<any>(null);
   const [selectedBills, setSelectedBills] = useState<Record<number, boolean>>({});
@@ -467,11 +467,10 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
             <div className="billing-tabs-nav" style={{ marginTop: "8px" }}>
               <button
                 type="button"
-                className={`billing-tab-btn ${activeTab === "unpaid" ? "active" : ""}`}
-                onClick={() => setActiveTab("unpaid")}
+                className={`billing-tab-btn ${activeTab === "all" ? "active" : ""}`}
+                onClick={() => setActiveTab("all")}
               >
-                Unpaid
-                <span className="billing-tab-badge">{unpaidBills.length}</span>
+                All
               </button>
 
               <button
@@ -484,10 +483,11 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
 
               <button
                 type="button"
-                className={`billing-tab-btn ${activeTab === "all" ? "active" : ""}`}
-                onClick={() => setActiveTab("all")}
+                className={`billing-tab-btn ${activeTab === "unpaid" ? "active" : ""}`}
+                onClick={() => setActiveTab("unpaid")}
               >
-                All
+                Unpaid
+                <span className="billing-tab-badge">{unpaidBills.length}</span>
               </button>
             </div>
 
@@ -507,7 +507,9 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
                 </div>
               ) : displayedBills.length === 0 ? (
                 <div className="billing-state-box">
-                  <p style={{ margin: 0 }}>No {activeTab} bills for this patient visit.</p>
+                  <p style={{ margin: 0 }}>
+                    {activeTab === "all" ? "No bills for this patient visit." : `No ${activeTab} bills for this patient visit.`}
+                  </p>
                 </div>
               ) : (
                 <table className="billing-table">
