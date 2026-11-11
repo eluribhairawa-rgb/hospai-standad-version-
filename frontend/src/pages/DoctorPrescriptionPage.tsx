@@ -811,26 +811,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     const deptTerm = selectedDepartment.trim().toLowerCase();
 
     return queue.filter((item) => {
-      // If doctor is typing in the search bar:
-      // Return matching patients across ALL statuses (including Completed)
-      if (qTerm) {
-        const matchName = item.name.toLowerCase().includes(qTerm);
-        const matchToken = item.token.toLowerCase().includes(qTerm);
-        const matchUhid = item.uhid.toLowerCase().includes(qTerm);
-        const matchPhone = (item.phone || "").toLowerCase().includes(qTerm);
-        if (!matchName && !matchToken && !matchUhid && !matchPhone) {
-          return false;
-        }
-        if (selectedDepartment !== "All Departments" && item.department.toLowerCase() !== deptTerm) {
-          return false;
-        }
-        if (selectedDoctor !== "All Doctors" && item.doctor.toLowerCase() !== docTerm) {
-          return false;
-        }
-        return true;
-      }
-
-      // Default Queue View (when search is empty):
       // Do NOT show completed patients in the active queue!
       if (item.status === "Completed") {
         return false;
@@ -853,6 +833,16 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         return false;
       }
 
+      // Search only narrows the queue shown above -- it never reaches outside it.
+      if (qTerm) {
+        const matches =
+          item.name.toLowerCase().includes(qTerm) ||
+          item.token.toLowerCase().includes(qTerm) ||
+          item.uhid.toLowerCase().includes(qTerm) ||
+          (item.phone || "").toLowerCase().includes(qTerm);
+        if (!matches) return false;
+      }
+
       return true;
     });
   }, [queue, queueStatusFilter, selectedDepartment, selectedDoctor, queueSearch]);
@@ -869,18 +859,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       completed,
     };
   }, [queue]);
-
-  // Registered patients matching queue search term
-  const matchingRegisteredForQueue = useMemo(() => {
-    if (!queueSearch.trim()) return [];
-    const q = queueSearch.trim().toLowerCase();
-    return registeredPatients.filter((p) => {
-      const pid = (p.patient_id || p.id || "").toLowerCase();
-      const name = getPatientFullName(p).toLowerCase();
-      const phone = (p.phone || "").toLowerCase();
-      return pid.includes(q) || name.includes(q) || phone.includes(q);
-    }).slice(0, 8);
-  }, [queueSearch, registeredPatients]);
 
   // Registered patients displayed in top directory view
   const displayedRegistered = useMemo(() => {
@@ -1942,16 +1920,14 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
               <div style={{ position: "relative", flex: "1", minWidth: "180px" }}>
                 <input
                   type="text"
-                  placeholder="Search patient by UHID, name, or phone to load old prescription..."
+                  placeholder={topViewMode === "queue" ? "Search today's queue by token, UHID, name, or phone..." : "Search registered patients by UHID, name, or phone..."}
                   value={queueSearch}
                   onChange={(e) => setQueueSearch(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      if (filteredQueue.length > 0) {
+                      if (topViewMode === "queue" && filteredQueue.length > 0) {
                         void handleSelectPatient(filteredQueue[0]);
-                      } else if (matchingRegisteredForQueue.length > 0) {
-                        void handlePickSearchedPatient(matchingRegisteredForQueue[0]);
                       }
                     }
                   }}
@@ -2175,96 +2151,19 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
               </div>
             ) : filteredQueue.length === 0 ? (
               <div>
-                {queueSearch.trim() && matchingRegisteredForQueue.length > 0 ? (
+                {queueSearch.trim() ? (
                   <div
                     style={{
-                      padding: "16px",
-                      background: "#f0f9ff",
+                      padding: "24px",
+                      textAlign: "center",
+                      background: "#f8fafc",
                       borderRadius: "8px",
-                      border: "1.5px solid #7dd3fc",
+                      border: "1px dashed #cbd5e1",
+                      color: "#64748b",
+                      fontSize: "13px",
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", flexWrap: "wrap", gap: "6px" }}>
-                      <div>
-                        <strong style={{ fontSize: "13px", color: "#0369a1" }}>
-                          No appointments in today's queue for "{queueSearch}", but found {matchingRegisteredForQueue.length} registered patient(s) with matching UHID / Name:
-                        </strong>
-                        <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>
-                          Click any registered patient below to load their medical details and prescribe.
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setTopViewMode("directory")}
-                        style={{
-                          background: "#0284c7",
-                          color: "#ffffff",
-                          border: "none",
-                          borderRadius: "4px",
-                          padding: "4px 10px",
-                          fontSize: "11.5px",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Browse All Registered Patients →
-                      </button>
-                    </div>
-
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "10px" }}>
-                      {matchingRegisteredForQueue.map((p) => {
-                        const uhid = p.patient_id || p.id || "";
-                        const fullName = getPatientFullName(p);
-                        return (
-                          <div
-                            key={uhid}
-                            onClick={() => handlePickSearchedPatient(p)}
-                            style={{
-                              background: "#ffffff",
-                              padding: "10px 12px",
-                              borderRadius: "6px",
-                              border: "1px solid #bae6fd",
-                              cursor: "pointer",
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-                            }}
-                          >
-                            <div>
-                              <span style={{ fontSize: "11px", fontWeight: 800, color: "#0284c7", background: "#e0f2fe", padding: "2px 6px", borderRadius: "4px" }}>
-                                {uhid}
-                              </span>
-                              <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", marginTop: "3px" }}>
-                                {fullName}
-                              </div>
-                              <div style={{ fontSize: "11.5px", color: "#64748b" }}>
-                                {p.age ? `${p.age}y` : ""} {p.gender || ""} • {p.phone || ""}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handlePickSearchedPatient(p);
-                              }}
-                              style={{
-                                background: "#16a34a",
-                                color: "#ffffff",
-                                border: "none",
-                                borderRadius: "5px",
-                                padding: "6px 12px",
-                                fontSize: "11.5px",
-                                fontWeight: 700,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Prescribe →
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    No patients in today's queue match "{queueSearch}".
                   </div>
                 ) : queueStatusFilter === "In Consultation" && queueCounts.waiting > 0 ? (
                   <div
