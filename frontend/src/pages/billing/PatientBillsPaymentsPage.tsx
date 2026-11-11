@@ -5,6 +5,7 @@ import type { Notice } from "../../types";
 import { Button, Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import "./billingTheme.css";
 
 type Props = {
@@ -290,6 +291,68 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
       ],
     });
     printViaIframe(html);
+  };
+
+  const handleShareWhatsAppReceipt = (rcp: any) => {
+    const p = patientData?.patient;
+    const rawPhone = p?.phone || p?.mobile || "";
+    const rawCode = p?.phone_country_code || "+91";
+    const parts = splitStoredPhone(rawPhone, rawCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - Payment Receipt*`,
+      `----------------------------------------`,
+      `Receipt No: ${rcp.receipt_no}`,
+      p?.name ? `Patient: ${p.name} (UHID: ${p.patient_id})` : "",
+      `Date: ${rcp.created_at ? String(rcp.created_at).slice(0, 10) : targetDate}`,
+      `Type: ${rcp.receipt_type || "Bill Settlement"}`,
+      `Payment Mode: ${rcp.payment_mode || paymentMode}`,
+      `Amount Paid: ₹${Number(rcp.total_amount || rcp.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      `----------------------------------------`,
+      `Thank you for your payment. Keep this receipt for your records.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
+  const handleShareWhatsAppBill = (bill: any) => {
+    const p = patientData?.patient;
+    const rawPhone = p?.phone || p?.mobile || "";
+    const rawCode = p?.phone_country_code || "+91";
+    const parts = splitStoredPhone(rawPhone, rawCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - Bill Details*`,
+      `----------------------------------------`,
+      `Invoice No: ${bill.invoice_no}`,
+      `Module: ${bill.module}`,
+      p?.name ? `Patient: ${p.name} (UHID: ${p.patient_id})` : "",
+      `Total Amount: ₹${Number(bill.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      `Due Amount: ₹${Number(bill.due_amount ?? bill.balance ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      `Status: ${Number(bill.due_amount ?? bill.balance ?? 0) <= 0 ? "PAID" : "UNPAID"}`,
+      `----------------------------------------`,
+      `For any billing queries, visit HospAI Billing Counter.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   const expandedBill = allBills.find((b: any) => Number(b.id ?? b.invoice_id) === Number(expandedBillId));
@@ -594,12 +657,20 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
                 <h3 className="billing-card-title">
                   {expandedBill.module} bill details ({expandedBill.invoice_no})
                 </h3>
-                <span
-                  style={{ fontSize: "0.8125rem", color: "#0284c7", fontWeight: 600, cursor: "pointer" }}
-                  onClick={() => handlePrintReceipt(expandedBill)}
-                >
-                  View original bill ↗
-                </span>
+                <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                  <span
+                    style={{ fontSize: "0.8125rem", color: "#16a34a", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                    onClick={() => handleShareWhatsAppBill(expandedBill)}
+                  >
+                    💬 WhatsApp Bill
+                  </span>
+                  <span
+                    style={{ fontSize: "0.8125rem", color: "#0284c7", fontWeight: 600, cursor: "pointer" }}
+                    onClick={() => handlePrintReceipt(expandedBill)}
+                  >
+                    View original bill ↗
+                  </span>
+                </div>
               </div>
 
               <div className="billing-table-responsive">
@@ -807,6 +878,14 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
                           <rect x="6" y="14" width="12" height="8" />
                         </svg>
                         Print receipt
+                      </button>
+                      <button
+                        type="button"
+                        className="billing-btn-table-outline"
+                        style={{ color: "#16a34a", borderColor: "#86efac", marginLeft: "6px" }}
+                        onClick={() => handleShareWhatsAppReceipt(rcp)}
+                      >
+                        💬 WhatsApp
                       </button>
                     </td>
                   </tr>

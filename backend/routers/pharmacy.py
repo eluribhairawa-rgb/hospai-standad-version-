@@ -379,7 +379,7 @@ def pharmacy_insurance_case_settle(claim_id: int, request: Request, payload: dic
         paid_amount = float(invoice["paid_amount"] or 0) if invoice else 0
         total_amount = float(invoice["total_amount"] or 0) if invoice else 0
         settlement_status = "paid" if total_amount > 0 and paid_amount >= total_amount else ("part_paid" if paid_amount > 0 else "unpaid")
-    lq.update_insurance_claim(db, claim_id, {"settlement_status": settlement_status})
+    lq.update_insurance_claim(db, claim_id, {"settlement_status": settlement_status, "_actor": user.get("username")})
     log_audit_event(db, user, client_ip(request), "settle", "insurance_claims", str(claim_id), {"amount": amount})
     return {"status": "ok", "settlement_status": settlement_status}
 

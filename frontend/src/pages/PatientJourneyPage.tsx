@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../lib/api";
+import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import { generatePDFBlob, downloadPDF, printPDF, patientFilename } from "../lib/exportService";
 import type { StandardPdfPayload } from "../lib/exportService";
 import type { Notice, Patient } from "../types";
@@ -51,7 +52,7 @@ type JourneyDocument = { type: string; label: string; available: boolean; ref: n
 type JourneyPayment = { date: string; time: string; mode: string; reference: string; invoice_no: string; amount: number };
 
 type Journey = {
-  patient: { patient_id: string; name: string; age: number | null; gender: string | null };
+  patient: { patient_id: string; name: string; age: number | null; gender: string | null; phone?: string | null; phone_country_code?: string | null };
   encounters: JourneyEncounter[];
   selected: JourneyEncounter | null;
   doctor_name: string | null;
@@ -289,6 +290,18 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
   };
 
   const patient = journey?.patient;
+
+  const handleShareWhatsApp = () => {
+    if (!patient) return;
+    const parts = splitStoredPhone(patient.phone, patient.phone_country_code);
+    const number = toWhatsAppNumber(parts.countryCode, parts.value);
+    if (!number) {
+      setNotice({ type: "warning", message: "This patient has no primary mobile number on record." });
+      return;
+    }
+    const msg = `Hello ${patient.name}, your patient number (UHID) at our hospital is ${patient.patient_id}. Please quote it on every visit.`;
+    window.open(`https://wa.me/${number}?text=${encodeURIComponent(msg)}`, "_blank", "noopener,noreferrer");
+  };
   const selected = journey?.selected;
   const fs = journey?.financial_summary;
 
@@ -355,6 +368,10 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
           <button type="button" onClick={() => void handleDownloadPdf()} disabled={!journey || exporting !== ""}
                   className="pharmacy-btn-outline" style={{ height: "38px", padding: "0 16px", opacity: journey ? 1 : 0.5 }}>
             {exporting === "pdf" ? "Preparing…" : "Download PDF"}
+          </button>
+          <button type="button" onClick={handleShareWhatsApp} disabled={!journey}
+                  className="pharmacy-btn-outline" style={{ height: "38px", padding: "0 16px", opacity: journey ? 1 : 0.5 }}>
+            💬 Share via WhatsApp
           </button>
           <button type="button" onClick={() => void handlePrintJourney()} disabled={!journey || exporting !== ""}
                   className="pharmacy-btn-teal" style={{ height: "38px", padding: "0 16px", opacity: journey ? 1 : 0.5 }}>

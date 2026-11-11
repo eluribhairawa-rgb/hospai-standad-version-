@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Modal, Button } from "./ui";
 import { downloadPDF, printPDF } from "../lib/exportService";
+import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 
 type ExportShareModalProps = {
   open: boolean;
@@ -11,6 +12,8 @@ type ExportShareModalProps = {
     title: string;
     text?: string;
     shareUrl?: string;
+    phone?: string | null;
+    phoneCountryCode?: string | null;
   } | null;
 };
 
@@ -18,7 +21,7 @@ export default function ExportShareModal({ open, onClose, options }: ExportShare
   const [copied, setCopied] = useState(false);
 
   if (!options) return null;
-  const { blob, filename, title, shareUrl } = options;
+  const { blob, filename, title, text, shareUrl, phone, phoneCountryCode } = options;
 
   const handleDownload = () => {
     downloadPDF(blob, filename);
@@ -43,6 +46,23 @@ export default function ExportShareModal({ open, onClose, options }: ExportShare
     }
   };
 
+  const handleWhatsApp = () => {
+    const parts = splitStoredPhone(phone, phoneCountryCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const messageLines = [
+      `*HospAI Hospital - ${title || "Report / Document"}*`,
+      text || "",
+      shareUrl ? `View Online: ${shareUrl}` : "",
+      `Generated: ${new Date().toLocaleDateString("en-IN")}`,
+    ].filter(Boolean);
+    const msg = messageLines.join("\n\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    onClose();
+  };
+
   return (
     <Modal
       open={open}
@@ -59,6 +79,24 @@ export default function ExportShareModal({ open, onClose, options }: ExportShare
           style={{ width: "100%", justifyContent: "center" }}
         >
           Download PDF
+        </Button>
+
+        <Button
+          type="button"
+          onClick={handleWhatsApp}
+          style={{
+            width: "100%",
+            justifyContent: "center",
+            background: "#25D366",
+            borderColor: "#25D366",
+            color: "#ffffff",
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
+          }}
+        >
+          💬 Share via WhatsApp
         </Button>
 
         <Button

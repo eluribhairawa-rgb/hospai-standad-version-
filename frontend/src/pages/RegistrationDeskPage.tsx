@@ -8,7 +8,7 @@ import type { Appointment, Notice, Patient } from "../types";
 import { PRINT_BRAND_HEADER_DATA_URI } from "../lib/printBrand";
 import { printViaIframe } from "../lib/printViaIframe";
 import { filterInteger, filterDecimal } from "../lib/format";
-import { cleanCountryCode, formatPhone, normalizeSearchQuery } from "../lib/phone";
+import { cleanCountryCode, formatPhone, normalizeSearchQuery, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import PhoneInput from "../components/PhoneInput";
 
 type RegistrationMode = "appointment-in" | "appointment-out" | "consent" | "insurance";
@@ -205,6 +205,98 @@ function printRegistrationToken(token: any, setNotice: Dispatch<SetStateAction<N
     `${field("Fee", token.consultation_fee ? "₹" + token.consultation_fee : "-")}` +
     `</div></section>`;
   openRegistrationDeskDocumentPrint("Registration Token", body, setNotice);
+}
+
+function shareConsentWhatsApp(form: typeof DEFAULT_CONSENT_FORM, setNotice: Dispatch<SetStateAction<Notice | null>>) {
+  if (!form.patient_name.trim() && !form.patient_id.trim()) {
+    setNotice({ type: "warning", message: "Select or enter patient details before sharing consent." });
+    return;
+  }
+  const parts = splitStoredPhone(form.mobile, form.mobile_country_code);
+  const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+  const consentLabel = CONSENT_TYPE_OPTIONS.find((item) => item.value === form.consent_type)?.label || form.consent_type || "-";
+
+  const lines = [
+    `*HospAI Hospital - Clinical Consent Record*`,
+    `----------------------------------------`,
+    `Patient: ${form.patient_name} (UHID: ${form.patient_id})`,
+    `Consent Type: ${consentLabel}`,
+    form.doctor_name ? `Consultant: Dr. ${form.doctor_name}` : "",
+    `Signed By: ${form.signed_by || "Self"} (${form.relation_to_patient || "Patient"})`,
+    `Status: ${form.status}`,
+    form.document_reference ? `Document Ref: ${form.document_reference}` : "",
+    form.notes ? `Notes: ${form.notes}` : "",
+    `Date: ${new Date().toLocaleDateString("en-IN")}`,
+    `----------------------------------------`,
+    `HospAI Hospital Care & Records Team`,
+  ].filter(Boolean);
+
+  const text = lines.join("\n");
+  const url = waNumber
+    ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+  setNotice({ type: "success", message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened." });
+}
+
+function shareInsuranceWhatsApp(form: typeof DEFAULT_INSURANCE_FORM & Record<string, string>, setNotice: Dispatch<SetStateAction<Notice | null>>) {
+  if (!form.patient_name.trim() && !form.patient_id.trim()) {
+    setNotice({ type: "warning", message: "Select or enter patient details before sharing insurance." });
+    return;
+  }
+  const parts = splitStoredPhone(form.mobile, form.mobile_country_code);
+  const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+  const lines = [
+    `*HospAI Hospital - Insurance & TPA Desk Verification*`,
+    `----------------------------------------`,
+    `Patient: ${form.patient_name} (UHID: ${form.patient_id})`,
+    `Insurer: ${form.insurer_name}`,
+    form.tpa_name ? `TPA: ${form.tpa_name}` : "",
+    form.policy_number ? `Policy No: ${form.policy_number}` : "",
+    form.preauth_no ? `Pre-Auth No: ${form.preauth_no}` : "",
+    form.approved_amount ? `Approved Amount: ₹${form.approved_amount}` : "",
+    `Status: ${form.verification_status}`,
+    `Date: ${new Date().toLocaleDateString("en-IN")}`,
+    `----------------------------------------`,
+    `HospAI Insurance Desk`,
+  ].filter(Boolean);
+
+  const text = lines.join("\n");
+  const url = waNumber
+    ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+  setNotice({ type: "success", message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened." });
+}
+
+function shareRegistrationTokenWhatsApp(token: any, setNotice: Dispatch<SetStateAction<Notice | null>>) {
+  if (!token) {
+    setNotice({ type: "warning", message: "No appointment token available to share." });
+    return;
+  }
+  const parts = splitStoredPhone(token.mobile || token.phone, token.country_code);
+  const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+  const lines = [
+    `*HospAI Hospital - Appointment Token*`,
+    `----------------------------------------`,
+    `Token: #${token.token_no || token.tokenNo || "-"}`,
+    `Patient: ${token.patient_name} (UHID: ${token.patient_id})`,
+    token.doctor_name ? `Doctor: Dr. ${token.doctor_name}` : "",
+    token.department ? `Department: ${token.department}` : "",
+    token.appointment_date ? `Appointment: ${formatDateTime(token.appointment_date)}` : "",
+    token.consultation_fee ? `Fee: ₹${token.consultation_fee}` : "",
+    `----------------------------------------`,
+    `Please report to the OPD waiting lounge. Track your live queue status at HospAI.`,
+  ].filter(Boolean);
+
+  const text = lines.join("\n");
+  const url = waNumber
+    ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+  setNotice({ type: "success", message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened." });
 }
 
 export default function RegistrationDeskPage({ mode, selectedPatient, setNotice }: Props) {
@@ -1153,6 +1245,13 @@ const activeDepartments = (data.departments || []).filter((department) => {
               {savingConsent ? "Saving Consent..." : "Save Consent"}
             </Button>
             <Button variant="ghost" type="button" onClick={() => printConsentDocument(consentForm, setNotice)}>Print Consent</Button>
+            <Button
+              type="button"
+              style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff" }}
+              onClick={() => shareConsentWhatsApp(consentForm, setNotice)}
+            >
+              💬 WhatsApp
+            </Button>
           </div>
 
           <div className="appointment-history-card">
@@ -1294,6 +1393,13 @@ const activeDepartments = (data.departments || []).filter((department) => {
               {savingInsurance ? "Saving Verification..." : "Save Verification"}
             </Button>
             <Button variant="ghost" type="button" onClick={() => printInsuranceDocument(insuranceForm as typeof DEFAULT_INSURANCE_FORM & Record<string, string>, setNotice)}>Print Insurance</Button>
+            <Button
+              type="button"
+              style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff" }}
+              onClick={() => shareInsuranceWhatsApp(insuranceForm as typeof DEFAULT_INSURANCE_FORM & Record<string, string>, setNotice)}
+            >
+              💬 WhatsApp
+            </Button>
           </div>
           {uniqueInsuranceChecks.slice(0, 10).map((check) => (
             <p key={check.id} className="muted">
@@ -1624,6 +1730,14 @@ const activeDepartments = (data.departments || []).filter((department) => {
               </Button>
               <Button variant="ghost" type="button" onClick={() => printRegistrationToken(lastGeneratedToken, setNotice)} disabled={!lastGeneratedToken}>
                 Print
+              </Button>
+              <Button
+                type="button"
+                style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff" }}
+                onClick={() => shareRegistrationTokenWhatsApp(lastGeneratedToken, setNotice)}
+                disabled={!lastGeneratedToken}
+              >
+                💬 WhatsApp
               </Button>
             </div>
             {!isRazorpayReady ? <p className="muted">Razorpay payments are disabled until backend keys are configured.</p> : null}

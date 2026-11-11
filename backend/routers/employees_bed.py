@@ -186,10 +186,13 @@ def patient_beds(patient_id: str, active_only: bool = False, db: Session = Depen
 def patient_bed_assign(patient_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                         user: dict = Depends(require_permissions("patients.write"))):
     validate_required_fields(payload, ["admission_id", "ward", "room_no", "bed_no"])
-    bed_id = lq.assign_bed(db, {
-        "admission_id": payload.get("admission_id"), "patient_id": patient_id, "ward": payload.get("ward"),
-        "room_no": payload.get("room_no"), "bed_no": payload.get("bed_no"), "status": payload.get("status", "active"),
-    })
+    try:
+        bed_id = lq.assign_bed(db, {
+            "admission_id": payload.get("admission_id"), "patient_id": patient_id, "ward": payload.get("ward"),
+            "room_no": payload.get("room_no"), "bed_no": payload.get("bed_no"), "status": payload.get("status", "active"),
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     log_audit_event(db, user, client_ip(request), "create", "bed_allocations", str(bed_id), {"patient_id": patient_id})
     return {"bed_allocation_id": bed_id}
 
@@ -294,7 +297,10 @@ def _get_or_create_active_admission(db: Session, patient_id, hospital_id):
         row = cursor.fetchone()
         if row:
             return row[0]
-    return lq.add_admission(db, patient_id, "Bed allocation admission", hospital_id=hospital_id)
+    try:
+        return lq.add_admission(db, patient_id, "Bed allocation admission", hospital_id=hospital_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/bed/config")
@@ -393,6 +399,10 @@ def allot_bed_api(request: Request, payload: dict = Body(...), db: Session = Dep
         occupant = cursor.fetchone()
         if occupant:
             raise HTTPException(status_code=409, detail=f"Bed {bed_no} in {ward} is already occupied by patient {occupant[1]}.")
+        try:
+            lq.ensure_not_currently_admitted(cursor, patient_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         cursor.execute("SELECT ward, bed_no FROM bed_allocations WHERE patient_id = ? AND status = 'active'", (patient_id,))
         previous_beds = cursor.fetchall()
         cursor.execute("UPDATE bed_allocations SET status = 'released', released_at = CURRENT_TIMESTAMP WHERE patient_id = ? AND status = 'active'", (patient_id,))

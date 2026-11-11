@@ -316,6 +316,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                 "patient": {
                     "patient_id": patient_id, "name": _patient_name(patient),
                     "age": patient.get("age"), "gender": patient.get("gender"),
+                    "phone": patient.get("phone"), "phone_country_code": patient.get("phone_country_code"),
                 },
                 "encounters": [], "selected": None, "events": [],
                 "financial_summary": {"categories": [], "total_charges": 0, "payments_received": 0, "outstanding": 0, "status": "N/A"},
@@ -834,6 +835,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             "patient": {
                 "patient_id": patient_id, "name": _patient_name(patient),
                 "age": patient.get("age"), "gender": patient.get("gender"),
+                    "phone": patient.get("phone"), "phone_country_code": patient.get("phone_country_code"),
             },
             "encounters": encounters,
             "selected": selected,

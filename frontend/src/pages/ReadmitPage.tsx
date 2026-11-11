@@ -882,7 +882,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                         variant={expanded ? "ghost" : "primary"}
                         size="sm"
                       >
-                        {expanded ? "Hide" : "Readmit"}
+                        {expanded ? "Hide" : "Follow-up/Re-visit"}
                       </Button>
                     )}
                   </TableCell>

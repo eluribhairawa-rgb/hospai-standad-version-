@@ -484,7 +484,10 @@ def admissions_create(patient_id: str, request: Request, payload: dict = Body(..
     if vitals_err:
         raise HTTPException(status_code=400, detail=vitals_err)
 
-    admission_id = lq.add_admission(db, patient_id, notes, hospital_id=hospital_id)
+    try:
+        admission_id = lq.add_admission(db, patient_id, notes, hospital_id=hospital_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     log_audit_event(db, user, client_ip(request), "create", "admissions", str(admission_id), {"patient_id": patient_id})
 
     review_fee = payload.get("review_fee")

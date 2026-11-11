@@ -571,6 +571,8 @@ function App() {
     title: string;
     text?: string;
     shareUrl?: string;
+    phone?: string | null;
+    phoneCountryCode?: string | null;
   } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [dashboardDate, setDashboardDate] = useState(() => {

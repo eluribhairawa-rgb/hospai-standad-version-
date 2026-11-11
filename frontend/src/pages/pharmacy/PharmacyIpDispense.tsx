@@ -5,6 +5,7 @@ import { apiFetch, reportError } from "../../lib/api";
 import type { Notice } from "../../types";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -585,7 +586,7 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
         admission_id: selectedPatient.admission_id || undefined,
         billing_type: "IPD_RUNNING",
         stock_source: directStockSource,
-        payment_mode: "ipd_running",
+        payment_mode: directStockSource === "INSURANCE" ? "insurance" : "ipd_running",
         items: ipCart.map((c) => ({
           batch_id: c.batch_id,
           pharmacy_inventory_id: c.batch_id,
@@ -683,6 +684,54 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
     });
 
     printViaIframe(html);
+  };
+
+  const handleShareWhatsAppDispenseSlip = async () => {
+    if (!dispensedSlipData) return;
+    const { patient, items, total_amount, dispensed_at, invoice_no } = dispensedSlipData;
+
+    let phone = (patient as any).phone || (selectedPatient as any)?.phone || "";
+    let phoneCode = (patient as any).phone_country_code || (selectedPatient as any)?.phone_country_code || "+91";
+    if (!phone && patient.patient_id) {
+      try {
+        const res = await apiFetch<{ patient?: { phone?: string; phone_country_code?: string } }>(
+          `/api/patients/${encodeURIComponent(patient.patient_id)}`
+        );
+        phone = res?.patient?.phone || "";
+        phoneCode = res?.patient?.phone_country_code || "+91";
+      } catch {
+        // ignore
+      }
+    }
+
+    const parts = splitStoredPhone(phone, phoneCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital Pharmacy - Inpatient Dispense Slip*`,
+      `----------------------------------------`,
+      `Slip / Invoice: ${invoice_no || "-"}`,
+      `Patient: ${patient.patient_name} (UHID: ${patient.patient_id})`,
+      `Ward / Bed: ${patient.ward} · Bed ${patient.bed_no}`,
+      patient.doctor_name ? `Consultant: ${patient.doctor_name}` : "",
+      `Dispensed At: ${dispensed_at}`,
+      `Total Medicines Amount: ₹${total_amount.toFixed(2)} (Posted to IP Bill)`,
+      `----------------------------------------`,
+      `Medicines Issued:`,
+      ...items.map((it, idx) => `${idx + 1}. ${it.medicine_name} x ${it.quantity}`),
+      `----------------------------------------`,
+      `HospAI 24/7 Clinical Pharmacy`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   // -------------------------------------------------------------
@@ -2281,6 +2330,13 @@ export default function PharmacyIpDispense({ setNotice, onNavigate }: Props) {
                 onClick={handlePrintDispenseSlip}
               >
                 🖨️ Print Issue Slip
+              </Button>
+              <Button
+                type="button"
+                style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", fontWeight: 700 }}
+                onClick={() => void handleShareWhatsAppDispenseSlip()}
+              >
+                💬 WhatsApp Slip
               </Button>
             </div>
           </div>

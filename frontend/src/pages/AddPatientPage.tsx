@@ -6,7 +6,7 @@ import { printViaIframe } from "../lib/printViaIframe";
 import { calculateAgeFromDob } from "../lib/format";
 import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
 import { Modal } from "../components/ui";
-import { COUNTRY_CODE_RULES } from "../lib/phone";
+import { COUNTRY_CODE_RULES, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import PhoneInput from "../components/PhoneInput";
 
 const COUNTRY_OPTIONS = Object.values(COUNTRY_CODE_RULES).map((r) => r.label);
@@ -939,6 +939,62 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     printViaIframe(slipHtml);
   };
 
+  const handleShareWhatsAppSlip = () => {
+    const target = lastRegisteredPatient || (patientId ? {
+      patientId,
+      name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+      age,
+      gender,
+      phone: primaryPhone,
+      phoneCountryCode: primaryPhoneCode,
+      address,
+      visitType,
+      doctor: selectedDoctor,
+      department: selectedDepartment,
+      fee: consultationFee,
+      paymentMode,
+      tokenNo: bookedAppointment?.tokenNo,
+    } : null);
+
+    if (!target?.patientId) {
+      setNotice({ type: "warning", message: "Please register a patient first before sharing the slip." });
+      return;
+    }
+
+    const targetPhone = (target as any).phone || primaryPhone;
+    const targetCode = (target as any).phoneCountryCode || (target as any).phone_country_code || primaryPhoneCode;
+    const parts = splitStoredPhone(targetPhone, targetCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const tokenPart = bookedAppointment?.tokenNo || (target as any).tokenNo;
+
+    const lines = [
+      `*HospAI Hospital - Registration & Appointment Token Slip*`,
+      `----------------------------------------`,
+      `UHID: ${target.patientId}`,
+      tokenPart ? `Live Queue Token: #${tokenPart}` : "",
+      `Date: ${new Date().toLocaleDateString("en-GB")}`,
+      `Patient Name: ${target.name}`,
+      `Contact: ${parts.countryCode} ${parts.value}`,
+      `Visit Type: ${target.visitType}`,
+      target.department || selectedDepartment ? `Department: ${target.department || selectedDepartment}` : "",
+      target.doctor || selectedDoctor ? `Consulting Doctor: ${target.doctor || selectedDoctor}` : "",
+      target.fee !== undefined ? `Consultation Fee: ₹ ${target.fee ?? consultationFee}` : "",
+      `----------------------------------------`,
+      `Please present this token at the consultation desk or nursing counter.`,
+      `Wishing you good health!`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
   const todayFormatted = new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "2-digit",
@@ -1672,6 +1728,25 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               </button>
               <button
                 type="button"
+                onClick={handleShareWhatsAppSlip}
+                style={{
+                  padding: "6px 14px",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  color: "#ffffff",
+                  background: "#25D366",
+                  border: "1px solid #25D366",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                💬 WhatsApp
+              </button>
+              <button
+                type="button"
                 onClick={() => setLastRegisteredPatient(null)}
                 style={{
                   padding: "6px 10px",
@@ -2181,6 +2256,26 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                     fontSize: "14px",
                     fontWeight: 700,
                     borderRadius: "8px",
+                    background: "#25D366",
+                    color: "#ffffff",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                  onClick={handleShareWhatsAppSlip}
+                >
+                  💬 Share via WhatsApp
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    padding: "10px 20px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    borderRadius: "8px",
                     background: "#2563eb",
                     color: "#ffffff",
                     border: "none",
@@ -2449,6 +2544,25 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                 </button>
                 <button
                   type="button"
+                  style={{
+                    padding: "10px 18px",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    borderRadius: "8px",
+                    background: "#25D366",
+                    color: "#ffffff",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                  onClick={handleShareWhatsAppSlip}
+                >
+                  💬 Share via WhatsApp
+                </button>
+                <button
+                  type="button"
                   style={{ padding: "10px 18px", fontSize: "13px", fontWeight: 600, borderRadius: "8px", background: "#e2e8f0", color: "#334155", border: "none", cursor: "pointer" }}
                   onClick={handleClear}
                 >
@@ -2685,6 +2799,25 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               onClick={handlePrintSlip}
             >
               Print Slip
+            </button>
+            <button
+              type="button"
+              style={{
+                padding: "10px 18px",
+                fontSize: "13px",
+                fontWeight: 700,
+                borderRadius: "8px",
+                background: "#25D366",
+                color: "#ffffff",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+              onClick={handleShareWhatsAppSlip}
+            >
+              💬 Share via WhatsApp
             </button>
             <button
               type="button"

@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Notice } from "../types";
 import { apiFetch, reportError } from "../lib/api";
 import { printViaIframe } from "../lib/printViaIframe";
+import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import { Button, Input, Label, Modal } from "../components/ui";
 import PatientSearchPicker from "../components/PatientSearchPicker";
 import type { HospitalBed } from "./BedManagementPage";
@@ -319,6 +320,42 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     `;
     // The slip keeps its own layout (data-hospai-shared-print-shell); printViaIframe adds the standard page footer.
     printViaIframe(`<html><head><title>IP Admission Slip - ${rec.uhid}</title></head><body>${slipHtml}</body></html>`);
+  };
+
+  const handleShareWhatsAppSlip = () => {
+    if (!admittedRecord?.uhid) {
+      setNotice({ type: "warning", message: "Please complete the admission first before sharing the slip." });
+      return;
+    }
+    const rec = admittedRecord;
+    const parts = splitStoredPhone(rec.mobile);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - Inpatient Admission & Bed Allocation Slip*`,
+      `----------------------------------------`,
+      `Patient: ${rec.patientName} (UHID: ${rec.uhid})`,
+      `Admission #: ${rec.admissionId || "ADM-ACTIVE"}`,
+      `Admission Date: ${rec.admissionDate || new Date().toLocaleString("en-IN")}`,
+      `Department: ${rec.department}`,
+      `Consultant Doctor: ${rec.doctor}`,
+      `Ward / Bed: ${rec.ward} · Bed ${rec.bedNo}`,
+      rec.roomNo && rec.roomNo !== "-" ? `Room No: ${rec.roomNo}` : "",
+      rec.triagePriority ? `Triage / Acuity: ${rec.triagePriority}` : "",
+      `----------------------------------------`,
+      `Please report to the assigned ward nursing station with this confirmation slip.`,
+      `HospAI 24x7 Inpatient Care Team`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   return (
@@ -706,6 +743,26 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
             >
               Print Admission Slip
             </button>
+
+            <button
+              type="button"
+              onClick={handleShareWhatsAppSlip}
+              style={{
+                padding: "10px 18px",
+                fontSize: "13px",
+                fontWeight: 700,
+                borderRadius: "8px",
+                background: "#25D366",
+                color: "#ffffff",
+                border: "none",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              💬 Share via WhatsApp
+            </button>
           </div>
 
           <Button
@@ -764,6 +821,13 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
               <Button type="button" variant="secondary" onClick={handlePrintSlip}>
                 🖨️ Print Admission Slip
+              </Button>
+              <Button
+                type="button"
+                style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", fontWeight: 700 }}
+                onClick={handleShareWhatsAppSlip}
+              >
+                💬 WhatsApp Slip
               </Button>
               <Button
                 type="button"

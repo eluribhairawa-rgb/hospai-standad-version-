@@ -1,4 +1,4 @@
-import { normalizeSearchQuery, validateMobileByCountry } from "../lib/phone";
+import { normalizeSearchQuery, validateMobileByCountry, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import PhoneInput from "../components/PhoneInput";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
@@ -1271,6 +1271,36 @@ function PatientDetail({
     printViaIframe(html);
   };
 
+  const handleShareWhatsAppCertificate = (certificate: Certificate) => {
+    if (!patient) return;
+    const parts = splitStoredPhone(patient.phone, patient.phone_country_code);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - ${certificate.title || "Medical Certificate"}*`,
+      `----------------------------------------`,
+      `Patient: ${patient.name} (UHID: ${patient.patient_id})`,
+      `Type: ${certificate.certificate_type.replace(/_/g, " ")}`,
+      certificate.admission_id ? `Admission: #${certificate.admission_id}` : "",
+      certificate.issued_by ? `Issued by: ${certificate.issued_by}` : "",
+      certificate.created_at ? `Date: ${formatDateTimeIST(certificate.created_at)}` : "",
+      `----------------------------------------`,
+      certificate.body ? certificate.body : "",
+      `----------------------------------------`,
+      `Valid hospital document issued by HospAI Hospital.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
   const documentGroups = useMemo(() => {
     const sorted = [...documents].sort((a, b) => getTimestamp(b.created_at) - getTimestamp(a.created_at));
     const groups = new Map<string, { label: string; items: DocumentItem[] }>();
@@ -1659,6 +1689,21 @@ function PatientDetail({
             >
               Print Latest
             </Button>
+            <Button
+              size="sm"
+              style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", marginLeft: "6px" }}
+              onClick={() => {
+                const latest = certificates[0];
+                if (latest) {
+                  handleShareWhatsAppCertificate(latest);
+                } else {
+                  setNotice({ type: "warning", message: "No certificates found for this patient." });
+                }
+              }}
+              disabled={!patient || certificates.length === 0}
+            >
+              💬 WhatsApp Latest
+            </Button>
           </div>
         </div>
         <div className="care-panel-grid">
@@ -1705,6 +1750,21 @@ function PatientDetail({
                   >
                     Print Latest
                   </Button>
+                  <Button
+                    size="sm"
+                    style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff" }}
+                    onClick={() => {
+                      const latest = certificates[0];
+                      if (latest) {
+                        handleShareWhatsAppCertificate(latest);
+                      } else {
+                        setNotice({ type: "warning", message: "No certificates found for this patient." });
+                      }
+                    }}
+                    disabled={!patient || certificates.length === 0}
+                  >
+                    💬 WhatsApp
+                  </Button>
                 </div>
               </div>
             </div>
@@ -1735,6 +1795,14 @@ function PatientDetail({
                         onClick={() => handlePrintCertificate(certificate)}
                       >
                         Print
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff" }}
+                        onClick={() => handleShareWhatsAppCertificate(certificate)}
+                      >
+                        💬 WhatsApp
                       </Button>
                       {canEdit ? (
                         <Button

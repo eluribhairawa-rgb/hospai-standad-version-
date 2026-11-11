@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../lib/api";
 import { printViaIframe } from "../lib/printViaIframe";
+import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import type { Notice, Patient } from "../types";
 
 type Props = {
@@ -489,6 +490,45 @@ export default function DischargeSummaryPage({ setNotice, selectedPatient, canEd
     printViaIframe(html);
   };
 
+  const handleShareWhatsApp = () => {
+    if (!records || !records.patient) {
+      setNotice({ type: "warning", message: "No patient record loaded." });
+      return;
+    }
+    const p = records.patient;
+    const enc = records.encounter;
+    const rawPhone = String(p.phone || p.mobile || "");
+    const rawCode = String(p.phone_country_code || p.country_code || "+91");
+    const parts = splitStoredPhone(rawPhone, rawCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const printStatus: SummaryStatus | "UNSAVED" = viewing ? viewing.status : dirty || !saved ? "UNSAVED" : saved.status;
+    const lines = [
+      `*HospAI Hospital - Discharge Summary*`,
+      `----------------------------------------`,
+      `Patient: ${p.name || patientName} (UHID: ${p.patient_id || patientId})`,
+      enc?.attending_doctor ? `Consultant: Dr. ${enc.attending_doctor}` : "",
+      enc?.ward ? `Ward: ${enc.ward}${enc.bed_no ? ` · Bed ${enc.bed_no}` : ""}` : "",
+      enc?.start ? `Admitted: ${fmtDate(enc.start)}` : "",
+      `Discharge Date: ${fmtDate(shown?.discharge_date || new Date().toISOString())}`,
+      shown?.final_diagnosis ? `Final Diagnosis: ${shown.final_diagnosis}` : "",
+      `Status: ${printStatus}`,
+      `----------------------------------------`,
+      `Discharge summary details have been recorded. For medications or emergency assistance, contact HospAI Hospital.`,
+      `Wishing you good health & a speedy recovery!`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
   const meta = status ? STATUS_META[status] : null;
   const actions: Action[] = !saved || dirty || viewing ? [] : [
     ...(status === "DRAFT" && canEdit ? (["submit"] as Action[]) : []),
@@ -648,6 +688,26 @@ export default function DischargeSummaryPage({ setNotice, selectedPatient, canEd
                 style={{ height: "36px", padding: "0 16px", borderRadius: "8px", background: "#00828a", color: "#fff", fontWeight: 700, fontSize: "13px", border: "none", cursor: "pointer" }}
               >
                 🖨 Print / Save PDF
+              </button>
+              <button
+                type="button"
+                onClick={handleShareWhatsApp}
+                style={{
+                  height: "36px",
+                  padding: "0 16px",
+                  borderRadius: "8px",
+                  background: "#25D366",
+                  color: "#fff",
+                  fontWeight: 700,
+                  fontSize: "13px",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                💬 Share via WhatsApp
               </button>
             </div>
           </div>

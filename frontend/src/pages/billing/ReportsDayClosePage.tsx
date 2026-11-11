@@ -5,6 +5,7 @@ import type { Notice } from "../../types";
 import { Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import "./billingTheme.css";
 
 type Props = {
@@ -288,6 +289,33 @@ export default function ReportsDayClosePage({ setNotice, onNavigate }: Props) {
         totals: [{ label: "Total Paid", value: `₹${fmt(r.amount)}`, grand: true }],
       })
     );
+  };
+
+  const handleShareWhatsAppReceipt = (r: any) => {
+    const rawPhone = r.phone || r.mobile || "";
+    const parts = splitStoredPhone(rawPhone);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - Payment Receipt*`,
+      `----------------------------------------`,
+      `Receipt No: ${r.receipt_no}`,
+      `Date: ${r.time || targetDate}`,
+      `Payment Mode: ${r.payment_mode}`,
+      `Amount Paid: ₹${fmt(r.amount)}`,
+      `----------------------------------------`,
+      `Thank you for your payment at HospAI Hospital.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   const kpis = reportData.kpis ?? {};
@@ -1368,6 +1396,14 @@ export default function ReportsDayClosePage({ setNotice, onNavigate }: Props) {
               </button>
               <button type="button" className="billing-btn-teal" onClick={() => printReceipt(selectedReceipt)}>
                 Print Receipt
+              </button>
+              <button
+                type="button"
+                className="billing-btn-teal"
+                style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff" }}
+                onClick={() => handleShareWhatsAppReceipt(selectedReceipt)}
+              >
+                💬 WhatsApp
               </button>
             </div>
           </div>

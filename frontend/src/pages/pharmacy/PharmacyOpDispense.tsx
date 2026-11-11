@@ -8,7 +8,7 @@ import type { Notice, Patient } from "../../types";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml, buildPrintLabelsHtml } from "../../lib/printTemplates";
 import { downloadCsv } from "../../lib/csvExport";
-import { COUNTRY_CODE_RULES, COUNTRY_CODES, normalizePhoneNumber, validateMobileByCountry, withCountryCode } from "../../lib/phone";
+import { COUNTRY_CODE_RULES, COUNTRY_CODES, normalizePhoneNumber, validateMobileByCountry, withCountryCode, splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -681,6 +681,37 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     }
   };
 
+  const handleShareWhatsAppRepaymentReceipt = () => {
+    if (!repayReceipt) return;
+    const { invoice, amount, mode, remaining } = repayReceipt;
+    const external = isExternalDueInvoice(invoice);
+    const rawPhone = external ? (invoice.phone || invoice.patient_phone || "") : (invoice.patient_phone || invoice.phone || "");
+    const parts = splitStoredPhone(rawPhone);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital Pharmacy - Due Repayment Receipt*`,
+      `----------------------------------------`,
+      `Invoice: ${invoice.invoice_no}`,
+      `Customer / Patient: ${dueCustomerName(invoice)}`,
+      `Amount Paid: ₹${amount.toFixed(2)}`,
+      `Payment Mode: ${mode.toUpperCase()}`,
+      `Remaining Due: ₹${remaining.toFixed(2)}`,
+      `----------------------------------------`,
+      `Thank you for settling your pharmacy payment.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
   const handleConfirmRepayment = async () => {
     if (!selectedDueInvoice) return;
     const amountNum = parseFloat(repayAmount);
@@ -928,6 +959,46 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     } catch (error) {
       setNotice({ type: "error", message: error instanceof Error ? error.message : "Unable to print the invoice." });
     }
+  };
+
+  const handleShareWhatsAppInvoice = () => {
+    if (!dispenseResult) return;
+    const isExt = Boolean(dispensedCustomer || (!dispensedPatient && dispenseResult));
+    const customerFullName = dispensedPatient
+      ? `${dispensedPatient.name || ""} ${dispensedPatient.last_name || ""}`.trim()
+      : (dispensedCustomer?.name || "Customer");
+    const customerPhone = dispensedPatient?.phone || dispensedCustomer?.phone || "";
+    const phoneCode = dispensedPatient?.phone_country_code || dispensedCustomer?.phone_country_code || "+91";
+    const parts = splitStoredPhone(customerPhone, phoneCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const invoiceNumber = dispenseResult.invoice_no || `INV-${dispenseResult.invoice_id}`;
+    const total = dispenseResult.total_amount || 0;
+
+    const lines = [
+      `*HospAI Hospital Pharmacy - Dispense Invoice*`,
+      `----------------------------------------`,
+      `Invoice: ${invoiceNumber}`,
+      `Customer / Patient: ${customerFullName}`,
+      dispensedPatient?.patient_id ? `UHID: ${dispensedPatient.patient_id}` : "",
+      `Payment Mode: ${paymentMode.toUpperCase()}`,
+      `Total Amount: ₹${Number(total).toFixed(2)}`,
+      dispenseResult.due_amount ? `Due Amount: ₹${Number(dispenseResult.due_amount).toFixed(2)}` : "",
+      `----------------------------------------`,
+      `Medicines Dispensed:`,
+      ...dispensedItems.map((it, idx) => `${idx + 1}. ${it.medicine_name} x ${it.quantity} (₹${(it.unit_price * it.quantity).toFixed(2)})`),
+      `----------------------------------------`,
+      `Thank you for choosing HospAI Hospital Pharmacy. Take medicines as directed.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   const handlePrintLabels = () => {
@@ -2410,7 +2481,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
               )}
             </div>
 
-            <div style={{ display: "flex", gap: "1rem", justifyContent: "center" }}>
+            <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
               <Button
                 type="button"
                 className="primary"
@@ -2418,6 +2489,13 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                 onClick={handlePrintInvoice}
               >
                 Print Invoice
+              </Button>
+              <Button
+                type="button"
+                style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", fontWeight: 700 }}
+                onClick={handleShareWhatsAppInvoice}
+              >
+                💬 WhatsApp Invoice
               </Button>
               <Button
                 type="button"
@@ -2486,6 +2564,13 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     onClick={handlePrintRepaymentReceipt}
                   >
                     🖨️ Print Receipt
+                  </Button>
+                  <Button
+                    type="button"
+                    style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", fontWeight: 700 }}
+                    onClick={handleShareWhatsAppRepaymentReceipt}
+                  >
+                    💬 WhatsApp Receipt
                   </Button>
                 </div>
               </>

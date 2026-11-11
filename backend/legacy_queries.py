@@ -1478,10 +1478,35 @@ def create_insurance_provider(db, name, contact_person=None, contact_phone=None,
 
 
 
+def get_active_bed_allocation(cursor, patient_id):
+    """The patient's current bed allocation on a not-yet-discharged admission, or None."""
+    cursor.execute(
+        """
+        SELECT b.id, b.admission_id, b.ward, b.room_no, b.bed_no FROM bed_allocations b
+        JOIN admissions a ON a.id = b.admission_id
+        WHERE b.patient_id = ? AND b.status = 'active' AND a.discharge_date IS NULL
+        ORDER BY b.allocated_at DESC LIMIT 1
+        """,
+        (patient_id,),
+    )
+    return cursor.fetchone()
+
+
+def ensure_not_currently_admitted(cursor, patient_id):
+    """Raise ValueError if the patient already holds a bed on an undischarged admission."""
+    cur = get_active_bed_allocation(cursor, patient_id)
+    if cur:
+        raise ValueError(
+            f"Patient {patient_id} is already admitted (admission #{cur['admission_id']}, "
+            f"{cur['ward'] or '-'} / bed {cur['bed_no'] or '-'}). Discharge the current admission before admitting or assigning another bed."
+        )
+
+
 def add_admission(db, patient_id, notes="", hospital_id=None):
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        ensure_not_currently_admitted(cursor, patient_id)
         # NOTE: admission_date stored as UTC via CURRENT_TIMESTAMP (matches
         # patients.created_at pattern). Converted to IST only at display
         # time via date_clause(). Do NOT store IST wall-clock time here --
@@ -4200,6 +4225,8 @@ def set_encounter_disposition(db, encounter_id, disposition, notes, username):
 def assign_bed(db, data):
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        if str(data.get("status", "active")) == "active":
+            ensure_not_currently_admitted(cursor, data["patient_id"])
         cursor.execute(
             """
             INSERT INTO bed_allocations (
@@ -4800,8 +4827,13 @@ def update_insurance_claim(db, claim_id, data):
                 claim_id,
             ),
         )
+        updated = cursor.rowcount > 0
+        new_status = data.get("settlement_status", existing["settlement_status"])
+        inv_id = data.get("invoice_id", existing["invoice_id"])
+        if updated and inv_id and str(new_status or "").lower() == "paid":
+            deduct_deferred_insurance_stock(cursor, inv_id, data.get("_actor"))
         conn.commit()
-        return cursor.rowcount > 0
+        return updated
 
 
 
@@ -6357,6 +6389,56 @@ def _create_emar_doses(cursor, line, indent_id, admission_id, patient_id, medici
         )
 
 
+def _pending_insurance_qty(cursor, medicine_name):
+    """Units dispensed against insurance whose stock has not been deducted yet."""
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(ps.quantity), 0) AS qty FROM pharmacy_sales ps
+        WHERE ps.medicine_name = ? AND LOWER(COALESCE(ps.payment_mode, '')) = 'insurance'
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id)
+        """,
+        (medicine_name,),
+    )
+    row = cursor.fetchone()
+    return int(row["qty"] or 0) if row else 0
+
+
+def deduct_deferred_insurance_stock(cursor, invoice_id, username):
+    """Deduct inventory (FEFO) for insurance sales on an invoice whose claim is
+    now settled. Idempotent: sales that already have a stock movement are skipped."""
+    cursor.execute(
+        """
+        SELECT ps.id, ps.medicine_name, ps.quantity, ps.stock_source FROM pharmacy_sales ps
+        WHERE ps.invoice_id = ? AND LOWER(COALESCE(ps.payment_mode, '')) = 'insurance'
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales' AND sm.ref_id = ps.id)
+        ORDER BY ps.id
+        """,
+        (invoice_id,),
+    )
+    for sale in cursor.fetchall():
+        remaining = int(sale["quantity"] or 0)
+        cursor.execute(
+            """
+            SELECT id, qty_available, stock_source FROM pharmacy_inventory
+            WHERE medicine_name = ? AND batch_status = 'available' AND qty_available > 0
+            ORDER BY CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END, expiry_date ASC, id ASC
+            FOR UPDATE
+            """,
+            (sale["medicine_name"],),
+        )
+        for batch in cursor.fetchall():
+            if remaining <= 0:
+                break
+            take = min(int(batch["qty_available"] or 0), remaining)
+            if take <= 0:
+                continue
+            new_avail = int(batch["qty_available"]) - take
+            cursor.execute("UPDATE pharmacy_inventory SET qty_available = ?, quantity = ? WHERE id = ?", (new_avail, new_avail, batch["id"]))
+            record_stock_movement(cursor, batch["id"], batch["stock_source"] or sale["stock_source"] or "CASH", "dispense", -take,
+                                  ref_table="pharmacy_sales", ref_id=sale["id"], actor=username)
+            remaining -= take
+
+
 def create_pharmacy_dispense(db, data, username):
     """Atomic: FEFO batch selection + stock decrement + sale record(s) +
     linked invoice (+ draft insurance claim when billed via insurance), all
@@ -6399,6 +6481,15 @@ def create_pharmacy_dispense(db, data, username):
     indent_id = data.get("indent_id")
     billing_type = data.get("billing_type", "OPD_IMMEDIATE")
     payment_mode = data.get("payment_mode", "cash")
+    # Insurance-billed dispenses are recorded as Due and do NOT touch inventory
+    # (stock / stock value) until the insurance claim is settled.
+    defer_stock = (
+        str(payment_mode or "").strip().lower() == "insurance"
+        or billing_type in ("OPD_INSURANCE", "INSURANCE", "IPD_INSURANCE")
+    )
+    if defer_stock:
+        payment_mode = "insurance"
+    deferred_in_request = {}
     idempotency_key = data.get("idempotency_key")
     payload_hash = _payload_hash(data)
 
@@ -6498,17 +6589,31 @@ def create_pharmacy_dispense(db, data, username):
 
             line_movements = []
             remaining = qty_needed
+            # Stock already promised to earlier undeducted insurance sales is not available again.
+            reserved_left = 0
+            if defer_stock:
+                reserved_left = _pending_insurance_qty(cursor, medicine_name) + deferred_in_request.get(medicine_name, 0)
             for batch in candidate_batches:
                 if remaining <= 0:
                     break
                 available = int(batch["qty_available"] or 0)
+                if defer_stock:
+                    held = min(reserved_left, available)
+                    reserved_left -= held
+                    available -= held
                 take = min(available, remaining)
-                new_avail = available - take
-                cursor.execute(
-                    "UPDATE pharmacy_inventory SET qty_available = ?, quantity = ? WHERE id = ?",
-                    (new_avail, new_avail, batch["id"]),
-                )
-                line_movements.append((batch["id"], take, batch["stock_source"] or stock_source))
+                if take <= 0:
+                    continue
+                if defer_stock:
+                    # Availability check only; inventory is deducted on claim settlement.
+                    deferred_in_request[medicine_name] = deferred_in_request.get(medicine_name, 0) + take
+                else:
+                    new_avail = available - take
+                    cursor.execute(
+                        "UPDATE pharmacy_inventory SET qty_available = ?, quantity = ? WHERE id = ?",
+                        (new_avail, new_avail, batch["id"]),
+                    )
+                    line_movements.append((batch["id"], take, batch["stock_source"] or stock_source))
                 remaining -= take
                 if unit_price == 0:
                     unit_price = float(batch["unit_price"] or 0)
@@ -6558,7 +6663,7 @@ def create_pharmacy_dispense(db, data, username):
         dispense_due_amount = 0.0
         dispense_payment_status = "paid"
         # Only generate an immediate invoice for OPD; IPD and Emergency Account run on patient account settled at discharge / encounter close
-        if total_amount > 0 and (patient_id or is_external) and billing_type not in ("IPD_RUNNING", "EMERGENCY_ACCOUNT"):
+        if total_amount > 0 and (patient_id or is_external) and (billing_type not in ("IPD_RUNNING", "EMERGENCY_ACCOUNT") or (defer_stock and billing_type == "IPD_RUNNING")):
             invoice_no = f"INV-PHM-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
             is_insurance = (
                 payment_mode.lower() == "insurance"

@@ -5,6 +5,7 @@ import type { Notice } from "../../types";
 import { Button, Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import "./billingTheme.css";
 
 type OverviewCard = "net_billed" | "receipts" | "refunds" | "dues";
@@ -276,6 +277,47 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
       ],
     });
     printViaIframe(html);
+  };
+
+  const handleShareWhatsAppReceipt = async (rcp: any) => {
+    let phone = rcp.phone || "";
+    let phoneCode = rcp.phone_country_code || "+91";
+    if (!phone && rcp.patient_id) {
+      try {
+        const res = await apiFetch<{ patient?: { phone?: string; phone_country_code?: string } }>(
+          `/api/patients/${encodeURIComponent(rcp.patient_id)}`
+        );
+        phone = res?.patient?.phone || "";
+        phoneCode = res?.patient?.phone_country_code || "+91";
+      } catch {
+        // ignore
+      }
+    }
+
+    const parts = splitStoredPhone(phone, phoneCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const lines = [
+      `*HospAI Hospital - Official Payment Receipt*`,
+      `----------------------------------------`,
+      `Receipt No: ${rcp.receipt_no}`,
+      rcp.patient_name ? `Patient: ${rcp.patient_name}` : "",
+      rcp.patient_id ? `UHID: ${rcp.patient_id}` : "",
+      `Payment Date: ${rcp.date || targetDate} ${rcp.time || ""}`,
+      `Payment Mode: ${(rcp.mode || "CASH").toUpperCase()}`,
+      `Amount Paid: ₹${Number(rcp.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      `----------------------------------------`,
+      `Thank you for your payment at HospAI Hospital. Keep this receipt for your records.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   const handleCollectBill = (row: any) => {
@@ -651,6 +693,14 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                               </svg>
                               Print
                             </button>
+                            <button
+                              type="button"
+                              className="billing-btn-table-outline"
+                              style={{ color: "#16a34a", borderColor: "#86efac", marginLeft: "4px" }}
+                              onClick={() => void handleShareWhatsAppReceipt(rcp)}
+                            >
+                              💬 WhatsApp
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -710,6 +760,14 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                               <rect x="6" y="14" width="12" height="8" />
                             </svg>
                             Print
+                          </button>
+                          <button
+                            type="button"
+                            className="billing-btn-table-outline"
+                            style={{ color: "#16a34a", borderColor: "#86efac", marginLeft: "4px" }}
+                            onClick={() => void handleShareWhatsAppReceipt(rcp)}
+                          >
+                            💬 WhatsApp
                           </button>
                         </td>
                       </tr>

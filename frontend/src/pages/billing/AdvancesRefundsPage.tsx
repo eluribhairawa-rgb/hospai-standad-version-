@@ -5,6 +5,7 @@ import type { Notice } from "../../types";
 import { Button, Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import "./billingTheme.css";
 
 type Props = {
@@ -375,6 +376,90 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
     printViaIframe(html);
   };
 
+  const handleShareWhatsAppAdvance = async (adv: any) => {
+    let phone = patientInfo?.phone || "";
+    let phoneCode = patientInfo?.phone_country_code || "+91";
+    if (!phone && adv.patient_id) {
+      try {
+        const res = await apiFetch<{ patient?: { phone?: string; phone_country_code?: string } }>(
+          `/api/patients/${encodeURIComponent(adv.patient_id)}`
+        );
+        phone = res?.patient?.phone || "";
+        phoneCode = res?.patient?.phone_country_code || "+91";
+      } catch {
+        // ignore
+      }
+    }
+
+    const parts = splitStoredPhone(phone, phoneCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const lines = [
+      `*HospAI Hospital - Advance Deposit Receipt*`,
+      `----------------------------------------`,
+      `Advance No: ${adv.advance_no}`,
+      `Patient UHID: ${adv.patient_id}`,
+      patientInfo?.name ? `Patient Name: ${patientInfo.name}` : "",
+      `Amount Deposited: ₹${Number(adv.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      `Payment Mode: ${(adv.payment_mode || "CASH").toUpperCase()}`,
+      adv.transaction_ref ? `Ref / Txn: ${adv.transaction_ref}` : "",
+      `Date: ${adv.created_at ? String(adv.created_at).slice(0, 10) : "Today"}`,
+      `----------------------------------------`,
+      `Keep this deposit receipt for discharge settlement.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
+  const handleShareWhatsAppRefund = async (rf: any) => {
+    let phone = patientInfo?.phone || "";
+    let phoneCode = patientInfo?.phone_country_code || "+91";
+    if (!phone && rf.patient_id) {
+      try {
+        const res = await apiFetch<{ patient?: { phone?: string; phone_country_code?: string } }>(
+          `/api/patients/${encodeURIComponent(rf.patient_id)}`
+        );
+        phone = res?.patient?.phone || "";
+        phoneCode = res?.patient?.phone_country_code || "+91";
+      } catch {
+        // ignore
+      }
+    }
+
+    const parts = splitStoredPhone(phone, phoneCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const lines = [
+      `*HospAI Hospital - Refund Payment Voucher*`,
+      `----------------------------------------`,
+      `Refund No: ${rf.refund_no}`,
+      `Patient UHID: ${rf.patient_id}`,
+      patientInfo?.name ? `Patient Name: ${patientInfo.name}` : "",
+      `Amount Refunded: ₹${Number(rf.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+      `Refund Method: ${(rf.refund_method || "CASH").toUpperCase()}`,
+      rf.reason ? `Reason: ${rf.reason}` : "",
+      `Date: ${rf.paid_at ? String(rf.paid_at).slice(0, 10) : "Completed"}`,
+      `----------------------------------------`,
+      `Refund disbursed by HospAI Billing Department.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
   return (
     <div className="billing-page-wrapper">
       {/* 1. Breadcrumbs */}
@@ -692,6 +777,15 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                               >
                                 🖨️ Receipt
                               </button>
+                              <button
+                                type="button"
+                                className="billing-btn-table-outline"
+                                style={{ color: "#16a34a", borderColor: "#86efac", marginLeft: "4px" }}
+                                onClick={() => void handleShareWhatsAppAdvance(a)}
+                                title="Share advance receipt on WhatsApp"
+                              >
+                                💬 WhatsApp
+                              </button>
                             </td>
                           </tr>
                         );
@@ -792,13 +886,24 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                                   </button>
                                 )}
                                 {st === "paid" && (
-                                  <button
-                                    type="button"
-                                    className="billing-btn-table-outline"
-                                    onClick={() => printRefundVoucher(rf)}
-                                  >
-                                    🖨️ Voucher
-                                  </button>
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="billing-btn-table-outline"
+                                      onClick={() => printRefundVoucher(rf)}
+                                    >
+                                      🖨️ Voucher
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="billing-btn-table-outline"
+                                      style={{ color: "#16a34a", borderColor: "#86efac" }}
+                                      onClick={() => void handleShareWhatsAppRefund(rf)}
+                                      title="Share refund voucher on WhatsApp"
+                                    >
+                                      💬 WhatsApp
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             </td>

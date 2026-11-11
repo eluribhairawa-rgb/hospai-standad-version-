@@ -9,6 +9,7 @@ import { fullPatientName, lookupPatientByUhid, normalizeUhidLookup } from "../li
 import type { Notice } from "../types";
 import { PRINT_BRAND_HEADER_DATA_URI } from "../lib/printBrand";
 import { printViaIframe } from "../lib/printViaIframe";
+import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import { generatePDFBlob, downloadPDF, patientFilename } from "../lib/exportService";
 
 export type BillingView =
@@ -751,6 +752,53 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
     } catch {
       setNotice({ type: "error", message: "Failed to generate Invoice PDF" });
     }
+  };
+
+  const handleShareWhatsAppInvoice = async (invoice: Invoice) => {
+    let phone = "";
+    let phoneCode = "+91";
+    let patientName = "";
+    if (invoice.patient_id) {
+      try {
+        const res = await apiFetch<{ patient?: { name?: string; last_name?: string; phone?: string; phone_country_code?: string } }>(
+          `/api/patients/${encodeURIComponent(invoice.patient_id)}`
+        );
+        patientName = [res?.patient?.name, res?.patient?.last_name].filter(Boolean).join(" ");
+        phone = res?.patient?.phone || "";
+        phoneCode = res?.patient?.phone_country_code || "+91";
+      } catch {
+        // external/walk-in invoice
+      }
+    }
+
+    const parts = splitStoredPhone(phone, phoneCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+    const paid = invoice.total_amount - invoice.due_amount;
+
+    const lines = [
+      `*HospAI Hospital - Invoice #${invoice.invoice_no || `INV-${invoice.id}`}*`,
+      `----------------------------------------`,
+      patientName ? `Patient: ${patientName}` : "",
+      invoice.patient_id ? `UHID: ${invoice.patient_id}` : "",
+      `Department / Module: ${invoice.module || "Hospital Billing"}`,
+      `Total Amount: ${formatCurrency(invoice.total_amount)}`,
+      `Paid Amount: ${formatCurrency(paid)}`,
+      `Due Amount: ${formatCurrency(invoice.due_amount)}`,
+      `Status: ${invoice.payment_status || "Pending"}`,
+      `Date: ${formatDateTime(invoice.created_at)}`,
+      `----------------------------------------`,
+      `Thank you for choosing HospAI Hospital. Keep this invoice for your records.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
   };
 
   const handleRecordPayment = async (event: FormEvent<HTMLFormElement>) => {
@@ -1502,6 +1550,14 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
                         <Button type="button" size="sm" onClick={() => handleEditInvoice(invoice)}>Edit</Button>
                         <Button type="button" size="sm" variant="secondary" onClick={() => handlePrintInvoice(invoice)}>Print</Button>
                         <Button type="button" size="sm" variant="secondary" onClick={() => handleDownloadInvoicePdf(invoice)}>PDF</Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", fontWeight: 600 }}
+                          onClick={() => void handleShareWhatsAppInvoice(invoice)}
+                        >
+                          💬 WhatsApp
+                        </Button>
                         <Button type="button" size="sm" variant="destructive" onClick={() => void handleDeleteInvoice(invoice)}>Delete</Button>
                       </div>
                     </TableCell>
@@ -1524,6 +1580,14 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
                       <Button type="button" size="sm" onClick={() => handleEditInvoice(invoice)}>Edit</Button>
                       <Button type="button" size="sm" variant="secondary" onClick={() => handlePrintInvoice(invoice)}>Print</Button>
                       <Button type="button" size="sm" variant="secondary" onClick={() => handleDownloadInvoicePdf(invoice)}>PDF</Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        style={{ background: "#25D366", borderColor: "#25D366", color: "#ffffff", fontWeight: 600 }}
+                        onClick={() => void handleShareWhatsAppInvoice(invoice)}
+                      >
+                        💬 WhatsApp
+                      </Button>
                       <Button type="button" size="sm" variant="destructive" onClick={() => void handleDeleteInvoice(invoice)}>Delete</Button>
                     </div>
                     <p className="muted"><strong>Created:</strong> {formatDateTime(invoice.created_at)}</p>

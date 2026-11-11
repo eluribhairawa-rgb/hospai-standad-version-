@@ -5,6 +5,7 @@ import type { Notice } from "../../types";
 import { Button, Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
+import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 import "./billingTheme.css";
 
 type Props = {
@@ -385,6 +386,71 @@ export default function IpDischargeBillingPage({
     printViaIframe(html);
   };
 
+  const handleShareWhatsAppBill = () => {
+    const p = dischargeData?.patient || {};
+    const a = dischargeData?.admission || {};
+    const rawPhone = p.phone || p.mobile || "";
+    const rawCode = p.phone_country_code || "+91";
+    const parts = splitStoredPhone(rawPhone, rawCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - Inpatient Discharge Bill Summary*`,
+      `----------------------------------------`,
+      `Patient: ${p.name || "Patient"} ${p.last_name || ""} (UHID: ${p.patient_id || "-"})`,
+      `Admission: IP-${String(a.id || 0).padStart(4, "0")}`,
+      a.ward ? `Ward / Bed: ${a.ward} · Bed ${a.bed_no || "-"}` : "",
+      `Gross Charges: ₹${fmt(charges.gross_charges)}`,
+      discVal > 0 ? `Discount: -₹${fmt(discVal)}` : "",
+      `Net Bill Amount: ₹${fmt(liveNetBill)}`,
+      charges.advance_applied > 0 ? `Advance Applied: -₹${fmt(charges.advance_applied)}` : "",
+      `*Balance Payable: ₹${fmt(liveBalance)}*`,
+      `Status: ${dischargeData?.status === "finalised" ? "Settled & Finalised" : "Pending Settlement"}`,
+      `----------------------------------------`,
+      `For billing inquiries, contact HospAI Billing Cashier Desk.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
+  const handleShareWhatsAppReceipt = (rec: any) => {
+    const p = dischargeData?.patient || {};
+    const rawPhone = p.phone || p.mobile || "";
+    const rawCode = p.phone_country_code || "+91";
+    const parts = splitStoredPhone(rawPhone, rawCode);
+    const waNumber = toWhatsAppNumber(parts.countryCode, parts.value);
+
+    const lines = [
+      `*HospAI Hospital - Inpatient Payment Receipt*`,
+      `----------------------------------------`,
+      `Receipt No: ${rec.receipt_no || "REC"}`,
+      `Patient: ${p.name || "Patient"} ${p.last_name || ""} (UHID: ${p.patient_id || "-"})`,
+      `Date: ${rec.created_at ? String(rec.created_at).slice(0, 10) : targetDate}`,
+      `Payment Mode: ${(rec.payment_mode || "CASH").toUpperCase()}`,
+      `Amount Paid: ₹${fmt(rec.total_amount || 0)}`,
+      `----------------------------------------`,
+      `Thank you for your payment at HospAI Hospital.`,
+    ].filter(Boolean);
+
+    const text = lines.join("\n");
+    const url = waNumber
+      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(text)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setNotice({
+      type: "success",
+      message: waNumber ? `WhatsApp chat opened for ${parts.countryCode} ${parts.value}.` : "WhatsApp opened.",
+    });
+  };
+
   const patient = dischargeData?.patient;
   const admission = dischargeData?.admission;
   const itemised = dischargeData?.itemised || {};
@@ -478,6 +544,16 @@ export default function IpDischargeBillingPage({
               <rect x="6" y="14" width="12" height="8" />
             </svg>
             🖨️ Detailed Bill (with Medicines)
+          </button>
+
+          <button
+            type="button"
+            className="billing-btn-outline"
+            style={{ borderColor: "#25D366", color: "#16a34a", fontWeight: 700, background: "#f0fdf4" }}
+            onClick={handleShareWhatsAppBill}
+            title="Share bill details to patient's WhatsApp"
+          >
+            💬 Share via WhatsApp
           </button>
         </div>
       </div>
@@ -1188,6 +1264,14 @@ export default function IpDischargeBillingPage({
                               onClick={() => printReceipt(rec)}
                             >
                               Print Receipt
+                            </button>
+                            <button
+                              type="button"
+                              className="billing-btn-outline"
+                              style={{ padding: "3px 8px", fontSize: "0.75rem", color: "#16a34a", borderColor: "#86efac", marginLeft: "4px" }}
+                              onClick={() => handleShareWhatsAppReceipt(rec)}
+                            >
+                              💬 WhatsApp
                             </button>
                           </td>
                         </tr>

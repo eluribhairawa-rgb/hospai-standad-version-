@@ -192,7 +192,8 @@ export async function exportPDF(
   filename: string,
   title: string,
   text?: string,
-  setNotice?: (notice: { type: "success" | "error" | "info"; message: string } | null) => void
+  setNotice?: (notice: { type: "success" | "error" | "info"; message: string } | null) => void,
+  contact?: { phone?: string | null; phoneCountryCode?: string | null }
 ): Promise<void> {
   try {
     const shared = await sharePDF(blob, filename, title, text);
@@ -209,7 +210,14 @@ export async function exportPDF(
 
   // Fallback to desktop/browser-specific share options dialog
   if (window.__hospai_export_share__) {
-    window.__hospai_export_share__({ blob, filename, title, text });
+    window.__hospai_export_share__({
+      blob,
+      filename,
+      title,
+      text,
+      phone: contact?.phone,
+      phoneCountryCode: contact?.phoneCountryCode,
+    });
   } else {
     // Ultimate fallback if no UI listener is registered
     downloadPDF(blob, filename);
@@ -230,6 +238,8 @@ declare global {
       title: string;
       text?: string;
       shareUrl?: string;
+      phone?: string | null;
+      phoneCountryCode?: string | null;
     }) => void;
   }
 }
