@@ -1184,6 +1184,60 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     setFollowUpDate(d.toLocaleDateString("en-CA"));
   };
 
+  // Reset / Clear prescription form for the next patient
+  const clearPrescriptionForm = () => {
+    setActiveQueueItem(null);
+    setPatientUhid("");
+    setPatientName("");
+    setPatientAge("");
+    setPatientGender("Male");
+    setPatientPhone("");
+    setPatientPhoneCode("+91");
+    setAppointmentId(null);
+    setAppointmentToken("");
+    setVisitType("OP Consultation");
+    setSymptoms("");
+    setDiagnosis("");
+    setVitalsBp("");
+    setVitalsPulse("");
+    setVitalsTemp("");
+    setVitalsWeight("");
+    setVitalsSpo2("");
+    setLoadingVitals(false);
+    setLatestVitalsRecord(null);
+    setVitalsSourceUhid("");
+    setLabFbs("");
+    setLabPpbs("");
+    setLabHba1c("");
+    setLabTchol("");
+    setLabLdl("");
+    setLabTgl("");
+    setLabVitd("");
+    setMedicines([
+      {
+        id: "med-1",
+        medicine_name: "",
+        dosage: "",
+        frequency: "",
+        duration: "",
+        instructions: "",
+      },
+    ]);
+    setLabTests("");
+    setAdvice("");
+    const d = new Date();
+    d.setDate(d.getDate() + 5);
+    setFollowUpDate(d.toLocaleDateString("en-CA"));
+    setSendToPharmacy(true);
+    setPatientSearchTerm("");
+    setSearchResults([]);
+    setOcrFileName("");
+    if (ocrPreviewUrl) {
+      URL.revokeObjectURL(ocrPreviewUrl);
+      setOcrPreviewUrl("");
+    }
+  };
+
   // Complete Consultation handler
   const handleCompleteConsultation = async (andPrint: boolean = false) => {
     if (!patientUhid.trim() && !patientName.trim()) {
@@ -1292,11 +1346,14 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
           : `Consultation completed for Token #${completedToken || "1"} (${completedName})! Prescription generated and status successfully reflected under Queue Management.`,
       });
 
-      // 5. If print was requested, open print dialog
+      // 5. If print was requested, open print dialog and clear form after print; otherwise clear immediately
       if (andPrint) {
         setTimeout(() => {
           window.print();
+          clearPrescriptionForm();
         }, 300);
+      } else {
+        clearPrescriptionForm();
       }
     } catch (error) {
       reportError(setNotice, error as { message?: string; status?: number }, "Failed to complete consultation.");
@@ -3374,24 +3431,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
               <button
                 type="button"
                 className="rx-outline-btn"
-                onClick={() => {
-                  setMedicines([]);
-                  setDiagnosis("");
-                  setSymptoms("");
-                  setLabTests("");
-                  setLabFbs("");
-                  setLabPpbs("");
-                  setLabHba1c("");
-                  setLabTchol("");
-                  setLabLdl("");
-                  setLabTgl("");
-                  setLabVitd("");
-                  setActiveQueueItem(null);
-                  setPatientUhid("");
-                  setPatientName("");
-                  setAppointmentId(null);
-                  setAppointmentToken("");
-                }}
+                onClick={clearPrescriptionForm}
               >
                 Clear Form
               </button>
