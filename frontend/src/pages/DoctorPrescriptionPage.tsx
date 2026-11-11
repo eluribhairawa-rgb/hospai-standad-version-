@@ -83,41 +83,11 @@ type OcrPrescriptionFields = {
   follow_up_date: string;
 };
 
-const COMMON_DRUGS = [
-  { name: "Paracetamol 650mg (Dolo)", dosage: "650 mg", freq: "1-1-1", duration: "3 Days", inst: "After Food" },
-  { name: "Amoxicillin + Clavulanate 625mg (Augmentin)", dosage: "625 mg", freq: "1-0-1", duration: "5 Days", inst: "After Food" },
-  { name: "Pantoprazole 40mg (Pan 40)", dosage: "40 mg", freq: "1-0-0", duration: "7 Days", inst: "Before Food (Empty Stomach)" },
-  { name: "Azithromycin 500mg (Azee)", dosage: "500 mg", freq: "1-0-0", duration: "3 Days", inst: "After Food" },
-  { name: "Cetirizine 10mg (Cetzine)", dosage: "10 mg", freq: "0-0-1", duration: "5 Days", inst: "At Bedtime" },
-  { name: "Metformin 500mg (Glycomet)", dosage: "500 mg", freq: "1-0-1", duration: "30 Days", inst: "After Food" },
-  { name: "Telmisartan 40mg (Telma 40)", dosage: "40 mg", freq: "1-0-0", duration: "30 Days", inst: "Morning After Food" },
-  { name: "Atorvastatin 10mg (Atorva)", dosage: "10 mg", freq: "0-0-1", duration: "30 Days", inst: "At Bedtime" },
-  { name: "Ibuprofen 400mg (Brufen)", dosage: "400 mg", freq: "1-0-1", duration: "3 Days", inst: "After Food" },
-  { name: "Cough Syrup (Ascoril LS)", dosage: "10 ml", freq: "1-1-1", duration: "5 Days", inst: "After Food" },
-  { name: "Multivitamin (Becadexamin)", dosage: "1 Cap", freq: "1-0-0", duration: "15 Days", inst: "After Food" },
-  { name: "Rabeprazole + Domperidone (Rablet-D)", dosage: "20mg/30mg", freq: "1-0-0", duration: "10 Days", inst: "Before Food" },
-];
-
 const WhatsAppIcon = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
     <path d="M12.031 2C6.504 2 2 6.504 2 12.031c0 1.954.563 3.778 1.536 5.32L2 22l4.821-1.503a10.007 10.007 0 0 0 5.21 1.534h.005c5.526 0 10.03-4.504 10.03-10.031A10.02 10.02 0 0 0 12.031 2zm0 18.272a8.23 8.23 0 0 1-4.214-1.157l-.302-.18-2.862.893.908-2.793-.197-.313A8.216 8.216 0 0 1 3.784 12.03c0-4.549 3.7-8.249 8.249-8.249 4.547 0 8.246 3.7 8.246 8.25 0 4.548-3.7 8.241-8.248 8.241zm4.52-6.177c-.248-.124-1.465-.723-1.692-.806-.228-.083-.393-.124-.559.124-.166.248-.642.806-.786.971-.145.166-.29.186-.538.062-.248-.124-1.049-.387-1.997-1.233-.738-.658-1.237-1.472-1.382-1.72-.145-.248-.016-.382.108-.506.112-.111.248-.29.373-.435.124-.145.166-.248.248-.414.083-.166.042-.311-.02-.435-.063-.124-.559-1.348-.766-1.846-.201-.485-.406-.419-.559-.427l-.476-.008c-.166 0-.435.062-.663.311-.228.248-.87 1.056-.87 2.574s1.099 2.984 1.253 3.191c.155.207 2.164 3.305 5.244 4.634.733.317 1.305.506 1.751.648.736.234 1.406.201 1.936.122.591-.088 1.815-.742 2.072-1.458.257-.716.257-1.33.18-1.458-.076-.124-.241-.186-.489-.31z" />
   </svg>
 );
-
-const COMMON_DIAGNOSES = [
-  "Viral Fever / Pyrexia",
-  "Upper Respiratory Tract Infection (URTI)",
-  "Acute Bronchitis",
-  "Acute Gastritis / Acid Peptic Disease",
-  "Essential Hypertension",
-  "Type 2 Diabetes Mellitus",
-  "Gastroenteritis / Acute Diarrhea",
-  "Urinary Tract Infection (UTI)",
-  "Allergic Rhinitis / Sinusitis",
-  "Migraine / Tension Headache",
-  "Lumbar Spondylosis / Low Back Ache",
-  "General Bodyache & Malaise",
-];
 
 const COMMON_LAB_TESTS = [
   "Complete Blood Count (CBC)",
@@ -1213,19 +1183,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       instructions: "",
     };
     setMedicines([...medicines, newMed]);
-  };
-
-  const handleQuickAddMedicine = (drug: (typeof COMMON_DRUGS)[0]) => {
-    const newMed: MedicineItem = {
-      id: `med-${Date.now()}`,
-      medicine_name: drug.name,
-      dosage: drug.dosage,
-      frequency: drug.freq,
-      duration: drug.duration,
-      instructions: drug.inst,
-    };
-    setMedicines([...medicines, newMed]);
-    setNotice({ type: "success", message: `Added ${drug.name} to prescription.` });
   };
 
   const handleRemoveMedicine = (id: string) => {
@@ -2931,35 +2888,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
               </div>
             </div>
 
-            {/* Quick Diagnosis Suggestions */}
-            <div style={{ marginBottom: "14px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "6px" }}>
-                Quick Diagnosis Presets (Click to set):
-              </div>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {COMMON_DIAGNOSES.slice(0, 8).map((diag) => (
-                  <button
-                    key={diag}
-                    type="button"
-                    onClick={() => setDiagnosis(diag)}
-                    style={{
-                      background: diagnosis === diag ? "#0284c7" : "#f1f5f9",
-                      color: diagnosis === diag ? "#ffffff" : "#334155",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "14px",
-                      padding: "3px 10px",
-                      fontSize: "11.5px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      transition: "all 0.1s ease",
-                    }}
-                  >
-                    + {diag}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Vitals row */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
               <div className="doctor-rx-field">
@@ -3131,34 +3059,6 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                 <button type="button" className="add-med-btn" onClick={handleAddMedicine}>
                   + Add Medicine
                 </button>
-              </div>
-            </div>
-
-            {/* Quick add chips */}
-            <div style={{ marginBottom: "12px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "5px" }}>
-                Common OPD Drugs Quick-Add:
-              </div>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {COMMON_DRUGS.slice(0, 6).map((drug) => (
-                  <button
-                    key={drug.name}
-                    type="button"
-                    onClick={() => handleQuickAddMedicine(drug)}
-                    style={{
-                      background: "#f0fdf4",
-                      color: "#166534",
-                      border: "1px solid #bbf7d0",
-                      borderRadius: "12px",
-                      padding: "2px 8px",
-                      fontSize: "11px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    + {drug.name.split(" ")[0]}
-                  </button>
-                ))}
               </div>
             </div>
 
