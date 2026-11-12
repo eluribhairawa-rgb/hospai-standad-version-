@@ -453,19 +453,22 @@ a.link.danger {
   z-index: 1;
 }
 
-/* Kalpra Tech logo at top-left */
+/* Kalpra Tech logo at top-left: the artwork is dark red/navy, so it sits on a white badge to stay clearly visible over the dark photo */
 .login-hero-logo {
   position: absolute;
-  top: 1.75rem;
-  left: 2.5rem;
+  top: 1.5rem;
+  left: 2.25rem;
   z-index: 3;
+  padding: 12px 18px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .login-hero-logo-img {
-  height: 80px;
+  display: block;
+  height: 118px;
   width: auto;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
-  opacity: 0.95;
 }
 
 /* Hero text content */
