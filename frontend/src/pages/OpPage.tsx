@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
-import StatCard from "../components/StatCard";
 import { Button, Input, Select, Table, TableCell, TableHead, TableRow } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import { formatDateTime } from "../lib/format";
@@ -593,29 +592,7 @@ export default function OpPage({ setNotice, canEdit }: Props) {
 
   return (
     <section className="module-page">
-      <div className="module-panel-head">
-        <h3>OP Desk</h3>
-        <div className="module-inline-actions">
-          <Input type="date" value={selectedDate} min={todayIsoDate()} onChange={(event) => setSelectedDate(event.target.value)} aria-label="OP date" />
-          <Select value={selectedDoctor} onChange={(event) => setSelectedDoctor(event.target.value)} aria-label="OP doctor filter">
-            <option value="">All doctors</option>
-            {doctorNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
-
-      <div className="stat-grid module-stat-grid">
-        <StatCard label="OP Appointments" value={summary.total_appointments} />
-        <StatCard label="Follow-ups" value={summary.follow_ups} />
-        <StatCard label="Active Queue" value={summary.active_queue} />
-        <StatCard label="No-Shows" value={summary.no_shows} />
-      </div>
-
-      {loading ? <p className="muted">Loading OP workflow...</p> : null}
+      {loading ? <p className="muted">Loading Doctor Scheduling...</p> : null}
 
       <div className="op-desk-stack">
         <div className="panel">
