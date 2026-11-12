@@ -14710,3 +14710,54 @@ label,
 .optv-card.is-calling{animation:optv-call-pulse 1.1s ease-in-out infinite;box-shadow:0 0 0 4px var(--c),0 18px 40px rgba(0,0,0,.35)}
 @keyframes optv-call-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.025)}}
 @media (prefers-reduced-motion: reduce){.optv-card.is-calling{animation:none}}
+
+
+/* ----- OP Desk > Doctor Schedule ----- */
+/* Add button sits in the same row as the five fields instead of alone underneath them. */
+@media (min-width: 1101px) {
+  .op-perfect-schedule-form {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  }
+  .op-perfect-schedule-form .ui-button {
+    min-height: 42px;
+    padding-inline: 2rem;
+  }
+}
+
+/* Fields and dropdowns in the form row share one height. */
+.op-perfect-schedule-form .ui-input,
+.op-perfect-schedule-form .ui-select {
+  height: 42px;
+}
+
+/* Table: explicit columns (the Actions column is a fixed width so the header and every row, each its own
+   grid, line up), and compact Edit / Delete buttons. A general toolbar rule
+   (".module-inline-actions > * { min-width: 150px !important }") also hit these buttons, making
+   the actions column ~330px wide: the table overflowed sideways, the Doctor column scrolled out
+   of view and the header bar ended short of the Delete button. */
+.module-table-schedule .table-head,
+.module-table-schedule .table-row {
+  grid-template-columns: minmax(110px, 1.3fr) minmax(110px, 1.3fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(80px, 0.9fr) 156px;
+  column-gap: 0.75rem;
+}
+
+.module-table-schedule .table-row .module-inline-actions {
+  flex-wrap: nowrap !important;
+  gap: 0.4rem !important;
+}
+
+.module-table-schedule .table-row .module-inline-actions > * {
+  min-width: 0 !important;
+  min-height: 34px;
+  padding: 0 1rem;
+}
+
+/* Narrow windows: keep every column (including Edit / Delete) and scroll sideways, instead of
+   the general rule that hides columns 4+ on all tables. */
+@media (max-width: 1024px) {
+  .module-table-schedule { overflow-x: auto; }
+  .module-table-schedule .table-head,
+  .module-table-schedule .table-row { min-width: 660px; }
+  .module-table-schedule .table-head > span,
+  .module-table-schedule .table-row > span { display: block; }
+}

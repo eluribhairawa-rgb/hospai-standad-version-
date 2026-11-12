@@ -709,7 +709,7 @@ export default function OpPage({ setNotice, canEdit }: Props) {
           {schedules.length === 0 ? (
             <p className="muted">No doctor schedules for this day.</p>
           ) : (
-            <Table className="module-table" aria-label="Doctor schedules table">
+            <Table className="module-table module-table-schedule" aria-label="Doctor schedules table">
               <TableHead>
                 <TableCell>Doctor</TableCell>
                 <TableCell>Department</TableCell>
