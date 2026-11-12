@@ -1947,7 +1947,11 @@ def get_billing_worklist(db: Session, tab: str = "pending_payments", department:
         # 1. Pending Payments Worklist
         pending_query = """
             SELECT i.id, i.invoice_no, i.patient_id, i.module, i.total_amount, i.paid_amount, i.due_amount,
-                   i.payment_status, i.created_at, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) as patient_name
+                   i.payment_status, i.created_at, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) as patient_name,
+                   COALESCE(
+                       i.payment_mode,
+                       (SELECT ip.payment_mode FROM invoice_payments ip WHERE ip.invoice_id = i.id AND ip.amount > 0 ORDER BY ip.id DESC LIMIT 1)
+                   ) AS payment_mode
             FROM invoices i
             LEFT JOIN patients p ON p.patient_id = i.patient_id
             WHERE i.due_amount > 0
@@ -1976,6 +1980,8 @@ def get_billing_worklist(db: Session, tab: str = "pending_payments", department:
             "applied": float(to_decimal(r["paid_amount"])),
             "balance": float(to_decimal(r["due_amount"])),
             "date": str(r["created_at"])[:16],
+            "payment_status": r["payment_status"],
+            "payment_mode": r["payment_mode"],
         } for r in pending_rows]
 
         # 2. Discharge Review Worklist (active admitted patients)

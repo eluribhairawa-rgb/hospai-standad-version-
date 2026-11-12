@@ -581,6 +581,7 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                       <tr>
                         <th>Patient</th>
                         <th>Bill & service</th>
+                        <th>Payment Mode</th>
                         <th>Net bill</th>
                         <th>Applied</th>
                         <th>Balance</th>
@@ -598,8 +599,34 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                             <div style={{ fontWeight: 600, color: "#0f172a" }}>{row.invoice_no}</div>
                             <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{row.service_desc}</div>
                           </td>
+                          <td>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontSize: "0.75rem",
+                                fontWeight: 600,
+                                textTransform: "capitalize",
+                                background: row.payment_mode ? "#f0fdfa" : "#f8fafc",
+                                color: row.payment_mode ? "#00828a" : "#64748b",
+                                border: `1px solid ${row.payment_mode ? "#99f6e4" : "#e2e8f0"}`,
+                              }}
+                            >
+                              {row.payment_mode
+                                ? (row.payment_mode.toLowerCase() === "upi" ? "UPI" : row.payment_mode)
+                                : "Due / Unpaid"}
+                            </span>
+                          </td>
                           <td style={{ fontWeight: 600 }}>₹{fmt(row.net_bill)}</td>
-                          <td style={{ color: "#64748b" }}>₹{fmt(row.applied)}</td>
+                          <td style={{ color: "#64748b" }}>
+                            ₹{fmt(row.applied)}
+                            {row.applied > 0 && row.payment_mode && (
+                              <div style={{ fontSize: "0.7rem", color: "#166534", textTransform: "capitalize", fontWeight: 500 }}>
+                                via {row.payment_mode.toLowerCase() === "upi" ? "UPI" : row.payment_mode}
+                              </div>
+                            )}
+                          </td>
                           <td style={{ fontWeight: 700, color: "#0f172a" }}>₹{fmt(row.balance)}</td>
                           <td style={{ textAlign: "right" }}>
                             <button

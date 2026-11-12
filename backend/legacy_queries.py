@@ -7821,7 +7821,13 @@ def get_pharmacy_summary(db):
 
         cursor.execute("""
             SELECT ps.id, ps.patient_id, TRIM(p.name || ' ' || COALESCE(p.last_name, '')) AS patient_name, ps.medicine_name, ps.quantity,
-                   ps.unit_price, ps.amount, ps.billing_type, ps.payment_mode, ps.sold_at,
+                   ps.unit_price, ps.amount, ps.billing_type,
+                   COALESCE(
+                       ps.payment_mode,
+                       i.payment_mode,
+                       (SELECT ip.payment_mode FROM invoice_payments ip WHERE ip.invoice_id = ps.invoice_id AND ip.amount > 0 ORDER BY ip.id DESC LIMIT 1)
+                   ) AS payment_mode,
+                   ps.sold_at,
                    ps.invoice_id, ps.admission_id,
                    COALESCE(
                        (SELECT pi.purchase_price 
@@ -7839,6 +7845,7 @@ def get_pharmacy_summary(db):
                    ) AS cost_price
             FROM pharmacy_sales ps
             LEFT JOIN patients p ON p.patient_id = ps.patient_id
+            LEFT JOIN invoices i ON i.id = ps.invoice_id
             ORDER BY ps.sold_at DESC
             LIMIT 15
         """)
@@ -7881,6 +7888,7 @@ def get_pharmacy_summary(db):
                 "profit": profit,
                 "profit_margin_pct": margin_pct,
                 "payment_status": pay_status,
+                "payment_mode": r["payment_mode"],
                 "user": "Pharmacist",
                 "date_time": sold_time_str,
                 "status": "Completed",

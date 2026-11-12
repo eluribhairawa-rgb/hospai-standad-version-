@@ -47,6 +47,7 @@ type RecentTransaction = {
   medicine_count: number;
   amount: number;
   payment_status: string;
+  payment_mode?: string | null;
   user: string;
   date_time: string;
   status: string;
@@ -538,7 +539,9 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
         costCell,
         saleCell,
         profitCell,
-        t.payment_status || "-",
+        t.payment_mode
+          ? `${t.payment_status || "Paid"} (${t.payment_mode.toUpperCase()})`
+          : (t.payment_status || "-"),
         t.date_time || "-",
       ];
     });
@@ -1911,9 +1914,29 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                       })()}
                     </td>
                     <td style={{ padding: "8px 10px" }}>
-                      <span style={{ fontSize: "11px", color: "#475569", fontWeight: 500 }}>
-                        {t.payment_status}
-                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "11px", color: t.payment_status === "Paid" ? "#166534" : "#475569", fontWeight: 700 }}>
+                          {t.payment_status}
+                        </span>
+                        {t.payment_mode && (
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: "fit-content",
+                              fontSize: "10.5px",
+                              color: "#00828a",
+                              background: "#f0fdfa",
+                              border: "1px solid #ccfbf1",
+                              padding: "1px 6px",
+                              borderRadius: "4px",
+                              textTransform: "capitalize",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {t.payment_mode.toLowerCase() === "upi" ? "UPI" : t.payment_mode}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: "8px 10px", color: "#64748b", fontSize: "11.5px" }}>
                       {t.date_time}
