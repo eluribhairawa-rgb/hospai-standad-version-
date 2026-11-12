@@ -964,10 +964,10 @@ def survey_report(db: Session, hospital_id: int, filters: dict):
         clauses.append("t.survey_type = :stype")
         params["stype"] = _clean(filters["survey_type"]).upper()
     if filters.get("doctor"):
-        clauses.append("COALESCE(r.doctor_name, '') = :doctor")
+        clauses.append("LOWER(TRIM(COALESCE(r.doctor_name, ''))) = LOWER(TRIM(:doctor))")
         params["doctor"] = _clean(filters["doctor"])
     if filters.get("department"):
-        clauses.append("COALESCE(r.department, '') = :dept")
+        clauses.append("LOWER(TRIM(COALESCE(r.department, ''))) = LOWER(TRIM(:dept))")
         params["dept"] = _clean(filters["department"])
     _date_range_clause("s.submitted_at", filters.get("date_from"), filters.get("date_to"), params, clauses)
     base = f"""
@@ -1000,10 +1000,10 @@ def survey_report(db: Session, hospital_id: int, filters: dict):
         r_clauses.append("t.survey_type = :stype")
         r_params["stype"] = params["stype"]
     if filters.get("doctor"):
-        r_clauses.append("COALESCE(r.doctor_name, '') = :doctor")
+        r_clauses.append("LOWER(TRIM(COALESCE(r.doctor_name, ''))) = LOWER(TRIM(:doctor))")
         r_params["doctor"] = params["doctor"]
     if filters.get("department"):
-        r_clauses.append("COALESCE(r.department, '') = :dept")
+        r_clauses.append("LOWER(TRIM(COALESCE(r.department, ''))) = LOWER(TRIM(:dept))")
         r_params["dept"] = params["dept"]
     _date_range_clause("r.created_at", filters.get("date_from"), filters.get("date_to"), r_params, r_clauses)
     status_rows = _rows(db, f"""
@@ -1108,12 +1108,28 @@ def survey_report(db: Session, hospital_id: int, filters: dict):
         "comments": comments,
         "filter_options": {
             "doctors": [r["v"] for r in _rows(db, """
-                SELECT DISTINCT doctor_name AS v FROM reach_survey_requests
-                WHERE hospital_id = :hid AND COALESCE(doctor_name, '') <> '' ORDER BY 1
+                SELECT DISTINCT v FROM (
+                    SELECT doctor_name AS v FROM doctor_schedules WHERE COALESCE(doctor_name, '') <> ''
+                    UNION
+                    SELECT doctor_name AS v FROM users WHERE (job_role = 'Doctor' OR doctor_name IS NOT NULL) AND COALESCE(doctor_name, '') <> ''
+                    UNION
+                    SELECT doctor_name AS v FROM reach_survey_requests WHERE hospital_id = :hid AND COALESCE(doctor_name, '') <> ''
+                    UNION
+                    SELECT doctor_name AS v FROM appointments WHERE COALESCE(doctor_name, '') <> ''
+                ) sub
+                ORDER BY 1
             """, {"hid": hospital_id})],
             "departments": [r["v"] for r in _rows(db, """
-                SELECT DISTINCT department AS v FROM reach_survey_requests
-                WHERE hospital_id = :hid AND COALESCE(department, '') <> '' ORDER BY 1
+                SELECT DISTINCT v FROM (
+                    SELECT department_name AS v FROM department_master WHERE (hospital_id = :hid OR hospital_id IS NULL) AND COALESCE(department_name, '') <> ''
+                    UNION
+                    SELECT department AS v FROM doctor_schedules WHERE COALESCE(department, '') <> ''
+                    UNION
+                    SELECT department AS v FROM reach_survey_requests WHERE hospital_id = :hid AND COALESCE(department, '') <> ''
+                    UNION
+                    SELECT department AS v FROM appointments WHERE COALESCE(department, '') <> ''
+                ) sub
+                ORDER BY 1
             """, {"hid": hospital_id})],
         },
     }

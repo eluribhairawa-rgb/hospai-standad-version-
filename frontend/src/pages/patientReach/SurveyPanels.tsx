@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import Modal from "../../components/ui/Modal";
 import ConfirmDialog from "../../components/ui/ConfirmDialog";
@@ -8,6 +8,7 @@ import { downloadCsv } from "../../lib/csvExport";
 import { downloadPDF, generatePDFBlob } from "../../lib/exportService";
 import type { StandardPdfSection } from "../../lib/exportService";
 import type { Patient } from "../../types";
+import { useDoctorDirectory } from "../../lib/doctorDirectory";
 import {
   Bar, CATEGORY_COLORS, CHANNEL_LABELS, EmptyState, Field, PLACEHOLDERS, Pill, QUESTION_TYPE_LABELS, S, STANDARD_CATEGORIES,
   STATUS_META, SURVEY_TYPE_LABELS, Stars, StatusPill, TABLE_CATEGORIES, TEMPLATE_STATUS_META, WHATSAPP_CATEGORY_LABELS,
@@ -1102,12 +1103,27 @@ function TrendChart({ daily }: { daily: SurveyReport["daily"] }) {
 
 export function SurveyReportsPanel({ setNotice }: { setNotice: SetNotice }) {
   const { templates } = useSurveyTemplates(setNotice);
+  const { departments: dirDepts, doctors: dirDoctors } = useDoctorDirectory();
   const initial = { date_from: monthStartIso(), date_to: todayIso(), template_id: "", survey_type: "", doctor: "", department: "" };
   const [draft, setDraft] = useState(initial);
   const [applied, setApplied] = useState(initial);
   const [report, setReport] = useState<SurveyReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
+
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>();
+    (report?.filter_options?.departments || []).forEach((d) => d && set.add(d.trim()));
+    (dirDepts || []).forEach((d) => d && set.add(d.trim()));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [report?.filter_options?.departments, dirDepts]);
+
+  const doctorOptions = useMemo(() => {
+    const set = new Set<string>();
+    (report?.filter_options?.doctors || []).forEach((d) => d && set.add(d.trim()));
+    (dirDoctors || []).forEach((doc) => doc.doctor_name && set.add(doc.doctor_name.trim()));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [report?.filter_options?.doctors, dirDoctors]);
 
   useEffect(() => {
     let alive = true;
@@ -1222,13 +1238,13 @@ export function SurveyReportsPanel({ setNotice }: { setNotice: SetNotice }) {
           <Field label="Doctor">
             <select value={draft.doctor} onChange={(e) => setDraft({ ...draft, doctor: e.target.value })} style={{ ...S.input, width: "170px" }}>
               <option value="">All doctors</option>
-              {(report?.filter_options.doctors || []).map((d) => <option key={d} value={d}>{d}</option>)}
+              {doctorOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </Field>
           <Field label="Department">
             <select value={draft.department} onChange={(e) => setDraft({ ...draft, department: e.target.value })} style={{ ...S.input, width: "170px" }}>
               <option value="">All departments</option>
-              {(report?.filter_options.departments || []).map((d) => <option key={d} value={d}>{d}</option>)}
+              {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </Field>
           <button type="submit" style={{ ...S.btnPrimary, background: "#10b981", borderColor: "#10b981" }}>Apply</button>
