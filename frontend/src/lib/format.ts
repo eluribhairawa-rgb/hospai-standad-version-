@@ -250,3 +250,28 @@ export const filterDecimal = (val: string): string => {
   }
   return v;
 };
+
+export const preventNonNumericDiscountKeys = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+  if (
+    e.key === "Backspace" ||
+    e.key === "Delete" ||
+    e.key === "Tab" ||
+    e.key === "Escape" ||
+    e.key === "Enter" ||
+    e.key === "ArrowLeft" ||
+    e.key === "ArrowRight" ||
+    e.key === "ArrowUp" ||
+    e.key === "ArrowDown" ||
+    e.key === "Home" ||
+    e.key === "End" ||
+    ((e.ctrlKey || e.metaKey) && ["a", "c", "v", "x", "z"].includes(e.key.toLowerCase()))
+  ) {
+    return;
+  }
+  if (e.key === "." && !e.currentTarget.value.includes(".")) {
+    return;
+  }
+  if (!/^[0-9]$/.test(e.key)) {
+    e.preventDefault();
+  }
+};

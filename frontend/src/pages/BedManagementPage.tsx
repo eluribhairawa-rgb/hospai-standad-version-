@@ -1455,9 +1455,11 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
                     <Label>Discount (₹)</Label>
                     <Input
                       type="number"
+                      name="discount"
+                      aria-label="Discount"
                       min={0}
                       value={dischargeForm.discount}
-                      onChange={(e) => setDischargeForm((p) => ({ ...p, discount: e.target.value }))}
+                      onChange={(e) => setDischargeForm((p) => ({ ...p, discount: e.target.value.replace(/[^0-9.]/g, "") }))}
                     />
                   </div>
                   <div>

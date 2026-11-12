@@ -1907,7 +1907,7 @@ export default function LabPage({ setNotice, user }: Props) {
                   min={0}
                   max={100}
                   value={discountPercentage}
-                  onChange={(event) => setDiscountPercentage(event.target.value)}
+                  onChange={(event) => setDiscountPercentage(event.target.value.replace(/[^0-9.]/g, ""))}
                   placeholder="0"
                   className="no-spin"
                   onWheel={(e) => (e.target as HTMLElement).blur()}
@@ -1920,7 +1920,7 @@ export default function LabPage({ setNotice, user }: Props) {
                   type="number"
                   min={0}
                   value={discountFixedAmount}
-                  onChange={(event) => setDiscountFixedAmount(event.target.value)}
+                  onChange={(event) => setDiscountFixedAmount(event.target.value.replace(/[^0-9.]/g, ""))}
                   placeholder="0.00"
                   className="no-spin"
                   onWheel={(e) => (e.target as HTMLElement).blur()}

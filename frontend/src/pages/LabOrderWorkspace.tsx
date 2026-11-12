@@ -483,8 +483,19 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
             <button type="button" className={discountType === "flat" ? "active" : ""} onClick={() => setDiscountType("flat")}>Flat</button>
           </div>
         </div>
-        <Input type="number" min={0} max={discountType === "percent" ? 100 : gross} placeholder={discountType === "percent" ? "e.g. 10" : "e.g. 100"}
-          value={discountVal} onChange={(e) => setDiscountVal(e.target.value === "" ? "" : Math.max(Number(e.target.value) || 0, 0))} />
+        <Input
+          type="number"
+          name="discount"
+          aria-label="Discount"
+          min={0}
+          max={discountType === "percent" ? 100 : gross}
+          placeholder={discountType === "percent" ? "e.g. 10" : "e.g. 100"}
+          value={discountVal}
+          onChange={(e) => {
+            const raw = e.target.value.replace(/[^0-9.]/g, "");
+            setDiscountVal(raw === "" ? "" : Math.max(Number(raw) || 0, 0));
+          }}
+        />
 
         {serviceType === "HOME_VISIT" && (
           <div style={{ marginTop: "0.75rem" }}>

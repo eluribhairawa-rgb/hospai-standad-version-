@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import PhoneInput from "../../components/PhoneInput";
 import { splitStoredPhone, toWhatsAppNumber, validateMobileByCountry } from "../../lib/phone";
+import { filterDecimal, preventNonNumericDiscountKeys } from "../../lib/format";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Modal } from "../../components/ui";
 import { apiFetch, reportError, getHospitalCode } from "../../lib/api";
@@ -1154,7 +1155,8 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           style={{ width: "100%", padding: "4px 6px", textAlign: "right" }}
                           value={item.discount_pct ?? ""}
                           placeholder="0"
-                          onChange={(e) => handleUpdateGrnItem(idx, "discount_pct", e.target.value)}
+                          onKeyDown={preventNonNumericDiscountKeys}
+                          onChange={(e) => handleUpdateGrnItem(idx, "discount_pct", filterDecimal(e.target.value))}
                         />
                       </td>
                       <td style={{ padding: "0.35rem" }}>

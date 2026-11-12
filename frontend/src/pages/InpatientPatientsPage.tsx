@@ -375,7 +375,14 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <div>
                     <Label>Discount (₹)</Label>
-                    <Input type="number" min={0} value={dischargeForm.discount} onChange={(e) => setDischargeForm((p) => ({ ...p, discount: e.target.value }))} />
+                    <Input
+                      type="number"
+                      name="discount"
+                      aria-label="Discount"
+                      min={0}
+                      value={dischargeForm.discount}
+                      onChange={(e) => setDischargeForm((p) => ({ ...p, discount: e.target.value.replace(/[^0-9.]/g, "") }))}
+                    />
                   </div>
                   <div>
                     <Label>Advance already paid (₹)</Label>

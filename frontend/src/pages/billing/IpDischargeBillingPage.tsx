@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../../lib/api";
+import { filterDecimal, preventNonNumericDiscountKeys } from "../../lib/format";
 import type { Notice } from "../../types";
 import { Button, Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
@@ -1391,7 +1392,8 @@ export default function IpDischargeBillingPage({
                       step="0.01"
                       className="billing-form-input"
                       value={discountAmount}
-                      onChange={(e) => setDiscountAmount(e.target.value)}
+                      onKeyDown={preventNonNumericDiscountKeys}
+                      onChange={(e) => setDiscountAmount(filterDecimal(e.target.value))}
                     />
                     <button
                       type="button"
@@ -1707,7 +1709,8 @@ export default function IpDischargeBillingPage({
                 step="0.01"
                 className="billing-form-input"
                 value={discountAmount}
-                onChange={(e) => setDiscountAmount(e.target.value)}
+                onKeyDown={preventNonNumericDiscountKeys}
+                onChange={(e) => setDiscountAmount(filterDecimal(e.target.value))}
               />
             </div>
 
