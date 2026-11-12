@@ -1,5 +1,8 @@
 # HospAI – Deployment
 
+> Full deployment guide (code structure, database, time-stamp convention, update/rollback): see [DEPLOYMENT_README.md](DEPLOYMENT_README.md). Dependency scan results: [../SCA_REPORT.md](../SCA_REPORT.md).
+
+
 Three containers on one Docker network (`hospai-net`):
 
 | Container | Image | Role |

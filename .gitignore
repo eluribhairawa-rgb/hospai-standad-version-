@@ -12,6 +12,7 @@ __pycache__/
 *.pyc
 backend/uploads/*
 venv/
+.venv/
 
 # editor / OS
 .DS_Store
@@ -31,3 +32,50 @@ docker-compose.override.yml
 *.sqlite3
 *.bak
 *.orig
+
+# python / test tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.pyo
+
+# frontend tooling
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+.vite/
+coverage/
+
+# test output (screenshots/reports can contain patient data)
+e2e/reports/
+
+# keys, certificates and credentials
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+.npmrc
+.pypirc
+
+# runtime data created by the app (uploaded logos, documents, scans)
+backend/uploads/
+hosp_deploy/volumes/*
+!hosp_deploy/volumes/uploads/
+hosp_deploy/volumes/uploads/*
+!hosp_deploy/volumes/uploads/.gitkeep
+
+# editor / OS (additional)
+.idea/
+.vscode/
+Thumbs.db
+*~
+
+# AI assistant / scratch workspaces
+.claude/
+scratch/
+tmp/
+

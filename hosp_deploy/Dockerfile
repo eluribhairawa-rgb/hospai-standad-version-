@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Build context = hospai-demo/ (the parent of hosp_deploy/)
-ARG NODE_VERSION=20
+ARG NODE_VERSION=22
 ARG PYTHON_VERSION=3.12
 ARG NGINX_VERSION=1.27
 
