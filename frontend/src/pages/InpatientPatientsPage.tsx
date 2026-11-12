@@ -20,6 +20,9 @@ type OccupiedBed = {
   total_days: number;
   total_amount: number;
   allocated_at: string;
+  payer_type?: "self" | "insurance";
+  insurance_provider?: string | null;
+  insurance_policy_no?: string | null;
 };
 
 type Admission = { id: number; notes?: string; admission_date?: string; created_at?: string };
@@ -139,7 +142,13 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
   const openDischargeBill = async (bed: OccupiedBed) => {
     setDischargeStep("bill");
     setDischargePreview(null);
-    setDischargeForm({ discount: "0", advance_paid: "0", payment_mode: "cash", notes: "Discharged in stable condition" });
+    setDischargeForm({
+      discount: "0",
+      advance_paid: "0",
+      // An insured stay is billed to the insurer; nothing is collected from the patient by default.
+      payment_mode: bed.payer_type === "insurance" ? "insurance" : "cash",
+      notes: "Discharged in stable condition",
+    });
     setLoadingDischargePreview(true);
     try {
       const preview = await apiFetch<DischargeBillPreview>(`/api/bed/allocations/${bed.id}/discharge-bill`);
@@ -155,7 +164,7 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
   const confirmDischargeBill = async (bed: OccupiedBed) => {
     setSubmittingDischarge(true);
     try {
-      const res = await apiFetch<{ invoice_no: string; total_amount: number; paid_amount: number }>(
+      const res = await apiFetch<{ invoice_no: string; total_amount: number; paid_amount: number; billed_to_insurer?: boolean; insurer_name?: string | null; insurer_due?: number }>(
         `/api/bed/allocations/${bed.id}/discharge`,
         {
           method: "POST",
@@ -169,7 +178,9 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
       );
       setNotice({
         type: "success",
-        message: `${bed.patient_name} discharged from ${bed.ward} / ${bed.room_no} / ${bed.bed_no}. Invoice ${res.invoice_no} generated for ₹${res.total_amount.toFixed(2)} (₹${res.paid_amount.toFixed(2)} collected now).`,
+        message: res.billed_to_insurer
+          ? `${bed.patient_name} discharged from ${bed.ward} / ${bed.room_no} / ${bed.bed_no}. Invoice ${res.invoice_no} for ₹${res.total_amount.toFixed(2)} billed to ${res.insurer_name || "the insurer"} (₹${Number(res.insurer_due || 0).toFixed(2)} due from the insurer, nothing collected now).`
+          : `${bed.patient_name} discharged from ${bed.ward} / ${bed.room_no} / ${bed.bed_no}. Invoice ${res.invoice_no} generated for ₹${res.total_amount.toFixed(2)} (₹${res.paid_amount.toFixed(2)} collected now).`,
       });
       setViewPatient(null);
       setDischargeStep("view");
@@ -373,8 +384,13 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
                 </div>
 
                 <div>
-                  <Label>Payment mode for balance collected now</Label>
+                  <Label>{dischargeForm.payment_mode === "insurance" ? "Payment mode" : "Payment mode for balance collected now"}</Label>
                   <Select value={dischargeForm.payment_mode} onChange={(e) => setDischargeForm((p) => ({ ...p, payment_mode: e.target.value }))}>
+                    <option value="insurance" disabled={viewPatient?.payer_type !== "insurance"}>
+                      {viewPatient?.payer_type === "insurance"
+                        ? `Insurance: bill ${viewPatient.insurance_provider || "the insurer"}`
+                        : "Insurance (payer is Self-pay)"}
+                    </option>
                     <option value="cash">Cash</option>
                     <option value="card">Card</option>
                     <option value="upi">UPI</option>
@@ -389,7 +405,16 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
                 </div>
 
                 <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#1e40af" }}>
-                  Amount to collect now: <strong>₹{Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - (Number(dischargeForm.advance_paid) || 0)).toFixed(2)}</strong>.
+                  {dischargeForm.payment_mode === "insurance" ? (
+                    <>
+                      Billed to {viewPatient?.insurance_provider || "the insurer"}
+                      {viewPatient?.insurance_policy_no ? ` (Policy ${viewPatient.insurance_policy_no})` : ""}:{" "}
+                      <strong>₹{Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - (Number(dischargeForm.advance_paid) || 0)).toFixed(2)}</strong>.
+                      Nothing is collected from the patient now; a claim is raised and the insurer's payment is recorded later in Insurance Claims.
+                    </>
+                  ) : (
+                    <>Amount to collect now: <strong>₹{Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - (Number(dischargeForm.advance_paid) || 0)).toFixed(2)}</strong>.</>
+                  )}{" "}
                   Confirming will generate the final invoice, mark this admission discharged, and free the bed.
                 </div>
 

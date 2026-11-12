@@ -213,12 +213,17 @@ export default function IpDischargeBillingPage({
     ? Number(charges.balance_to_collect || 0)
     : Math.max(0, liveNetBill - (charges.advance_applied || 0));
   const amountPaid = Number(charges.amount_paid || 0);
+  // Settled by billing the insurer: "due" is owed by the insurer while the claim is open, by the patient once it is rejected.
+  const billedToInsurance = isSettled && Boolean(charges.billed_to_insurance);
+  const waitingOnInsurer = billedToInsurance && Boolean(charges.insurance_open);
+  const insurerLabel = charges.insurer_name || "the insurer";
 
   const handleFinaliseSubmit = async () => {
     if (!dischargeData?.admission?.id) return;
     setSettling(true);
     try {
-      const tenderAmt = parseFloat(paymentAmount) || 0;
+      const billToInsurer = paymentMode === "Insurance";
+      const tenderAmt = billToInsurer ? 0 : parseFloat(paymentAmount) || 0;
       const payments = [];
       if (tenderAmt > 0) {
         payments.push({
@@ -233,6 +238,8 @@ export default function IpDischargeBillingPage({
         discount_amount: discVal,
         charges_version: dischargeData.charges_version,
         payments,
+        // Insurance is not a payment received: the balance is billed to the insurer as a claim.
+        ...(billToInsurer ? { bill_to_insurance: true } : {}),
         notes: dischargeNotes,
       };
 
@@ -245,12 +252,13 @@ export default function IpDischargeBillingPage({
       setFinaliseModalOpen(false);
       setNotice({
         type: "success",
-        message: `Discharge bill finalized successfully for Admission #${res.admission_id}! Invoice ${res.invoice_no || ""}`,
+        message: res.billed_to_insurer
+          ? `Discharge bill for Admission #${res.admission_id} billed to ${res.insurer_name || "the insurer"}: ₹${fmt(res.remaining_due)} due from the insurer. Invoice ${res.invoice_no || ""}`
+          : `Discharge bill finalized successfully for Admission #${res.admission_id}! Invoice ${res.invoice_no || ""}`,
       });
       fetchDischarge(String(res.admission_id));
     } catch (err: any) {
-      reportError(setNotice, err);
-      setNotice({ type: "error", message: err.message || "Failed to finalise discharge bill." });
+      reportError(setNotice, err, "Failed to finalise discharge bill.");
     } finally {
       setSettling(false);
     }
@@ -471,6 +479,12 @@ export default function IpDischargeBillingPage({
 
   const isInsurancePayer = admission?.payer_type === "insurance";
   const isDischarged = Boolean(admission?.discharge_date);
+
+  // An insured stay is billed to the insurer by default; otherwise the usual cash-type modes apply.
+  const openFinaliseModal = () => {
+    setPaymentMode(isInsurancePayer ? "Insurance" : "UPI");
+    setFinaliseModalOpen(true);
+  };
 
   const openPayerModal = () => {
     setPayerDraft({
@@ -1341,7 +1355,9 @@ export default function IpDischargeBillingPage({
                 ) : (
                   <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", textAlign: "center", color: "#64748b" }}>
                     {isSettled
-                      ? "No payment collections were recorded for this discharge."
+                      ? (billedToInsurance
+                          ? `Billed to ${insurerLabel}: no payment has been received from the insurer yet. It will appear here once recorded in Insurance Claims.`
+                          : "No payment collections were recorded for this discharge.")
                       : 'No payment collections recorded yet for this admission. Click "Review & finalise bill" to record settlement payment.'}
                   </div>
                 )}
@@ -1492,7 +1508,15 @@ export default function IpDischargeBillingPage({
               {/* Highlight Box: Balance to Collect */}
               <div className="billing-highlight-box teal-emphasis">
                 <div>
-                  <span className="box-label">{isSettled ? (liveBalance > 0 ? "Balance due" : "Balance due · settled in full") : "Balance to collect"}</span>
+                  <span className="box-label">
+                    {!isSettled
+                      ? "Balance to collect"
+                      : waitingOnInsurer
+                        ? `Due from insurer · ${insurerLabel}`
+                        : liveBalance > 0
+                          ? (billedToInsurance ? "Balance due from patient (claim closed)" : "Balance due")
+                          : "Balance due · settled in full"}
+                  </span>
                 </div>
                 <span className="box-value">₹{fmt(liveBalance)}</span>
               </div>
@@ -1539,7 +1563,24 @@ export default function IpDischargeBillingPage({
               )}
 
               {/* Action Buttons */}
-              {isSettled && liveBalance <= 0 ? (
+              {waitingOnInsurer ? (
+                <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "8px", background: "#f5f3ff", border: "1px solid #ddd6fe", color: "#4c1d95", fontSize: "0.82rem", lineHeight: 1.45 }}>
+                  <strong>Billed to insurance</strong>: ₹{fmt(liveBalance)} is due from {insurerLabel} (claim {String(charges.claim_status || "submitted").replace(/_/g, " ")}).
+                  Nothing is collected from the patient. Record the insurer's payment in Insurance Claims.
+                  {onNavigate && (
+                    <div style={{ marginTop: "6px" }}>
+                      <button type="button" onClick={() => onNavigate("pharmacy-insurance-claims")} style={{ background: "none", border: "none", padding: 0, color: "#6d28d9", fontWeight: 700, cursor: "pointer", fontSize: "0.82rem" }}>
+                        Open Insurance Claims →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : billedToInsurance && liveBalance > 0 ? (
+                <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "8px", background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: "0.82rem", lineHeight: 1.45 }}>
+                  {insurerLabel} did not pay this bill (claim {String(charges.claim_status || "closed").replace(/_/g, " ")}), so ₹{fmt(liveBalance)} is now payable by the patient.
+                  Collect it in Patient Bills &amp; Payments.
+                </div>
+              ) : isSettled && liveBalance <= 0 ? (
                 <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534", fontSize: "0.82rem", fontWeight: 600, textAlign: "center" }}>
                   ✓ Discharge bill settled in full. Nothing left to collect.
                 </div>
@@ -1548,7 +1589,7 @@ export default function IpDischargeBillingPage({
                   type="button"
                   className="billing-btn-teal"
                   style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
-                  onClick={() => setFinaliseModalOpen(true)}
+                  onClick={openFinaliseModal}
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -1671,23 +1712,13 @@ export default function IpDischargeBillingPage({
             </div>
 
             <div className="billing-form-group">
-              <label className="billing-form-label">Payment Amount Tendered (₹)</label>
-              <input
-                type="number"
-                step="0.01"
-                className="billing-form-input"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-              />
-            </div>
-
-            <div className="billing-form-group">
               <label className="billing-form-label">Payment Mode</label>
               <select
                 className="billing-form-input"
                 value={paymentMode}
                 onChange={(e) => setPaymentMode(e.target.value)}
               >
+                {isInsurancePayer && <option value="Insurance">Insurance: bill {admission?.insurance_provider || "the insurer"}</option>}
                 <option value="UPI">UPI</option>
                 <option value="Cash">Cash</option>
                 <option value="Card">Card</option>
@@ -1695,16 +1726,37 @@ export default function IpDischargeBillingPage({
               </select>
             </div>
 
-            <div className="billing-form-group">
-              <label className="billing-form-label">Transaction Reference</label>
-              <input
-                type="text"
-                className="billing-form-input"
-                placeholder="Enter payment reference (e.g. UPI Ref / Card Last 4)"
-                value={transactionRef}
-                onChange={(e) => setTransactionRef(e.target.value)}
-              />
-            </div>
+            {paymentMode === "Insurance" ? (
+              <div style={{ margin: "0 0 1rem", padding: "10px 12px", borderRadius: "8px", background: "#f5f3ff", border: "1px solid #ddd6fe", color: "#4c1d95", fontSize: "0.82rem", lineHeight: 1.45 }}>
+                ₹{fmt(liveBalance)} will be billed to <strong>{admission?.insurance_provider || "the insurer"}</strong>
+                {admission?.insurance_policy_no ? ` (Policy ${admission.insurance_policy_no})` : ""}. Nothing is collected from the patient now:
+                a claim is raised and the insurer's payment is recorded later in Insurance Claims.
+              </div>
+            ) : (
+              <>
+                <div className="billing-form-group">
+                  <label className="billing-form-label">Payment Amount Tendered (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="billing-form-input"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                  />
+                </div>
+
+                <div className="billing-form-group">
+                  <label className="billing-form-label">Transaction Reference</label>
+                  <input
+                    type="text"
+                    className="billing-form-input"
+                    placeholder="Enter payment reference (e.g. UPI Ref / Card Last 4)"
+                    value={transactionRef}
+                    onChange={(e) => setTransactionRef(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
 
             <div className="billing-form-group">
               <label className="billing-form-label">Discharge Notes</label>

@@ -16,6 +16,7 @@ type Claim = {
   patient_id: string;
   patient_name: string;
   admission_id: number | null;
+  bill_module?: string;
   insurer_name: string;
   membership_ref: string | null;
   authorization_ref: string | null;
@@ -156,9 +157,10 @@ export default function PharmacyInsuranceClaims({ setNotice }: Props) {
     <div style={{ padding: "4px 0" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
         <div>
-          <h1 style={{ fontSize: "22px", fontWeight: 800, color: "#0f172a", margin: 0 }}>Pharmacy Insurance Claims</h1>
+          <h1 style={{ fontSize: "22px", fontWeight: 800, color: "#0f172a", margin: 0 }}>Insurance Claims</h1>
           <p style={{ fontSize: "13px", color: "#64748b", margin: "4px 0 0" }}>
-            Medicines billed to insurance stay as Due and are not deducted from stock until the claim is settled, rejected or closed.
+            Bills sent to an insurer stay as Due until the claim is paid. Medicines billed to insurance are also not deducted from stock until the
+            claim is settled, rejected or closed.
           </p>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -217,6 +219,9 @@ export default function PharmacyInsuranceClaims({ setNotice }: Props) {
                 <tr key={c.id}>
                   <td style={td}>
                     <div style={{ fontWeight: 700 }}>{c.invoice_no}</div>
+                    <div style={{ fontSize: "11px", fontWeight: 700, color: c.bill_module === "IP" ? "#0369a1" : "#6d28d9" }}>
+                      {c.bill_module === "IP" ? "IP stay bill" : "Pharmacy"}
+                    </div>
                     <div style={{ fontSize: "12px", color: "#64748b" }}>{String(c.submitted_at || "").slice(0, 16).replace("T", " ")}</div>
                   </td>
                   <td style={td}>
@@ -240,8 +245,8 @@ export default function PharmacyInsuranceClaims({ setNotice }: Props) {
                       {chip.label}
                     </span>
                   </td>
-                  <td style={{ ...td, fontSize: "12px", fontWeight: 600, color: c.stock_deducted ? "#15803d" : "#6d28d9", whiteSpace: "nowrap" }}>
-                    {c.stock_deducted ? "Deducted" : "Not deducted"}
+                  <td style={{ ...td, fontSize: "12px", fontWeight: 600, color: c.bill_module === "IP" ? "#94a3b8" : c.stock_deducted ? "#15803d" : "#6d28d9", whiteSpace: "nowrap" }}>
+                    {c.bill_module === "IP" ? "n/a" : c.stock_deducted ? "Deducted" : "Not deducted"}
                   </td>
                   <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
                     {!finished && (

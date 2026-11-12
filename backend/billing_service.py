@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from database import IST_TIMEZONE
 import legacy_sql
-from legacy_queries import resolve_hospital_id, current_ist_datetime
+from legacy_queries import resolve_hospital_id, current_ist_datetime, get_admission_insurer, create_ip_insurance_claim, NOT_INSURED_MESSAGE
 
 D_ZERO = Decimal("0.00")
 
@@ -780,7 +780,7 @@ def _admission_settlement(cursor, admission_id):
     cursor.execute(
         """
         SELECT i.id, i.invoice_no, i.total_amount, i.subtotal, i.discount, i.paid_amount, i.due_amount,
-               i.payment_status, i.created_at
+               i.payment_status, i.payment_mode, i.created_at
         FROM invoices i
         WHERE i.module = 'IP'
           AND (i.admission_id = ? OR i.invoice_no = ?
@@ -803,6 +803,16 @@ def _admission_settlement(cursor, admission_id):
         (ids,),
     )
     payments = [dict(r) for r in cursor.fetchall()]
+    cursor.execute(
+        "SELECT id, invoice_id, insurer_name, claim_status, settlement_status, claim_amount FROM insurance_claims WHERE invoice_id = ANY(?) ORDER BY id",
+        (ids,),
+    )
+    claims = [dict(r) for r in cursor.fetchall()]
+    billed_to_insurance = any(str(i.get("payment_mode") or "").lower() == "insurance" for i in invoices)
+    # Still waiting on the insurer: billed to insurance, something is due, and the claim has not been rejected / closed.
+    insurance_open = billed_to_insurance and any(
+        c["claim_status"] not in ("rejected", "closed") and c["settlement_status"] != "paid" for c in claims
+    )
     total = quantize_dec(sum((to_decimal(i["total_amount"]) for i in invoices), D_ZERO))
     due = quantize_dec(sum((to_decimal(i["due_amount"]) for i in invoices), D_ZERO))
     collected = quantize_dec(sum((to_decimal(p["amount"]) for p in payments), D_ZERO))
@@ -813,7 +823,11 @@ def _admission_settlement(cursor, admission_id):
     ))
     advance = quantize_dec(max(D_ZERO, total - due - collected))
     return {"invoices": invoices, "payments": payments, "total": total, "due": due, "collected": collected,
-            "discount": discount, "billed_gross": billed_gross, "advance_applied": advance}
+            "discount": discount, "billed_gross": billed_gross, "advance_applied": advance, "claims": claims,
+            "billed_to_insurance": billed_to_insurance,
+            "insurance_open": bool(insurance_open and due > D_ZERO),
+            "insurer_name": (claims[0]["insurer_name"] if claims else None),
+            "claim_status": (claims[0]["claim_status"] if claims else None)}
 
 
 def _release_admission_beds(cursor, admission_id):
@@ -1118,7 +1132,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
                 payment_items.append({
                     "id": f"inv-pay-{pay['id']}",
                     "receipt_no": pay.get("receipt_no") or inv_by_id[pay["invoice_id"]]["invoice_no"],
-                    "receipt_type": "Discharge bill",
+                    "receipt_type": "Insurance settlement" if str(inv_by_id[pay["invoice_id"]].get("payment_mode") or "").lower() == "insurance" else "Discharge bill",
                     "total_amount": float(to_decimal(pay["amount"])),
                     "created_at": pay.get("created_at"),
                     "notes": f"Recorded with discharge invoice {inv_by_id[pay['invoice_id']]['invoice_no']}",
@@ -1136,6 +1150,11 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
                 # >0: charges on record now exceed what was billed; <0: the invoice(s) billed more than that.
                 "billed_vs_charges_difference": float(quantize_dec(gross_charges - settlement["billed_gross"])),
                 "invoice_count": len(settlement["invoices"]),
+                # Billed to the insurer: "due" is owed by the insurer while the claim is open, by the patient once it is rejected.
+                "billed_to_insurance": settlement["billed_to_insurance"],
+                "insurance_open": settlement["insurance_open"],
+                "insurer_name": settlement["insurer_name"],
+                "claim_status": settlement["claim_status"],
                 "settlement_invoices": [
                     {"id": i["id"], "invoice_no": i["invoice_no"], "total": float(to_decimal(i["total_amount"])),
                      "paid": float(to_decimal(i["paid_amount"])), "due": float(to_decimal(i["due_amount"])),
@@ -1191,6 +1210,8 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
     admission_id = int(payload.get("admission_id"))
     payments = payload.get("payments") or []
     discount_input = to_decimal(payload.get("discount_amount") or 0)
+    # Insurance is not a payment received: the balance is billed to the insurer as a claim instead.
+    bill_to_insurance = bool(payload.get("bill_to_insurance"))
 
     notes = payload.get("notes") or "Discharge billing clearance"
 
@@ -1209,12 +1230,30 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
         # raise a second invoice and collect the same bill twice.
         if adm["discharge_date"]:
             already = _admission_settlement(cursor, admission_id)
+            if already and already["insurance_open"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"This stay is billed to {already['insurer_name'] or 'the insurer'} and is waiting for the insurer's payment. "
+                           "Record it in Insurance Claims instead of settling again.",
+                )
             if already and already["due"] <= D_ZERO:
                 nos = ", ".join(i["invoice_no"] for i in already["invoices"])
                 raise HTTPException(
                     status_code=409,
                     detail=f"This admission is already settled (invoice {nos}, ₹{already['collected']} collected). Nothing is left to collect.",
                 )
+
+        # Checked before anything is changed (advances are applied further down).
+        insurer = None
+        if bill_to_insurance:
+            if any(to_decimal(p.get("amount")) > D_ZERO for p in payments):
+                raise HTTPException(
+                    status_code=400,
+                    detail="A bill sent to the insurer is not collected from the patient. Remove the payment amount, or settle it as a normal payment.",
+                )
+            insurer = get_admission_insurer(cursor, admission_id)
+            if not insurer:
+                raise HTTPException(status_code=409, detail=NOT_INSURED_MESSAGE)
 
         # 2. Re-compute charges atomically under lock
         cursor.execute("SELECT * FROM bed_allocations WHERE admission_id = ? ORDER BY allocated_at ASC", (admission_id,))
@@ -1363,6 +1402,9 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
 
         remaining_due = quantize_dec(balance_to_collect - total_tendered)
         settlement_status = "paid" if remaining_due <= D_ZERO else "partial"
+        if insurer and remaining_due > D_ZERO and total_advance_applied <= D_ZERO:
+            settlement_status = "due"   # nothing paid yet: the whole bill is with the insurer
+        invoice_mode = "insurance" if (insurer and remaining_due > D_ZERO) else (clean_payments[0]["mode"] if clean_payments else None)
 
         # 5. Create or update consolidated IP invoice
         inv_no = f"INV-IP-{admission_id:04d}"
@@ -1375,21 +1417,28 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
             cursor.execute(
                 """
                 UPDATE invoices
-                SET total_amount = ?, paid_amount = ?, due_amount = ?, payment_status = ?
+                SET total_amount = ?, paid_amount = ?, due_amount = ?, payment_status = ?,
+                    payment_mode = COALESCE(?, payment_mode), admission_id = COALESCE(admission_id, ?)
                 WHERE id = ?
                 """,
-                (float(net_bill), float(total_advance_applied + total_tendered), float(remaining_due), settlement_status, inv_id)
+                (float(net_bill), float(total_advance_applied + total_tendered), float(remaining_due), settlement_status,
+                 invoice_mode, admission_id, inv_id)
             )
         else:
             cursor.execute(
                 """
-                INSERT INTO invoices (invoice_no, patient_id, module, total_amount, paid_amount, due_amount, payment_status, created_by)
-                VALUES (?, ?, 'IP', ?, ?, ?, ?, ?)
+                INSERT INTO invoices (invoice_no, patient_id, module, total_amount, paid_amount, due_amount, payment_status, created_by, admission_id, payment_mode)
+                VALUES (?, ?, 'IP', ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
-                (inv_no, patient_id, float(net_bill), float(total_advance_applied + total_tendered), float(remaining_due), settlement_status, user.get("username") or "Cashier")
+                (inv_no, patient_id, float(net_bill), float(total_advance_applied + total_tendered), float(remaining_due), settlement_status,
+                 user.get("username") or "Cashier", admission_id, invoice_mode)
             )
             inv_id = cursor.fetchone()[0]
+
+        claim_id = None
+        if insurer and remaining_due > D_ZERO:
+            claim_id = create_ip_insurance_claim(cursor, inv_id, patient_id, admission_id, insurer, float(remaining_due))
 
         receipt_no = None
         receipt_id = None
@@ -1477,6 +1526,9 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
             "amount_paid": float(total_tendered),
             "remaining_due": float(remaining_due),
             "settlement_status": settlement_status,
+            "billed_to_insurer": bool(insurer and remaining_due > D_ZERO),
+            "insurer_name": insurer["provider"] if insurer else None,
+            "claim_id": claim_id,
             "status": "finalised"
         }
 

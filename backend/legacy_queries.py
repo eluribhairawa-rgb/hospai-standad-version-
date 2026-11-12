@@ -4857,7 +4857,7 @@ def list_pharmacy_insurance_claims(db, status=None):
     stock for the issued medicines has been deducted yet."""
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        where = ["i.module = 'PHARMACY'"]
+        where = ["i.module IN ('PHARMACY', 'IP')"]
         params = []
         if status == "open":
             where.append("c.claim_status NOT IN ('rejected', 'closed', 'settled') AND COALESCE(c.settlement_status, 'unpaid') <> 'paid'")
@@ -4867,9 +4867,9 @@ def list_pharmacy_insurance_claims(db, status=None):
             f"""
             SELECT c.id, c.invoice_id, c.patient_id, c.insurer_name, c.claim_amount, c.approved_amount, c.claim_status,
                    c.settlement_status, c.patient_responsibility, c.membership_ref, c.authorization_ref, c.notes, c.submitted_at,
-                   i.invoice_no, i.total_amount, i.paid_amount, i.due_amount, i.payment_status,
+                   i.invoice_no, i.total_amount, i.paid_amount, i.due_amount, i.payment_status, i.module AS bill_module,
                    TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) AS patient_name,
-                   (SELECT MAX(ps.admission_id) FROM pharmacy_sales ps WHERE ps.invoice_id = c.invoice_id) AS admission_id,
+                   COALESCE(i.admission_id, (SELECT MAX(ps.admission_id) FROM pharmacy_sales ps WHERE ps.invoice_id = c.invoice_id)) AS admission_id,
                    (SELECT COUNT(*) FROM pharmacy_sales ps WHERE ps.invoice_id = c.invoice_id AND COALESCE(ps.quantity, 0) > 0
                       AND NOT EXISTS (SELECT 1 FROM stock_movements sm WHERE sm.ref_table = 'pharmacy_sales'
                                       AND sm.ref_id = ps.id AND sm.movement_type = 'dispense')) AS lines_awaiting_stock
@@ -8914,6 +8914,48 @@ def get_discharge_bill_preview(db, admission_id=None, allocation_id=None):
 
 
 
+def get_admission_insurer(cursor, admission_id):
+    """The insurer an admission is billed to: {provider, policy_no, preauth_no}, or None when the
+    stay is Self-pay or its insurance details are incomplete."""
+    cursor.execute(
+        "SELECT payer_type, insurance_provider, insurance_policy_no, insurance_preauth_no FROM admissions WHERE id = ?",
+        (admission_id,),
+    )
+    row = cursor.fetchone()
+    if not row or row["payer_type"] != "insurance" or not row["insurance_provider"] or not row["insurance_policy_no"]:
+        return None
+    return {"provider": row["insurance_provider"], "policy_no": row["insurance_policy_no"],
+            "preauth_no": row["insurance_preauth_no"] or ""}
+
+
+NOT_INSURED_MESSAGE = (
+    "This admission is marked Self-pay. Set the payer to Insurance (with provider and policy number) at "
+    "IP Admission or IP Discharge Billing before billing the insurer."
+)
+
+
+def create_ip_insurance_claim(cursor, invoice_id, patient_id, admission_id, insurer, claim_amount):
+    """Claim for an inpatient bill that is due from the insurer (nothing is recorded as paid)."""
+    cursor.execute("SELECT id FROM insurance_claims WHERE invoice_id = ?", (invoice_id,))
+    existing = cursor.fetchone()
+    if existing:
+        cursor.execute("UPDATE insurance_claims SET claim_amount = ? WHERE id = ?", (float(claim_amount), existing["id"]))
+        return existing["id"]
+    cursor.execute(
+        """
+        INSERT INTO insurance_claims (
+            invoice_id, patient_id, insurer_name, claim_amount, approved_amount, claim_status, external_ref, notes,
+            patient_responsibility, settlement_status, membership_ref, authorization_ref
+        ) VALUES (?, ?, ?, ?, 0, 'submitted', ?, ?, 0, 'unpaid', ?, ?)
+        RETURNING id
+        """,
+        (invoice_id, patient_id, insurer["provider"], float(claim_amount), insurer["preauth_no"] or None,
+         f"IP discharge claim - Admission #{admission_id} - Policy: {insurer['policy_no']}",
+         insurer["policy_no"], insurer["preauth_no"] or None),
+    )
+    return cursor.fetchone()["id"]
+
+
 def settle_inpatient_discharge(db, data, username):
     """Atomically settles bed release, records discharge timestamp, generates
     consolidated final invoice (bed + pharmacy), and links all running pharmacy
@@ -8922,7 +8964,9 @@ def settle_inpatient_discharge(db, data, username):
     allocation_id = data.get("allocation_id")
     raw_mode = str(data.get("payment_mode") or "cash").strip().lower()
     valid_modes = {"cash", "card", "upi", "bank", "razorpay", "bank_transfer", "net_banking", "mixed_payment", "cheque"}
-    payment_mode = raw_mode if raw_mode in valid_modes else "cash"
+    # "insurance" is not a payment received: the bill goes to the insurer as a claim.
+    bill_to_insurer = raw_mode == "insurance"
+    payment_mode = "insurance" if bill_to_insurer else (raw_mode if raw_mode in valid_modes else "cash")
     notes = data.get("notes", "Discharged in stable condition")
     discount = float(data.get("discount") or 0)
     advance_paid = float(data.get("advance_paid") or 0)
@@ -8942,12 +8986,35 @@ def settle_inpatient_discharge(db, data, username):
     total_amount = max(0.0, round(subtotal - discount, 2))
     paid_amount = max(0.0, round(total_amount - advance_paid, 2))
     due_amount = 0.0
+    insurer_due = 0.0
+    invoice_status = "paid"
+    if bill_to_insurer:
+        # The patient's advance covers its part; the insurer is billed the rest and nothing is collected now.
+        insurer_due = max(0.0, round(total_amount - advance_paid, 2))
+        paid_amount = 0.0
+        due_amount = insurer_due
+        invoice_status = "due" if insurer_due > 0 else "paid"
 
     now_str = datetime.now().strftime("%Y%m%d%H%M%S")
     invoice_no = f"INV-DIS-{now_str}"
 
     with get_connection(db) as conn:
         cursor = conn.cursor()
+
+        insurer = None
+        if bill_to_insurer:
+            insurer = get_admission_insurer(cursor, adm_id)
+            if not insurer:
+                raise ValueError(NOT_INSURED_MESSAGE)
+
+        # Two discharges in the same second would otherwise share an invoice number.
+        base_no, copy_no = invoice_no, 1
+        while True:
+            cursor.execute("SELECT 1 FROM invoices WHERE invoice_no = ?", (invoice_no,))
+            if not cursor.fetchone():
+                break
+            copy_no += 1
+            invoice_no = f"{base_no}-{copy_no}"
 
         if bed_id:
             cursor.execute(
@@ -8988,10 +9055,13 @@ def settle_inpatient_discharge(db, data, username):
             (
                 invoice_no, patient_id, preview["bed"].get("assigned_doctor") if preview.get("bed") else None,
                 "HospAI", None, subtotal, 0, discount, total_amount, paid_amount, due_amount,
-                "paid", username, advance_paid, 0, adm_id, payment_mode
+                invoice_status, username, advance_paid, 0, adm_id, payment_mode
             )
         )
         invoice_id = cursor.lastrowid
+        claim_id = None
+        if insurer and insurer_due > 0:
+            claim_id = create_ip_insurance_claim(cursor, invoice_id, patient_id, adm_id, insurer, insurer_due)
 
         if paid_amount > 0:
             cursor.execute(
@@ -9028,6 +9098,10 @@ def settle_inpatient_discharge(db, data, username):
         "invoice_id": invoice_id,
         "invoice_no": invoice_no,
         "payment_mode": payment_mode,
+        "billed_to_insurer": bill_to_insurer,
+        "insurer_name": insurer["provider"] if insurer else None,
+        "insurer_due": insurer_due,
+        "claim_id": claim_id,
         "preview": preview,
         "total_amount": total_amount,
         "paid_amount": paid_amount,
