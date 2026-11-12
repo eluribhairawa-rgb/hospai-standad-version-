@@ -47,7 +47,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   const [admissionType, setAdmissionType] = useState("Planned");
   const [triagePriority, setTriagePriority] = useState<"Critical" | "Urgent" | "Stable">("Stable");
   const [reasonForAdmission, setReasonForAdmission] = useState("");
-  const [expectedStay, setExpectedStay] = useState("3");
+  const [expectedStay, setExpectedStay] = useState("");
   const [notes, setNotes] = useState("");
   // Who pays for this stay -- prefilled from the patient's insurance on record.
   const [payer, setPayer] = useState<AdmissionPayer>(EMPTY_PAYER);
@@ -192,7 +192,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     setAdmissionType("Planned");
     setTriagePriority("Stable");
     setReasonForAdmission("");
-    setExpectedStay("3");
+    setExpectedStay("");
     setNotes("");
     setPayer(EMPTY_PAYER);
     setSelectedBedNo("");
@@ -618,6 +618,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
               max={60}
               value={expectedStay}
               onChange={(e) => setExpectedStay(e.target.value)}
+              placeholder="e.g. 3"
               style={{ height: "42px" }}
             />
           </div>
