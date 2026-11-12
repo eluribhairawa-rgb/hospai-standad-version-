@@ -329,7 +329,7 @@ export async function generateClientPdf(
             const titleText = (b.hospital_title || "").trim();
             const len = titleText.length;
             const fontPx = len <= 20 ? 24 : len <= 32 ? 20 : len <= 48 ? 17 : len <= 65 ? 15 : 13;
-            const titleStyle = `font-size: ${fontPx}px; font-weight: 800; color: #000; text-transform: uppercase; line-height: 1.25; word-break: break-word; text-align: center;`;
+            const titleStyle = `font-size: ${fontPx}px; font-weight: 800; color: #000; text-transform: uppercase; line-height: 1.25; word-break: break-word; white-space: pre-line; text-align: center;`;
 
             if (!b.logo?.data_uri) {
               return `<div style="text-align: center; width: 100%; ${titleStyle}">${escapeBrandText(titleText)}</div>`;

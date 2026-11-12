@@ -75,5 +75,5 @@ export function brandSystemLabel(): string {
 }
 
 export function brandThanks(): string {
-  return `Thank you for choosing ${brandTitle().replace(/[.\s]+$/, "")}.`;
+  return `Thank you for choosing ${brandTitle().replace(/[\r\n]+/g, ", ").replace(/[.\s]+$/, "")}.`;
 }

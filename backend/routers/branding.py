@@ -85,8 +85,8 @@ def update_branding_settings(request: Request, payload: dict = Body(...), db: Se
     lim = svc.OFFSET_LIMIT_MM
     if not (-lim <= ox <= lim and -lim <= oy <= lim):
         raise HTTPException(400, f"Offsets must be between -{lim:g} and {lim:g} mm.")
-    # No control characters in text that is drawn onto documents.
-    title, footer_text = (re.sub(r"[\x00-\x1f\x7f]", " ", v) for v in (title, footer_text))
+    # No control characters in text that is drawn onto documents (preserves \r and \n).
+    title, footer_text = (re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]", " ", v) for v in (title, footer_text))
     _ensure_row(db, hospital_id, user.get("username"))
     db.execute(text("""UPDATE document_branding SET hospital_title = :t, footer_text = :f, logo_alignment = :a,
                        logo_offset_x_mm = :ox, logo_offset_y_mm = :oy, auto_fit_scaling = :af,

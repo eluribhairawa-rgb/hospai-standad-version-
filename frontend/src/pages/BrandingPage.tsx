@@ -151,6 +151,7 @@ export default function BrandingPage({ setNotice }: Props) {
     letterSpacing: "-0.2px",
     wordBreak: "break-word",
     overflowWrap: "break-word",
+    whiteSpace: "pre-line",
     textAlign: "center",
   };
   const titleEl = trimmedTitle ? <div style={{ flex: 1, ...titleStyle }}>{trimmedTitle}</div> : null;
@@ -175,8 +176,23 @@ export default function BrandingPage({ setNotice }: Props) {
 
         <section style={section}>
           <h3 style={{ margin: "0 0 10px" }}>Hospital title</h3>
-          <label className="muted" htmlFor="branding-title" style={{ fontSize: 12 }}>Printed on documents in place of “HospAI”</label>
-          <Input id="branding-title" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Sunrise Multispeciality Hospital" />
+          <label className="muted" htmlFor="branding-title" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+            Printed on documents in place of “HospAI”. Press Shift+Enter or Enter to add a new line.
+          </label>
+          <Textarea
+            id="branding-title"
+            rows={2}
+            maxLength={200}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.shiftKey) {
+                e.stopPropagation();
+              }
+            }}
+            placeholder={"e.g. Sunrise Multispeciality Hospital\nShivaji Nagar, Siddipet"}
+            style={{ resize: "vertical", minHeight: 64, fontFamily: "inherit" }}
+          />
         </section>
 
         <section style={section}>
@@ -294,7 +310,7 @@ export default function BrandingPage({ setNotice }: Props) {
               <div style={{ borderTop: "1.5px solid #000", paddingTop: 4 }}>
                 {footerSrc && <img src={footerSrc} alt="Footer preview" style={{ width: fw * PX_PER_MM, height: fh * PX_PER_MM, objectFit: "contain", display: "block", margin: "0 auto 4px" }} />}
                 <div style={{ display: "flex", justifyContent: "space-between", font: "italic 7.5pt Arial, sans-serif" }}>
-                  <span>{footerText.trim() || `Thank you for choosing ${title.trim() || "HospAI"}.`}</span>
+                  <span>{footerText.trim() || `Thank you for choosing ${title.trim().replace(/[\r\n]+/g, ", ") || "HospAI"}.`}</span>
                   <span>Page 1 of 1</span>
                 </div>
               </div>

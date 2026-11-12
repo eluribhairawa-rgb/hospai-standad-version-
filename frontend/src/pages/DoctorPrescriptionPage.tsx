@@ -3438,7 +3438,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                     const tLen = titleText.length;
                     const rxFontSize = tLen > 45 ? "15px" : tLen > 32 ? "18px" : tLen > 22 ? "21px" : "24px";
                     return (
-                      <div className="rx-sheet-brand-name" style={{ fontSize: rxFontSize, wordBreak: "break-word" }}>
+                      <div className="rx-sheet-brand-name" style={{ fontSize: rxFontSize, wordBreak: "break-word", whiteSpace: "pre-line" }}>
                         {titleText ? titleText : <>Hosp<span className="brand-red">AI</span></>}
                       </div>
                     );

@@ -95,9 +95,18 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
         t_len = len(title)
         font_size = 18 if t_len <= 20 else (15.5 if t_len <= 32 else (13.5 if t_len <= 48 else (11.5 if t_len <= 65 else 9.5)))
         pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Helvetica", "B", font_size)
         align = (b.get("logo_alignment") if b else None) or "left"
-        if drawn:
+        lines = [line.strip() for line in title.splitlines() if line.strip()]
+        if len(lines) > 1:
+            line_height = 5 if len(lines) > 2 else 6
+            start_y = top_y + (16 if (drawn and align == "center") else 6)
+            for i, line in enumerate(lines):
+                pdf.set_xy(left_margin, start_y + i * line_height)
+                sub_font = font_size if i == 0 else max(font_size - 2.5, 9.0)
+                pdf.set_font("Helvetica", "B" if i == 0 else "", sub_font)
+                pdf.cell(195 - left_margin, line_height, line, align="C")
+        elif drawn:
+            pdf.set_font("Helvetica", "B", font_size)
             if align == "center":
                 pdf.set_xy(left_margin, top_y + 20)
                 pdf.cell(195 - left_margin, 8, title, align="C")
@@ -105,6 +114,7 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
                 pdf.set_xy(left_margin, top_y + 8)
                 pdf.cell(195 - left_margin, 12, title, align="C")
         else:
+            pdf.set_font("Helvetica", "B", font_size)
             pdf.set_xy(left_margin, top_y + 8)
             pdf.cell(195 - left_margin, 12, title, align="C")
     elif not drawn:

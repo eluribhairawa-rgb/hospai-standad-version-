@@ -99,7 +99,7 @@ function buildBrandRowHtml(): string {
   }
   const titleText = (b.hospital_title || "").trim();
   const fontSizePt = getPrintTitleFontSizePt(titleText);
-  const titleStyle = `font: 800 ${fontSizePt}pt Arial, Helvetica, sans-serif; color: #000; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px; word-break: break-word; overflow-wrap: break-word; text-align: center;`;
+  const titleStyle = `font: 800 ${fontSizePt}pt Arial, Helvetica, sans-serif; color: #000; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px; word-break: break-word; overflow-wrap: break-word; white-space: pre-line; text-align: center;`;
 
   if (!b.logo?.data_uri) {
     return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: center; min-height: auto; padding-bottom: 2mm;">
