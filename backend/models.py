@@ -2098,6 +2098,8 @@ class VendorPayments(Base):
     invoice_ref: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    supplier_id: Mapped[Optional[int]] = mapped_column(Integer)
+    created_by: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class WardIndents(Base):

@@ -27,14 +27,47 @@ type Supplier = {
   payment_terms?: string;
 };
 
+type SupplierPayment = {
+  id: number;
+  amount: number;
+  payment_date: string;
+  payment_mode: string;
+  invoice_ref?: string | null;
+  notes?: string | null;
+  created_by?: string | null;
+};
+
+type SupplierDelivery = {
+  grn_id: number;
+  grn_no?: string | null;
+  invoice_no?: string | null;
+  date: string;
+  medicine_name: string;
+  quantity: number;
+  free_qty: number;
+  total_cost: number;
+};
+
 type SupplierLedger = {
   supplier: Supplier;
   total_purchases: number;
   total_paid: number;
   outstanding: number;
+  advance: number;
   purchases: any[];
-  goods_receipts: any[];
+  deliveries: SupplierDelivery[];
+  payments: SupplierPayment[];
 };
+
+const PAYMENT_MODE_LABELS: Record<string, string> = {
+  bank_transfer: "Bank Transfer",
+  cheque: "Cheque",
+  upi: "UPI",
+  cash: "Cash",
+  card: "Card",
+};
+const inr = (n: number | null | undefined) =>
+  `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -65,6 +98,8 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
   const [payMode, setPayMode] = useState("bank_transfer");
   const [payRef, setPayRef] = useState("");
   const [payRemarks, setPayRemarks] = useState("");
+  const [payDate, setPayDate] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const [savingPayment, setSavingPayment] = useState(false);
 
   // Load suppliers
   const loadSuppliers = async () => {
@@ -200,24 +235,42 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
     }
   };
 
-  // Record Payment
-  const handleRecordPayment = () => {
+  // Record Payment: saved on the server (vendor_payments), then the ledger is re-read from it.
+  const handleRecordPayment = async () => {
+    const supplierId = selectedLedger?.supplier?.id;
     const amountNum = parseFloat(payAmount) || 0;
+    if (!supplierId) return;
     if (amountNum <= 0) {
       setNotice({ type: "warning", message: "Payment amount must be greater than 0" });
       return;
     }
-    setNotice({
-      type: "success",
-      message: `Disbursement of ₹${amountNum.toFixed(2)} recorded via ${payMode}. Ref #${payRef || "N/A"}.`,
-    });
-    setPaymentModalOpen(false);
-    if (selectedLedger) {
-      setSelectedLedger({
-        ...selectedLedger,
-        total_paid: selectedLedger.total_paid + amountNum,
-        outstanding: Math.max(0, selectedLedger.outstanding - amountNum),
+    if (savingPayment) return;
+    setSavingPayment(true);
+    try {
+      const res = await apiFetch<{ ledger: SupplierLedger }>(`/api/pharmacy/suppliers/${supplierId}/payments`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount: amountNum,
+          payment_mode: payMode,
+          payment_date: payDate,
+          reference: payRef.trim() || undefined,
+          notes: payRemarks.trim() || undefined,
+        }),
       });
+      setSelectedLedger(res.ledger);
+      setPaymentModalOpen(false);
+      setPayRef("");
+      setPayRemarks("");
+      setNotice({
+        type: "success",
+        message: `Payment of ${inr(amountNum)} to ${res.ledger.supplier.supplier_name} recorded via ${PAYMENT_MODE_LABELS[payMode] || payMode}.${
+          res.ledger.advance > 0 ? ` Advance credit: ${inr(res.ledger.advance)}.` : ` Outstanding: ${inr(res.ledger.outstanding)}.`
+        }`,
+      });
+    } catch (err) {
+      reportError(setNotice, err as any, "Could not record the payment");
+    } finally {
+      setSavingPayment(false);
     }
   };
 
@@ -465,8 +518,10 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
                 className="primary"
                 style={{ background: "#00828a", borderColor: "#00828a", padding: "4px 12px", fontSize: "0.8rem" }}
                 onClick={() => {
-                  setPayAmount("");
+                  setPayAmount(selectedLedger && selectedLedger.outstanding > 0 ? String(selectedLedger.outstanding) : "");
                   setPayRef("");
+                  setPayRemarks("");
+                  setPayDate(new Date().toLocaleDateString("en-CA"));
                   setPaymentModalOpen(true);
                 }}
               >
@@ -479,21 +534,61 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
               <div style={{ background: "#f8fafc", padding: "0.85rem", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                 <div style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: 600 }}>Total Inward Purchases</div>
                 <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#0f172a" }}>
-                  ₹{(selectedLedger?.total_purchases || 0).toFixed(2)}
+                  {inr(selectedLedger?.total_purchases)}
                 </div>
               </div>
               <div style={{ background: "#f0fdf4", padding: "0.85rem", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
                 <div style={{ fontSize: "0.75rem", color: "#166534", fontWeight: 600 }}>Total Payments Made</div>
                 <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#16a34a" }}>
-                  ₹{(selectedLedger?.total_paid || 0).toFixed(2)}
+                  {inr(selectedLedger?.total_paid)}
                 </div>
               </div>
               <div style={{ background: "#fef2f2", padding: "0.85rem", borderRadius: "8px", border: "1px solid #fecaca" }}>
                 <div style={{ fontSize: "0.75rem", color: "#991b1b", fontWeight: 600 }}>Outstanding Balance</div>
                 <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "#dc2626" }}>
-                  ₹{(selectedLedger?.outstanding || 0).toFixed(2)}
+                  {inr(selectedLedger?.outstanding)}
                 </div>
               </div>
+            </div>
+            {(selectedLedger?.advance || 0) > 0 && (
+              <div style={{ margin: "-0.75rem 0 1.25rem", fontSize: "0.8rem", color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "0.5rem 0.75rem" }}>
+                Paid more than purchased so far: <strong>{inr(selectedLedger?.advance)}</strong> is held as an advance credit with this supplier.
+              </div>
+            )}
+
+            {/* Payments made to this supplier */}
+            <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "#0f172a" }}>Payments Made</h4>
+            <div style={{ maxHeight: "180px", overflowY: "auto", marginBottom: "1.25rem" }}>
+              <table className="pharmacy-data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1.5px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
+                    <th style={{ padding: "0.4rem" }}>Date</th>
+                    <th style={{ padding: "0.4rem" }}>Mode</th>
+                    <th style={{ padding: "0.4rem" }}>Reference</th>
+                    <th style={{ padding: "0.4rem" }}>By</th>
+                    <th style={{ padding: "0.4rem", textAlign: "right" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedLedger?.payments && selectedLedger.payments.length > 0 ? (
+                    selectedLedger.payments.map((pay) => (
+                      <tr key={pay.id} style={{ borderBottom: "1px solid #f1f5f9" }} title={pay.notes || undefined}>
+                        <td style={{ padding: "0.4rem", color: "#64748b" }}>{pay.payment_date}</td>
+                        <td style={{ padding: "0.4rem" }}>{PAYMENT_MODE_LABELS[pay.payment_mode] || pay.payment_mode}</td>
+                        <td style={{ padding: "0.4rem" }}>{pay.invoice_ref || "-"}</td>
+                        <td style={{ padding: "0.4rem", color: "#64748b" }}>{pay.created_by || "-"}</td>
+                        <td style={{ padding: "0.4rem", textAlign: "right", fontWeight: 700, color: "#16a34a" }}>{inr(pay.amount)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} style={{ padding: "1rem", textAlign: "center", color: "#94a3b8" }}>
+                        No payments recorded for this supplier yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             {/* Recent Orders / GRNs */}
@@ -512,18 +607,32 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedLedger?.purchases && selectedLedger.purchases.length > 0 ? (
-                    selectedLedger.purchases.map((p) => (
-                      <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "0.4rem", color: "#64748b" }}>
-                          {p.created_at ? new Date(p.created_at).toLocaleDateString() : "-"}
-                        </td>
-                        <td style={{ padding: "0.4rem", fontWeight: 600 }}>{p.medicine_name}</td>
-                        <td style={{ padding: "0.4rem", textAlign: "center" }}>{p.quantity}</td>
-                        <td style={{ padding: "0.4rem", textAlign: "right", fontWeight: 700 }}>₹{p.total_cost}</td>
-                        <td style={{ padding: "0.4rem", textTransform: "capitalize" }}>{p.status}</td>
-                      </tr>
-                    ))
+                  {(selectedLedger?.purchases || []).filter((p) => p.status === "ordered").length > 0 ||
+                  (selectedLedger?.deliveries || []).length > 0 ? (
+                    <>
+                      {(selectedLedger?.purchases || [])
+                        .filter((p) => p.status === "ordered")
+                        .map((p) => (
+                          <tr key={`po-${p.id}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "0.4rem", color: "#64748b" }}>
+                              {p.created_at ? new Date(p.created_at).toLocaleDateString() : "-"}
+                            </td>
+                            <td style={{ padding: "0.4rem", fontWeight: 600 }}>{p.medicine_name}</td>
+                            <td style={{ padding: "0.4rem", textAlign: "center" }}>{p.quantity}</td>
+                            <td style={{ padding: "0.4rem", textAlign: "right", color: "#94a3b8" }}>not billed yet</td>
+                            <td style={{ padding: "0.4rem", color: "#b45309" }}>Ordered</td>
+                          </tr>
+                        ))}
+                      {(selectedLedger?.deliveries || []).map((d, i) => (
+                        <tr key={`grn-${d.grn_id}-${i}`} style={{ borderBottom: "1px solid #f1f5f9" }} title={d.invoice_no ? `Invoice ${d.invoice_no}` : undefined}>
+                          <td style={{ padding: "0.4rem", color: "#64748b" }}>{d.date}</td>
+                          <td style={{ padding: "0.4rem", fontWeight: 600 }}>{d.medicine_name}</td>
+                          <td style={{ padding: "0.4rem", textAlign: "center" }}>{d.quantity}{d.free_qty ? ` +${d.free_qty} free` : ""}</td>
+                          <td style={{ padding: "0.4rem", textAlign: "right", fontWeight: 700 }}>{inr(d.total_cost)}</td>
+                          <td style={{ padding: "0.4rem", color: "#15803d" }}>Received{d.grn_no ? ` · ${d.grn_no.slice(0, 12)}` : ""}</td>
+                        </tr>
+                      ))}
+                    </>
                   ) : (
                     <tr>
                       <td colSpan={5} style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8" }}>
@@ -567,6 +676,19 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
               />
             </div>
 
+            {(parseFloat(payAmount) || 0) > (selectedLedger?.outstanding || 0) && (
+              <div style={{ margin: "-0.5rem 0 1rem", fontSize: "0.78rem", color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "6px", padding: "0.4rem 0.6rem" }}>
+                This is more than the outstanding balance ({inr(selectedLedger?.outstanding)}). The extra will be kept as an advance credit with this supplier.
+              </div>
+            )}
+
+            <div style={{ marginBottom: "1rem" }}>
+              <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Payment Date:
+              </label>
+              <Input type="date" value={payDate} max={new Date().toLocaleDateString("en-CA")} onChange={(e) => setPayDate(e.target.value)} />
+            </div>
+
             <div style={{ marginBottom: "1rem" }}>
               <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                 Payment Mode:
@@ -584,7 +706,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
               </select>
             </div>
 
-            <div style={{ marginBottom: "1.25rem" }}>
+            <div style={{ marginBottom: "1rem" }}>
               <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                 Transaction / UTR / Cheque Ref:
               </label>
@@ -595,17 +717,25 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
               />
             </div>
 
+            <div style={{ marginBottom: "1.25rem" }}>
+              <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Remarks (optional):
+              </label>
+              <Input value={payRemarks} onChange={(e) => setPayRemarks(e.target.value)} placeholder="e.g. Against invoice INV-1042" />
+            </div>
+
             <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
-              <Button type="button" variant="secondary" onClick={() => setPaymentModalOpen(false)}>
+              <Button type="button" variant="secondary" onClick={() => setPaymentModalOpen(false)} disabled={savingPayment}>
                 Cancel
               </Button>
               <Button
                 type="button"
                 className="primary"
                 style={{ background: "#00828a", borderColor: "#00828a" }}
-                onClick={handleRecordPayment}
+                onClick={() => void handleRecordPayment()}
+                disabled={savingPayment}
               >
-                Confirm Payment
+                {savingPayment ? "Saving..." : "Confirm Payment"}
               </Button>
             </div>
           </div>

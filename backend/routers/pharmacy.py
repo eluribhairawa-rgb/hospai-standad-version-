@@ -517,6 +517,21 @@ def pharmacy_supplier_ledger_get(supplier_id: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@router.post("/suppliers/{supplier_id}/payments")
+def pharmacy_supplier_payment_create(supplier_id: int, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
+                                      user: dict = Depends(require_permissions("pharmacy.write"))):
+    try:
+        payment_id = lq.record_supplier_payment(db, supplier_id, payload, user.get("username"))
+        ledger = lq.get_supplier_ledger(db, supplier_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    log_audit_event(db, user, client_ip(request), "supplier_payment", "vendor_payments", str(payment_id),
+                    {"supplier_id": supplier_id, "amount": payload.get("amount"), "payment_mode": payload.get("payment_mode")})
+    return {"payment_id": payment_id, "ledger": ledger}
+
+
 @router.get("/ward-indents")
 def pharmacy_ward_indents_list(status: str | None = None, ward: str | None = None, patient_id: str | None = None,
                                 admission_id: int | None = None, db: Session = Depends(get_db),

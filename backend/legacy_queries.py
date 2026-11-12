@@ -8064,7 +8064,22 @@ def update_purchase_request_status(db, pr_id, status, username=None, reason=None
 
 
 
+# Payments counted against a supplier: money actually paid out. A 'pending' row is a payable that
+# has not been paid yet, so it is not counted.
+_SUPPLIER_PAID_STATUSES = ("paid", "partial")
+
+
 def get_supplier_ledger(db, supplier_id):
+    """Supplier financial ledger.
+
+    Inward purchases = what the supplier has invoiced for goods received: every verified GRN
+    line, valued the way the GRN screen totals a supplier invoice (billed quantity = received
+    minus free, at the purchase price, less discount, plus GST). Purchase orders are only
+    commitments until goods arrive, so they are listed but not counted as owed.
+
+    Payments = vendor_payments rows linked to this supplier (recorded here), plus older rows
+    typed in Accounts under the exact same vendor name.
+    """
     with get_connection(db) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM pharmacy_suppliers WHERE id = ?", (supplier_id,))
@@ -8074,7 +8089,7 @@ def get_supplier_ledger(db, supplier_id):
 
         cursor.execute(
             """
-            SELECT id, medicine_name, quantity, unit_cost, total_cost, status, created_at
+            SELECT id, medicine_name, quantity, unit_cost, total_cost, status, created_at, expected_date
             FROM pharmacy_purchases
             WHERE supplier_id = ?
             ORDER BY created_at DESC
@@ -8082,43 +8097,130 @@ def get_supplier_ledger(db, supplier_id):
             (supplier_id,),
         )
         purchases = [dict(r) for r in cursor.fetchall()]
-        total_purchases = sum(p["total_cost"] for p in purchases if p["status"] != "cancelled")
 
-        # No supplier-payment recording exists yet, so paid stays 0 and the
-        # full purchase total is shown as outstanding -- an honest reflection
-        # of what this system can currently track, not a placeholder guess.
+        cursor.execute(
+            """
+            SELECT gr.id AS grn_id, gr.grn_no, gr.supplier_invoice_no, gr.received_date, gr.created_at,
+                   i.medicine_name, i.qty_received, i.free_qty, i.qty_accepted, i.purchase_price,
+                   COALESCE(i.discount_pct, 0) AS discount_pct, COALESCE(i.gst_rate, 0) AS gst_rate
+            FROM goods_receipts gr
+            JOIN goods_receipt_items i ON i.grn_id = gr.id
+            WHERE gr.status = 'verified'
+              AND COALESCE(gr.supplier_id, (SELECT pp.supplier_id FROM pharmacy_purchases pp WHERE pp.id = gr.purchase_order_id)) = ?
+            ORDER BY COALESCE(gr.received_date, DATE(gr.created_at)) DESC, gr.id DESC, i.id
+            """,
+            (supplier_id,),
+        )
+        deliveries = []
+        total_purchases = 0.0
+        for row in cursor.fetchall():
+            r = dict(row)
+            billed = max(0, int(r["qty_received"] or 0) - int(r["free_qty"] or 0))
+            taxable = billed * float(r["purchase_price"] or 0) * (1 - float(r["discount_pct"] or 0) / 100.0)
+            line_total = round(taxable * (1 + float(r["gst_rate"] or 0) / 100.0), 2)
+            total_purchases += line_total
+            deliveries.append({
+                "grn_id": r["grn_id"], "grn_no": r["grn_no"], "invoice_no": r["supplier_invoice_no"],
+                "date": str(r["received_date"] or r["created_at"])[:10],
+                "medicine_name": r["medicine_name"], "quantity": billed, "free_qty": int(r["free_qty"] or 0),
+                "total_cost": line_total, "status": "received",
+            })
+        total_purchases = round(total_purchases, 2)
+
+        placeholders = ", ".join("?" for _ in _SUPPLIER_PAID_STATUSES)
+        cursor.execute(
+            f"""
+            SELECT id, amount, payment_date, payment_mode, status, invoice_ref, notes, created_by, created_at
+            FROM vendor_payments
+            WHERE status IN ({placeholders})
+              AND (supplier_id = ? OR (supplier_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM(?))))
+            ORDER BY payment_date DESC, id DESC
+            """,
+            (*_SUPPLIER_PAID_STATUSES, supplier_id, supplier["supplier_name"]),
+        )
+        payments = []
         total_paid = 0.0
-        outstanding = max(0.0, total_purchases - total_paid)
+        for row in cursor.fetchall():
+            r = dict(row)
+            r["payment_date"] = str(r["payment_date"])[:10]
+            r["created_at"] = str(r["created_at"])[:19] if r.get("created_at") else None
+            total_paid += float(r["amount"] or 0)
+            payments.append(r)
+        total_paid = round(total_paid, 2)
+
+        balance = round(total_purchases - total_paid, 2)
+        outstanding = max(0.0, balance)
+        advance = max(0.0, -balance)
 
         cursor.execute(
             """
             SELECT gr.id, gr.grn_no, gr.supplier_invoice_no, gr.received_date, gr.stock_source, gr.status
             FROM goods_receipts gr
-            JOIN pharmacy_purchases pp ON pp.id = gr.purchase_order_id
-            WHERE pp.supplier_id = ? AND gr.status = 'verified'
+            WHERE gr.status = 'verified'
+              AND COALESCE(gr.supplier_id, (SELECT pp.supplier_id FROM pharmacy_purchases pp WHERE pp.id = gr.purchase_order_id)) = ?
             ORDER BY gr.received_date DESC
             LIMIT 25
             """,
             (supplier_id,),
         )
-        recent_receipts = []
-        for grn in cursor.fetchall():
-            grn_dict = dict(grn)
-            cursor.execute(
-                "SELECT medicine_name, qty_accepted FROM goods_receipt_items WHERE grn_id = ?",
-                (grn_dict["id"],),
-            )
-            grn_dict["items"] = [dict(row) for row in cursor.fetchall()]
-            recent_receipts.append(grn_dict)
+        recent_receipts = [dict(grn) for grn in cursor.fetchall()]
 
         return {
             "supplier": dict(supplier),
             "total_purchases": total_purchases,
             "total_paid": total_paid,
+            # `outstanding` is what the screen reads; `outstanding_balance` is kept for older callers.
+            "outstanding": outstanding,
             "outstanding_balance": outstanding,
+            "advance": advance,
             "purchases": purchases,
+            "deliveries": deliveries,
+            "payments": payments,
             "recent_receipts": recent_receipts,
         }
+
+
+SUPPLIER_PAYMENT_MODES = ("bank_transfer", "cheque", "upi", "cash", "card")
+
+
+def record_supplier_payment(db, supplier_id, data, username):
+    """Record money paid to a pharmacy supplier. Stored in vendor_payments (so it also shows
+    under Accounts > Vendor Payments) and counted by get_supplier_ledger. A payment larger than
+    the outstanding balance is allowed: it is kept as an advance credit on the ledger."""
+    try:
+        amount = round(float(data.get("amount")), 2)
+    except (TypeError, ValueError):
+        raise ValueError("Enter the payment amount.")
+    if not amount > 0:
+        raise ValueError("Payment amount must be greater than zero.")
+    mode = str(data.get("payment_mode") or "bank_transfer").strip().lower()
+    if mode not in SUPPLIER_PAYMENT_MODES:
+        raise ValueError("Choose a valid payment mode.")
+    pay_date = str(data.get("payment_date") or "").strip() or current_ist_datetime().date().isoformat()
+    try:
+        parsed = datetime.strptime(pay_date[:10], "%Y-%m-%d").date()
+    except ValueError:
+        raise ValueError("Payment date must be a valid date (YYYY-MM-DD).")
+    if parsed > current_ist_datetime().date():
+        raise ValueError("Payment date cannot be in the future.")
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT supplier_name FROM pharmacy_suppliers WHERE id = ?", (supplier_id,))
+        supplier = cursor.fetchone()
+        if not supplier:
+            raise LookupError("Supplier not found.")
+        cursor.execute(
+            """
+            INSERT INTO vendor_payments (vendor_name, supplier_id, invoice_ref, amount, payment_date, payment_mode, status, notes, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, 'paid', ?, ?)
+            RETURNING id
+            """,
+            (supplier["supplier_name"], supplier_id, str(data.get("reference") or "").strip() or None, amount,
+             parsed.isoformat(), mode, str(data.get("notes") or "").strip() or None, username),
+        )
+        payment_id = cursor.fetchone()["id"]
+        conn.commit()
+        return payment_id
 
 
 # ==================== Enterprise IPD Ward Indenting & eMAR ====================
