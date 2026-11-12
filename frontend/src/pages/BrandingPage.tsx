@@ -140,8 +140,20 @@ export default function BrandingPage({ setNotice }: Props) {
   const footerSrc = cfg?.footer ? `${baseUrl}${cfg.footer.url}` : "";
   const [lw, lh] = fitMm(cfg?.logo?.width_px ?? null, cfg?.logo?.height_px ?? null, logoBox[0], logoBox[1], autoFit);
   const [fw, fh] = fitMm(cfg?.footer?.width_px ?? null, cfg?.footer?.height_px ?? null, footerBox[0], footerBox[1], true);
-  const showTitle = title.trim() && alignment !== "center";
-  const titleEl = <div style={{ font: "800 15pt Arial, sans-serif", color: "#000" }}>{title.trim()}</div>;
+  const trimmedTitle = title.trim();
+  const titleLen = trimmedTitle.length;
+  const titleFontSizePt = titleLen <= 20 ? 18 : titleLen <= 32 ? 15.5 : titleLen <= 48 ? 13.5 : titleLen <= 65 ? 11.5 : 10;
+  const titleStyle: React.CSSProperties = {
+    font: `800 ${titleFontSizePt}pt Arial, sans-serif`,
+    color: "#000",
+    textTransform: "uppercase",
+    lineHeight: 1.25,
+    letterSpacing: "-0.2px",
+    wordBreak: "break-word",
+    overflowWrap: "break-word",
+    textAlign: "center",
+  };
+  const titleEl = trimmedTitle ? <div style={{ flex: 1, ...titleStyle }}>{trimmedTitle}</div> : null;
   const logoEl = cfg?.logo ? (
     <img src={logoSrc} alt="Logo preview" style={{ width: lw * PX_PER_MM, height: lh * PX_PER_MM, objectFit: "contain", position: "relative", left: ox * PX_PER_MM, top: oy * PX_PER_MM, display: "block" }} />
   ) : null;
@@ -238,11 +250,44 @@ export default function BrandingPage({ setNotice }: Props) {
           <h3 style={{ margin: "0 0 10px" }}>Live preview</h3>
           <div style={{ background: "#fff", border: "1px solid #cbd5e1", boxShadow: "0 1px 6px rgba(0,0,0,.12)", padding: 15 * PX_PER_MM / 3, overflow: "hidden" }}>
             <div style={{ width: 180 * PX_PER_MM, maxWidth: "100%", margin: "0 auto" }}>
-              <div style={{ minHeight: 32 * PX_PER_MM, display: "flex", alignItems: "flex-start", justifyContent: alignment === "center" || !showTitle || !logoEl ? (alignment === "center" ? "center" : alignment === "right" ? "flex-end" : "flex-start") : "space-between", borderBottom: "2px solid #000", paddingBottom: 4 }}>
+              <div style={{
+                minHeight: Math.max(26 * PX_PER_MM, (lh + 6) * PX_PER_MM),
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderBottom: "2px solid #000",
+                paddingBottom: 6,
+                paddingTop: 4,
+                boxSizing: "border-box",
+                width: "100%",
+              }}>
                 {logoEl ? (
-                  alignment === "right" && showTitle ? <>{titleEl}{logoEl}</> : <>{logoEl}{showTitle ? titleEl : null}</>
-                ) : title.trim() ? titleEl : (
-                  <div className="muted" style={{ fontSize: 12 }}>Default HospAI header (no custom logo or title)</div>
+                  !trimmedTitle ? (
+                    <div style={{ width: "100%", display: "flex", justifyContent: alignment === "center" ? "center" : alignment === "right" ? "flex-end" : "flex-start" }}>
+                      {logoEl}
+                    </div>
+                  ) : alignment === "center" ? (
+                    <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                      <div>{logoEl}</div>
+                      {titleEl}
+                    </div>
+                  ) : alignment === "right" ? (
+                    <div style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ width: lw * PX_PER_MM, flexShrink: 0, visibility: "hidden" }} aria-hidden="true" />
+                      {titleEl}
+                      <div style={{ width: lw * PX_PER_MM, flexShrink: 0, display: "flex", justifyContent: "flex-end" }}>{logoEl}</div>
+                    </div>
+                  ) : (
+                    <div style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ width: lw * PX_PER_MM, flexShrink: 0, display: "flex", justifyContent: "flex-start" }}>{logoEl}</div>
+                      {titleEl}
+                      <div style={{ width: lw * PX_PER_MM, flexShrink: 0, visibility: "hidden" }} aria-hidden="true" />
+                    </div>
+                  )
+                ) : trimmedTitle ? (
+                  titleEl
+                ) : (
+                  <div className="muted" style={{ fontSize: 12, textAlign: "center", width: "100%" }}>Default HospAI header (no custom logo or title)</div>
                 )}
               </div>
               <div style={{ margin: "14px 0 90px", color: "#94a3b8", fontSize: 11 }}>Document title · patient details · body…</div>

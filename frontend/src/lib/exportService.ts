@@ -318,19 +318,53 @@ export async function generateClientPdf(
       <div style="position: relative; z-index: 1;">
 
         <!-- Header -->
-        <div style="display: flex; justify-content: ${({ left: "flex-start", center: "center", right: "flex-end" } as Record<string, string>)[getBranding()?.logo_alignment || "left"]}; align-items: flex-start; margin-bottom: ${PDF_HEADER_SPACING}; gap: ${PDF_IMAGE_PADDING};">
-          <div style="flex-shrink: 0;">
-            ${(() => {
-              const b = getBranding();
-              if (b?.logo?.data_uri) {
-                const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
-                const px = (mm: number) => Math.round(mm * 3.7795 * 1.6);
-                return `<img src="${b.logo.data_uri}" style="width:${px(w)}px;height:${px(h)}px;object-fit:contain;" alt="${escapeBrandText(b.hospital_title || "Logo")}" />`;
-              }
-              if (b?.hospital_title) return `<div style="font-size:26px;font-weight:800;color:#000;">${escapeBrandText(b.hospital_title)}</div>`;
-              return `<img src="${PRINT_BRAND_HEADER_DATA_URI}" style="width: ${PDF_LOGO_WIDTH}; height: ${PDF_LOGO_HEIGHT}; object-fit: contain;" alt="HospAI Logo" />`;
-            })()}
-          </div>
+        <div style="margin-bottom: ${PDF_HEADER_SPACING};">
+          ${(() => {
+            const b = getBranding();
+            if (!b || (!b.logo?.data_uri && !b.hospital_title)) {
+              return `<div style="display: flex; justify-content: flex-start; align-items: center;">
+                <img src="${PRINT_BRAND_HEADER_DATA_URI}" style="width: ${PDF_LOGO_WIDTH}; height: ${PDF_LOGO_HEIGHT}; object-fit: contain;" alt="HospAI Logo" />
+              </div>`;
+            }
+            const titleText = (b.hospital_title || "").trim();
+            const len = titleText.length;
+            const fontPx = len <= 20 ? 24 : len <= 32 ? 20 : len <= 48 ? 17 : len <= 65 ? 15 : 13;
+            const titleStyle = `font-size: ${fontPx}px; font-weight: 800; color: #000; text-transform: uppercase; line-height: 1.25; word-break: break-word; text-align: center;`;
+
+            if (!b.logo?.data_uri) {
+              return `<div style="text-align: center; width: 100%; ${titleStyle}">${escapeBrandText(titleText)}</div>`;
+            }
+
+            const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
+            const px = (mm: number) => Math.round(mm * 3.7795 * 1.6);
+            const logoImg = `<img src="${b.logo.data_uri}" style="width: ${px(w)}px; height: ${px(h)}px; object-fit: contain;" alt="${escapeBrandText(titleText || "Logo")}" />`;
+
+            if (!titleText) {
+              const justify = b.logo_alignment === "center" ? "center" : b.logo_alignment === "right" ? "flex-end" : "flex-start";
+              return `<div style="display: flex; justify-content: ${justify}; align-items: center;">${logoImg}</div>`;
+            }
+
+            if (b.logo_alignment === "center") {
+              return `<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                <div>${logoImg}</div>
+                <div style="${titleStyle}">${escapeBrandText(titleText)}</div>
+              </div>`;
+            }
+
+            if (b.logo_alignment === "right") {
+              return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <div style="width: ${px(w)}px; flex-shrink: 0; visibility: hidden;"></div>
+                <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+                <div style="width: ${px(w)}px; flex-shrink: 0; display: flex; justify-content: flex-end;">${logoImg}</div>
+              </div>`;
+            }
+
+            return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <div style="width: ${px(w)}px; flex-shrink: 0; display: flex; justify-content: flex-start;">${logoImg}</div>
+              <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+              <div style="width: ${px(w)}px; flex-shrink: 0; visibility: hidden;"></div>
+            </div>`;
+          })()}
         </div>
         
         <div style="border-top: 2px solid #000; margin-bottom: ${PDF_HEADER_SPACING};"></div>

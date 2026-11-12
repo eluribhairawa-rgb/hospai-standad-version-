@@ -79,6 +79,15 @@ function appendSharedHospaiPrintFooter(html: string): string {
   return bodyEnd >= 0 ? `${html.slice(0, bodyEnd)}${style}${html.slice(bodyEnd)}` : `${html}${style}`;
 }
 
+function getPrintTitleFontSizePt(title: string): number {
+  const len = title.trim().length;
+  if (len <= 20) return 18;
+  if (len <= 32) return 15.5;
+  if (len <= 48) return 13.5;
+  if (len <= 65) return 11.5;
+  return 10;
+}
+
 /** Letterhead row: the built-in HospAI logo by default, or the hospital's own logo/title
  * (alignment, offsets, auto-fit) from Branding & Templates. */
 function buildBrandRowHtml(): string {
@@ -88,14 +97,45 @@ function buildBrandRowHtml(): string {
         <img class="hospai-shared-brand-logo" src="${PRINT_BRAND_HEADER_DATA_URI}" alt="HospAI, Pharmacy and Diagnostic" />
       </div>`;
   }
-  const title = b.hospital_title ? `<div style="font:800 15pt Arial,Helvetica,sans-serif;color:#000;">${escapeBrandText(b.hospital_title)}</div>` : "";
-  if (!b.logo?.data_uri) return `<div class="hospai-shared-brand-row" style="align-items:center;">${title}</div>`;
+  const titleText = (b.hospital_title || "").trim();
+  const fontSizePt = getPrintTitleFontSizePt(titleText);
+  const titleStyle = `font: 800 ${fontSizePt}pt Arial, Helvetica, sans-serif; color: #000; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px; word-break: break-word; overflow-wrap: break-word; text-align: center;`;
+
+  if (!b.logo?.data_uri) {
+    return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: center; min-height: auto; padding-bottom: 2mm;">
+      <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+    </div>`;
+  }
+
   const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
-  const logo = `<img src="${b.logo.data_uri}" alt="${escapeBrandText(b.hospital_title || "Hospital logo")}" style="display:block;width:${w.toFixed(2)}mm;height:${h.toFixed(2)}mm;max-width:100%;object-fit:contain;position:relative;left:${b.logo_offset_x_mm}mm;top:${b.logo_offset_y_mm}mm;" />`;
-  const justify = b.logo_alignment === "center" ? "center" : b.logo_alignment === "right" ? "flex-end" : "flex-start";
-  const withTitle = b.logo_alignment === "center" || !title ? logo : b.logo_alignment === "right" ? `${title}${logo}` : `${logo}${title}`;
-  const rowJustify = b.logo_alignment === "center" || !title ? justify : "space-between";
-  return `<div class="hospai-shared-brand-row" style="justify-content:${rowJustify};">${withTitle}</div>`;
+  const logoImg = `<img src="${b.logo.data_uri}" alt="${escapeBrandText(titleText || "Hospital logo")}" style="display: block; width: ${w.toFixed(2)}mm; height: ${h.toFixed(2)}mm; max-width: 100%; object-fit: contain; position: relative; left: ${b.logo_offset_x_mm}mm; top: ${b.logo_offset_y_mm}mm;" />`;
+
+  if (!titleText) {
+    const justify = b.logo_alignment === "center" ? "center" : b.logo_alignment === "right" ? "flex-end" : "flex-start";
+    return `<div class="hospai-shared-brand-row" style="justify-content: ${justify}; align-items: center; min-height: auto;">${logoImg}</div>`;
+  }
+
+  if (b.logo_alignment === "center") {
+    return `<div class="hospai-shared-brand-row" style="flex-direction: column; align-items: center; justify-content: center; min-height: auto; gap: 2.5mm; padding-bottom: 2mm;">
+      <div>${logoImg}</div>
+      <div style="${titleStyle}">${escapeBrandText(titleText)}</div>
+    </div>`;
+  }
+
+  if (b.logo_alignment === "right") {
+    return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding-bottom: 2mm;">
+      <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; visibility: hidden;" aria-hidden="true"></div>
+      <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+      <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; justify-content: flex-end;">${logoImg}</div>
+    </div>`;
+  }
+
+  // Default: left alignment
+  return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding-bottom: 2mm;">
+    <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; justify-content: flex-start;">${logoImg}</div>
+    <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+    <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; visibility: hidden;" aria-hidden="true"></div>
+  </div>`;
 }
 
 function applySharedHospaiPrintFrame(html: string): string {
@@ -164,8 +204,8 @@ function applySharedHospaiPrintFrame(html: string): string {
       .hospai-shared-brand-row {
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
-        min-height: 32mm;
+        align-items: center;
+        min-height: 24mm;
       }
       .hospai-shared-brand-logo {
         width: 86mm;

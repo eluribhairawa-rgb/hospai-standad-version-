@@ -90,16 +90,24 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
                                   bw, bh, bool(b.get("auto_fit_scaling")), x_for, y)
         except Exception:
             drawn = None
-    if drawn:
-        x, w, _h = drawn
-        title = brand_title() if b.get("hospital_title") else ""
-        if title and (b.get("logo_alignment") or "left") != "center":
-            on_left = (b.get("logo_alignment") or "left") == "right"
-            pdf.set_xy(left_margin if on_left else 195 - 80, top_y + 8)
-            pdf.set_font("Helvetica", "B", 15)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(80, 12, title, align="L" if on_left else "R")
-    else:
+    title = (brand_title() if b and b.get("hospital_title") else "").strip()
+    if title:
+        t_len = len(title)
+        font_size = 18 if t_len <= 20 else (15.5 if t_len <= 32 else (13.5 if t_len <= 48 else (11.5 if t_len <= 65 else 9.5)))
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "B", font_size)
+        align = (b.get("logo_alignment") if b else None) or "left"
+        if drawn:
+            if align == "center":
+                pdf.set_xy(left_margin, top_y + 20)
+                pdf.cell(195 - left_margin, 8, title, align="C")
+            else:
+                pdf.set_xy(left_margin, top_y + 8)
+                pdf.cell(195 - left_margin, 12, title, align="C")
+        else:
+            pdf.set_xy(left_margin, top_y + 8)
+            pdf.cell(195 - left_margin, 12, title, align="C")
+    elif not drawn:
         logo_path = None if (b and b.get("hospital_title") and not b.get("logo_file")) else _frontend_logo_path()
         if logo_path:
             try:

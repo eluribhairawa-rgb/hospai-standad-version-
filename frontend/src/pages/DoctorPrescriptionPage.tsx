@@ -3433,9 +3433,16 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   return <img src={docBrand.logo.data_uri} alt={docBrand.hospital_title || "Hospital logo"} style={{ width: `${lw}mm`, height: `${lh}mm`, objectFit: "contain", position: "relative", left: `${docBrand.logo_offset_x_mm}mm`, top: `${docBrand.logo_offset_y_mm}mm` }} />;
                 })()}
                 <div className="rx-sheet-title-col">
-                  <div className="rx-sheet-brand-name">
-                    {docBrand?.hospital_title ? docBrand.hospital_title : <>Hosp<span className="brand-red">AI</span></>}
-                  </div>
+                  {(() => {
+                    const titleText = (docBrand?.hospital_title || "").trim();
+                    const tLen = titleText.length;
+                    const rxFontSize = tLen > 45 ? "15px" : tLen > 32 ? "18px" : tLen > 22 ? "21px" : "24px";
+                    return (
+                      <div className="rx-sheet-brand-name" style={{ fontSize: rxFontSize, wordBreak: "break-word" }}>
+                        {titleText ? titleText : <>Hosp<span className="brand-red">AI</span></>}
+                      </div>
+                    );
+                  })()}
                   {!docBrand?.hospital_title && <div className="rx-sheet-brand-sub">MULTISPECIALITY HOSPITAL & RESEARCH CENTRE</div>}
                 </div>
               </div>
