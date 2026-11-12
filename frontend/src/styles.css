@@ -14761,3 +14761,21 @@ label,
   .module-table-schedule .table-head > span,
   .module-table-schedule .table-row > span { display: block; }
 }
+
+/* ---- Layout fixes: narrow desktop widths (<=1400px) ---- */
+/* KPI cards: let the text column shrink and wrap instead of being cut by overflow:hidden. */
+.hosp-kpi-card { min-width: 0; }
+.hosp-kpi-card > :not(.hosp-kpi-icon) { min-width: 0; overflow-wrap: anywhere; }
+.hosp-kpi-card .hosp-kpi-breakdown-row { flex-wrap: wrap; min-width: 0; }
+
+/* Wide data tables inside cards scroll sideways instead of having columns (and their action buttons) cut off. */
+.billing-card { overflow-x: auto; overflow-y: hidden; }
+
+/* OP queue: tighten the table so the Actions column (Call Patient / Complete) stays on screen. */
+@media (max-width: 1400px) {
+  .opq-table th { padding: 10px 8px !important; font-size: 12.5px !important; }
+  .opq-table td { padding: 10px 8px !important; font-size: 13px !important; }
+  .opq-table td:last-child > div, .opq-table td:last-child { flex-wrap: wrap; gap: 6px; }
+  .opq-table td .opq-uhid, .opq-table td a { word-break: normal; overflow-wrap: anywhere; }
+}
+.hosp-kpi-chip { white-space: normal; max-width: 100%; min-width: 0; flex-wrap: wrap; }

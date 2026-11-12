@@ -1566,6 +1566,30 @@ def add_admission(db, patient_id, notes="", hospital_id=None, payer=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
         ensure_not_currently_admitted(cursor, patient_id)
+        # One open admission per patient. A bed-less admission still counts: without this a
+        # second admission could be opened and the bed and active-admission lookups would
+        # then point at different admissions. The placeholder created by "Inpatient
+        # registration" is adopted by the real admission instead of duplicated.
+        cursor.execute(
+            """
+            SELECT id, notes FROM admissions
+            WHERE patient_id = ? AND discharge_date IS NULL AND COALESCE(notes, '') != 'Initial registration'
+            ORDER BY admission_date DESC LIMIT 1
+            """,
+            (patient_id,),
+        )
+        open_adm = cursor.fetchone()
+        if open_adm:
+            if (open_adm["notes"] or "") == "Inpatient registration":
+                cursor.execute("UPDATE admissions SET notes = ? WHERE id = ?", (notes, open_adm["id"]))
+                if payer:
+                    set_admission_payer(cursor, open_adm["id"], payer, patient_id)
+                conn.commit()
+                return open_adm["id"]
+            raise ValueError(
+                f"Patient {patient_id} already has an open admission (#{open_adm['id']}). "
+                "Discharge it before creating another admission."
+            )
         # NOTE: admission_date stored as UTC via CURRENT_TIMESTAMP (matches
         # patients.created_at pattern). Converted to IST only at display
         # time via date_clause(). Do NOT store IST wall-clock time here --
@@ -2954,10 +2978,11 @@ def update_appointment(db, appointment_id, data):
                         SELECT id, patient_name, token_no FROM appointments
                         WHERE LOWER(TRIM(doctor_name)) = LOWER(TRIM(?))
                           AND status IN ('in_consultation', 'in consultation', 'consulting')
+                          AND appointment_date::date = (SELECT appointment_date::date FROM appointments WHERE id = ?)
                           AND id != ?
                         LIMIT 1
                         """,
-                        (target_doctor, appointment_id),
+                        (target_doctor, appointment_id, appointment_id),
                     )
                     already_active = cursor.fetchone()
                     if already_active:
