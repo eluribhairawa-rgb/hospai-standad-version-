@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Label, Modal, Select } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
@@ -239,7 +240,7 @@ export default function LabPage({ setNotice, user }: Props) {
             <div class="header">
               <div>
                 <h1>PAYMENT RECEIPT</h1>
-                <div style="font-size: 8pt; color:#64748b;">HospAI</div>
+                <div style="font-size: 8pt; color:#64748b;">${escapeBrandText(brandTitle())}</div>
               </div>
               <div class="meta">
                 <div>Receipt: <strong>REC-${receipt.payment_id}</strong></div>

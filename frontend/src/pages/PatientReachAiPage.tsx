@@ -1,3 +1,4 @@
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import { useEffect, useMemo, useState } from "react";
 import PhoneInput from "../components/PhoneInput";
 import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
@@ -648,7 +649,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
       </head><body>
       <div class="header">
         <div>
-          <div class="logo-title">HospAI Hospital</div>
+          <div class="logo-title">${escapeBrandText(brandTitle())}</div>
           <div style="font-size:12px; color:#64748b;">Patient Care & Discharge Summary</div>
         </div>
         <div style="text-align:right;">

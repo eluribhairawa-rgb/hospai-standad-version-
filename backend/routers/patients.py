@@ -635,7 +635,7 @@ def export_pdf(payload: dict = Body(...), user: dict = Depends(require_permissio
 
 @router.post("/export/word")
 def export_word(payload: dict = Body(...), user: dict = Depends(require_permissions("patients.read"))):
-    word_bytes = generate_word(payload.get("patient_name", ""), payload.get("doc_type", "document"), payload.get("ocr_text", ""), payload.get("date"))
+    word_bytes = generate_word(payload.get("patient_name", ""), payload.get("doc_type", "document"), payload.get("ocr_text", ""), payload.get("date"), hospital_id=user.get("hospital_id"))
     return StreamingResponse(io.BytesIO(word_bytes), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                               headers={"Content-Disposition": 'attachment; filename="document.docx"'})
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import StatCard from "../components/StatCard";
 import { Button, Input, Label, Select, Table, TableCell, TableHead, TableRow } from "../components/ui";
@@ -662,7 +663,7 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
             <header class="header">
               <img class="brand-logo" src="${PRINT_BRAND_HEADER_DATA_URI}" alt="HospAI" />
               <div>
-                <p class="brand-title">HospAI</p>
+                <p class="brand-title">${escapeBrandText(brandTitle())}</p>
                 <p class="brand-line">POLYCLINIC &amp;</p>
                 <p class="brand-line">DIAGNOSTICS</p>
               </div>

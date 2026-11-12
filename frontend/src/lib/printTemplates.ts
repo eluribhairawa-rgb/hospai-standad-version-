@@ -1,3 +1,4 @@
+import { brandTitle, escapeBrandText } from "./branding";
 const escapeHtml = (value: unknown) =>
   String(value ?? "-")
     .replace(/&/g, "&amp;")
@@ -88,7 +89,7 @@ export function buildPrintLabelsHtml(opts: {
   `;
   const labelsHtml = opts.items.map((it) => `
     <div class="label">
-      <div class="label-hospital">HospAI &middot; Pharmacy</div>
+      <div class="label-hospital">${escapeBrandText(brandTitle())} &middot; Pharmacy</div>
       <div class="label-medicine">${escapeHtml(it.medicineName)}</div>
       <div class="label-row"><b>Patient:</b> ${escapeHtml(opts.patientName)} (${escapeHtml(opts.patientId)})</div>
       <div class="label-row"><b>Quantity:</b> ${escapeHtml(it.quantity)}</div>

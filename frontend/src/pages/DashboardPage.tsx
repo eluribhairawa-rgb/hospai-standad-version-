@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Modal } from "../components/ui";
 import { API_BASE } from "../lib/constants";
@@ -778,7 +779,7 @@ function ExecutiveDashboard({
             <header class="print-header">
               <img class="print-logo" src="${PRINT_BRAND_HEADER_DATA_URI}" alt="HospAI" />
               <div>
-                <p class="print-brand-title">HospAI</p>
+                <p class="print-brand-title">${escapeBrandText(brandTitle())}</p>
                 <p class="print-brand-line">POLYCLINIC &amp;</p>
                 <p class="print-brand-line">DIAGNOSTICS</p>
                 

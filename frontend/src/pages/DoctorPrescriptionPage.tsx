@@ -5,6 +5,7 @@ import { apiFetch, reportError, getHospitalCode } from "../lib/api";
 import { API_BASE } from "../lib/constants";
 import type { Notice } from "../types";
 import BrandLogo from "../components/BrandLogo";
+import { fitMm, useBranding } from "../lib/branding";
 import { buildHospaiPrintFooterCss } from "../lib/printViaIframe";
 
 type Props = {
@@ -436,6 +437,7 @@ const FrequencyCombobox: React.FC<FrequencyComboboxProps> = ({
 };
 
 export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNavigate, scopedDoctor }: Props) {
+  const docBrand = useBranding();
   // Today's date
   const [selectedDate, setSelectedDate] = useState(() => new Date().toLocaleDateString("en-CA"));
 
@@ -3425,12 +3427,16 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
             {/* Sheet Header */}
             <div className="rx-sheet-header">
               <div className="rx-sheet-logo-group">
-                <BrandLogo className="brand-logo-img" />
+                {(() => {
+                  if (!docBrand?.logo?.data_uri) return docBrand?.hospital_title ? null : <BrandLogo className="brand-logo-img" />;
+                  const [lw, lh] = fitMm(docBrand.logo.width_px, docBrand.logo.height_px, docBrand.logo_box_mm[0], docBrand.logo_box_mm[1], docBrand.auto_fit_scaling);
+                  return <img src={docBrand.logo.data_uri} alt={docBrand.hospital_title || "Hospital logo"} style={{ width: `${lw}mm`, height: `${lh}mm`, objectFit: "contain", position: "relative", left: `${docBrand.logo_offset_x_mm}mm`, top: `${docBrand.logo_offset_y_mm}mm` }} />;
+                })()}
                 <div className="rx-sheet-title-col">
                   <div className="rx-sheet-brand-name">
-                    Hosp<span className="brand-red">AI</span>
+                    {docBrand?.hospital_title ? docBrand.hospital_title : <>Hosp<span className="brand-red">AI</span></>}
                   </div>
-                  <div className="rx-sheet-brand-sub">MULTISPECIALITY HOSPITAL & RESEARCH CENTRE</div>
+                  {!docBrand?.hospital_title && <div className="rx-sheet-brand-sub">MULTISPECIALITY HOSPITAL & RESEARCH CENTRE</div>}
                 </div>
               </div>
             </div>
@@ -3650,12 +3656,12 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
             <div className="rx-sheet-signature-block">
               <div className="sig-name">{doctorName}</div>
               <div className="sig-dept">{department}</div>
-              <div className="sig-reg">Reg. No: TSMC-48291 • HospAI HMS</div>
+              <div className="sig-reg">Reg. No: TSMC-48291 • {docBrand?.hospital_title || "HospAI"} HMS</div>
             </div>
 
             {/* Footer */}
             <div className="rx-sheet-footer">
-              This is a computer generated electronic prescription. Valid across HospAI Pharmacy and Diagnostic Labs.
+              This is a computer generated electronic prescription. Valid across {docBrand?.hospital_title || "HospAI"} Pharmacy and Diagnostic Labs.
             </div>
           </div>
         </div>

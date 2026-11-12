@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { Dispatch, SetStateAction } from "react";
 import type { Notice } from "../types";
 import { apiFetch, reportError } from "../lib/api";
@@ -319,7 +320,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     const slipHtml = `
       <div data-hospai-shared-print-shell style="font-family: Arial, sans-serif; max-width: 520px; margin: 20px auto; padding: 24px; border: 2px solid #00828a; border-radius: 10px;">
         <div style="text-align: center; border-bottom: 2px solid #00828a; padding-bottom: 12px; margin-bottom: 16px;">
-          <h2 style="margin: 0; color: #16324a;">HospAI</h2>
+          <h2 style="margin: 0; color: #16324a;">${escapeBrandText(brandTitle())}</h2>
           <div style="font-size: 11px; color: #64748b; margin-top: 3px;">Inpatient Admission & Bed Allocation Slip</div>
         </div>
         <div style="font-size: 13.5px; line-height: 1.8; color: #1e293b;">
@@ -348,7 +349,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
           </div>
         </div>
         <div style="text-align: center; margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 11px; color: #64748b;">
-          HospAI · 24x7 Inpatient Care & Bed Management · Computer Generated Slip
+          ${escapeBrandText(brandTitle())} · 24x7 Inpatient Care & Bed Management · Computer Generated Slip
         </div>
       </div>
     `;

@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { PRINT_BRAND_HEADER_DATA_URI } from "../lib/printBrand";
 
 export type HospitalBrandVariant = "sidebar" | "screen" | "print" | "collapsed" | "header";
 
@@ -63,7 +64,7 @@ function BrandEmblem({ size, isSidebar, isPrint }: { size: number, isSidebar: bo
 
   return (
     <img
-      src={isPrint ? "/hospai_print_logo.png" : isSidebar ? HOSPITAL_BRAND_CONFIG.sidebarLogoSrc : HOSPITAL_BRAND_CONFIG.emblemSrc}
+      src={isPrint ? PRINT_BRAND_HEADER_DATA_URI : isSidebar ? HOSPITAL_BRAND_CONFIG.sidebarLogoSrc : HOSPITAL_BRAND_CONFIG.emblemSrc}
       alt="HospAI emblem"
       style={{ 
         width: isSidebar ? 160 : size * 2.5,

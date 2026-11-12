@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
 import { Button, Card, CardContent, CardHeader, CardTitle } from "../components/ui";
 import { DonutChart, PieChart, BarChart, HorizontalBar } from "../components/charts";
@@ -84,7 +85,7 @@ function buildAnalysisReportHtml(data: AnalysisReportData): string {
       </style>
       <div class="hdr">
         <div>
-          <h2>HospAI</h2>
+          <h2>${escapeBrandText(brandTitle())}</h2>
           <div style="font-size: 12px; font-weight: 600; color: #334155;">Comprehensive Performance Analysis</div>
         </div>
         <div class="meta">Generated: ${new Date().toLocaleString()}<br/>Period: ${periodLabel}</div>
@@ -118,7 +119,7 @@ function buildAnalysisReportHtml(data: AnalysisReportData): string {
         </tbody>
       </table>
 
-      <footer>HospAI Management Information System &middot; Confidential Performance Report</footer>
+      <footer>${escapeBrandText(brandTitle())} Management Information System &middot; Confidential Performance Report</footer>
     </div>
   `;
 }

@@ -106,7 +106,7 @@ def reports_export_pdf(db: Session = Depends(get_db), user: dict = Depends(requi
 @router.get("/reports/export/word")
 def reports_export_word(db: Session = Depends(get_db), user: dict = Depends(require_permissions("reports.read"))):
     overview = lq.get_reports_overview(db)
-    word_bytes = generate_word("Hospital Operations", "reports_overview", _build_reports_export_text(overview), datetime.now().strftime("%Y-%m-%d %H:%M"))
+    word_bytes = generate_word("Hospital Operations", "reports_overview", _build_reports_export_text(overview), datetime.now().strftime("%Y-%m-%d %H:%M"), hospital_id=user.get("hospital_id"))
     return StreamingResponse(io.BytesIO(word_bytes), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                               headers={"Content-Disposition": 'attachment; filename="reports-overview.docx"'})
 

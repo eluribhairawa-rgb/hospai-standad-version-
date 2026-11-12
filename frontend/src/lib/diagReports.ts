@@ -1,3 +1,4 @@
+import { brandTitle, escapeBrandText } from "./branding";
 import { apiFetch } from "./api";
 
 // Shared types and pure helpers for Lab & Diagnostics reports (LAB + IMAGING),
@@ -74,7 +75,7 @@ export function buildReportPrintHtml(report: ReportDetail, content: Record<strin
       : "DRAFT / PRELIMINARY";
   return `
     <html><head><title>${report.service_name} report</title></head><body style="font-family:sans-serif;padding:24px;">
-    <h2>HospAI -- ${isLab ? "Laboratory" : "Imaging"} Report</h2>
+    <h2>${escapeBrandText(brandTitle())} -- ${isLab ? "Laboratory" : "Imaging"} Report</h2>
     <p><strong>${statusLabel}</strong> -- Version ${report.version}</p>
     <p>Patient: ${patient.name || ""} ${patient.last_name || ""} &nbsp; UHID: ${report.patient_id} &nbsp; Age/Sex: ${patient.age ?? "-"}/${patient.gender ?? "-"}</p>
     <p>Order: ${report.order_no} &nbsp; Test: ${report.service_name}</p>

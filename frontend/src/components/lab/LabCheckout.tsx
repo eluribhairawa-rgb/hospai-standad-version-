@@ -1,5 +1,6 @@
 // Shared pieces of the Lab "common process": labels, money, payment dialog, invoice print.
 // Used by the Orders & Billing order screen, Order History and the home-visit board.
+import { brandTitle, escapeBrandText } from "../../lib/branding";
 import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Label, Modal, Select } from "../ui";
@@ -123,7 +124,7 @@ export function printLabInvoice(order: LabOrder, invoice: LabInvoice | null) {
     ? `<p><strong>Home visit:</strong> ${esc(order.visit_address)} &nbsp; <strong>Scheduled:</strong> ${esc(order.visit_scheduled_at ? new Date(order.visit_scheduled_at).toLocaleString() : "-")}</p>` : "";
   printViaIframe(`
     <html><head><title>Invoice ${esc(invoice?.invoice_no || order.order_no)}</title></head><body style="font-family:sans-serif;padding:24px;">
-    <h2>HospAI -- Diagnostics Invoice (${esc(SERVICE_TYPE_LABELS[order.service_type] || order.service_type)})</h2>
+    <h2>${escapeBrandText(brandTitle())} -- Diagnostics Invoice (${esc(SERVICE_TYPE_LABELS[order.service_type] || order.service_type)})</h2>
     <p><strong>Invoice:</strong> ${esc(invoice?.invoice_no || "-")} &nbsp; <strong>Order:</strong> ${esc(order.order_no)} &nbsp; <strong>Date:</strong> ${esc(new Date(order.created_at).toLocaleString())}</p>
     <p><strong>Patient:</strong> ${patient}</p>
     ${visit}

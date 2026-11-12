@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { Dispatch, SetStateAction } from "react";
 import type { Notice, Patient, PatientForm } from "../types";
 import { apiFetch, reportError } from "../lib/api";
@@ -910,7 +911,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     const slipHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 20px auto; padding: 24px; border: 2px solid #00828a; border-radius: 8px;">
         <div style="text-align: center; border-bottom: 2px solid #00828a; padding-bottom: 12px; margin-bottom: 16px;">
-          <h2 style="margin: 0; color: #16324a;">HospAI</h2>
+          <h2 style="margin: 0; color: #16324a;">${escapeBrandText(brandTitle())}</h2>
           <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Patient Registration & Token Slip</div>
         </div>
         <div style="font-size: 13px; line-height: 1.8; color: #1e293b; margin-bottom: 16px;">
