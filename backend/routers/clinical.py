@@ -2,7 +2,7 @@ import logging
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ import legacy_sql
 import prescription_suggestions
 import role_dashboard
 import security
-from qwen_ocr import extract_prescription_fields
+from qwen_ocr import extract_prescription_fields, prescription_identity_check
 
 router = APIRouter(prefix="/api", tags=["clinical"])
 logger = logging.getLogger(__name__)
@@ -375,7 +375,18 @@ def op_doctor_schedules_delete(schedule_id: int, request: Request, db: Session =
 # ------------------------------------------------------------ prescriptions --
 
 @router.post("/ocr/prescription-fields")
-def prescription_ocr_fields(file: UploadFile = File(...), user: dict = Depends(require_permissions("patients.write"))):
+def prescription_ocr_fields(patient_id: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db),
+                            user: dict = Depends(require_permissions("patients.write")),
+                            scope: set | None = Depends(patient_scope), hospital_id: int = Depends(current_hospital_id)):
+    """Reads an uploaded prescription, but only hands the contents back when the UHID / patient
+    name printed on it belong to the selected patient. The patient is looked up here, not trusted
+    from the browser."""
+    patient = lq.get_patient(db, patient_id, hospital_id=hospital_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Select a registered patient before uploading a prescription.")
+    ensure_patient_allowed(scope, patient["patient_id"])
+    expected_name = " ".join(" ".join(str(patient.get(k) or "").strip() for k in ("name", "middle_name", "last_name")).split())
+
     content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
@@ -385,7 +396,12 @@ def prescription_ocr_fields(file: UploadFile = File(...), user: dict = Depends(r
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    return {"fields": fields}
+
+    identity = prescription_identity_check(fields, patient["patient_id"], expected_name)
+    if not identity["ok"]:
+        # Nothing from the sheet is returned: it is not this patient's prescription.
+        raise HTTPException(status_code=409, detail=identity["message"])
+    return {"fields": fields, "identity": identity}
 
 
 @router.post("/prescriptions")

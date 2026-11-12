@@ -620,11 +620,18 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       setNotice({ type: "warning", message: "Please upload an image file (JPG, PNG, WEBP, TIFF, BMP, GIF...)." });
       return;
     }
+    // The server checks the UHID / patient name printed on the sheet against this patient,
+    // so a patient has to be selected before a prescription can be uploaded.
+    if (!patientUhid.trim()) {
+      setNotice({ type: "warning", message: "Select the patient first, then upload their prescription so the UHID and patient name can be checked." });
+      return;
+    }
     setOcrFileName(file.name);
     setOcrPreviewUrl(URL.createObjectURL(file));
     setOcrScanning(true);
     try {
       const body = new FormData();
+      body.append("patient_id", patientUhid.trim());
       body.append("file", file);
       const baseUrl = (API_BASE || "").replace(/\/+$/, "").replace(/\/api$/, "");
       const response = await fetch(`${baseUrl}/api/ocr/prescription-fields`, {
@@ -638,12 +645,17 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         throw Object.assign(new Error(data?.detail || data?.error || "OCR failed."), { status: response.status });
       }
       const filled = applyOcrPrescription(data.fields as OcrPrescriptionFields);
+      const verifiedBy = data?.identity?.verified_by ? `Patient verified by ${data.identity.verified_by}. ` : "";
       setNotice(
         filled.length
-          ? { type: "success", message: `OCR filled: ${filled.join(", ")}. Please verify before saving the prescription.` }
+          ? { type: "success", message: `${verifiedBy}OCR filled: ${filled.join(", ")}. Please verify before saving the prescription.` }
           : { type: "warning", message: "No prescription details could be read from this image. Try a clearer photo." }
       );
     } catch (err) {
+      // A prescription for another patient (or one that can't be confirmed) is refused with the
+      // server's message ("UHID doesn't match", "Patient name doesn't match", ...); nothing is filled in.
+      setOcrFileName("");
+      setOcrPreviewUrl("");
       reportError(setNotice, err as any, "OCR failed.");
     } finally {
       setOcrScanning(false);

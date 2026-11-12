@@ -1,5 +1,6 @@
 """Structured OCR through the Qwen3-VL model served by vLLM (OpenAI-compatible API)."""
 import base64
+from difflib import SequenceMatcher
 import io
 import json
 import os
@@ -84,6 +85,7 @@ PRESCRIPTION_PROMPT = """You are reading a doctor's prescription / OP consultati
 Read all the text and return ONLY a JSON object with exactly these keys:
 {
   "patient_name": "",
+  "patient_uhid": "",
   "patient_age": "",
   "patient_gender": "",
   "symptoms": "",
@@ -100,6 +102,7 @@ Read all the text and return ONLY a JSON object with exactly these keys:
 
 Rules:
 - Use "" (or [] for medicines) for anything not clearly present. Never invent values.
+- patient_uhid: the patient's UHID / Patient ID / registration number exactly as printed (it looks like PAT-20261111-0055). Never use a phone number, token number, bill number or age here.
 - symptoms: chief complaints (C/O) as one comma-separated line.
 - diagnosis: provisional / final diagnosis (Dx, Imp).
 - vitals: numbers only, e.g. bp "120/80", pulse "72", temperature "98.6", weight "68", spo2 "98".
@@ -131,6 +134,7 @@ def _clean_prescription(raw):
     follow_up = _s(raw.get("follow_up_date"))
     return {
         "patient_name": _s(raw.get("patient_name")),
+        "patient_uhid": _s(raw.get("patient_uhid")),
         "patient_age": re.sub(r"\D", "", _s(raw.get("patient_age")))[:3],
         "patient_gender": {"m": "Male", "male": "Male", "f": "Female", "female": "Female", "other": "Other"}.get(gender, ""),
         "symptoms": _s(raw.get("symptoms")),
@@ -146,6 +150,78 @@ def _clean_prescription(raw):
         "advice": _s(raw.get("advice")),
         "follow_up_date": follow_up if re.fullmatch(r"\d{4}-\d{2}-\d{2}", follow_up) else "",
     }
+
+
+_NAME_TITLES = {"mr", "mrs", "ms", "miss", "dr", "master", "baby", "smt", "shri", "sri", "shree", "late", "sir"}
+
+
+def _identity_name_tokens(name):
+    return [t for t in re.findall(r"[a-z]+", (name or "").lower()) if len(t) >= 2 and t not in _NAME_TITLES]
+
+
+def _token_equal(a, b):
+    """Same word, allowing one small OCR slip in words long enough for that to be safe."""
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 5:
+        return False
+    return SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
+def prescription_name_matches(printed_name, expected_name):
+    """True / False, or None when either name has nothing to compare.
+    Every word of the shorter name must appear in the other one (in any order), so
+    "Ravi Kumar" is not accepted for "Suresh Kumar" just because the surname is shared,
+    while "Srinidhi S" still matches "S Srinidhi" and "Ravi" matches "Ravi Kumar"."""
+    a, b = _identity_name_tokens(printed_name), _identity_name_tokens(expected_name)
+    if not a or not b:
+        return None
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return all(any(_token_equal(s, t) for t in long_) for s in short)
+
+
+def _uhid_key(value):
+    """Letters/digits only, upper-case, with the usual OCR look-alikes folded (O->0, I/L->1).
+    Real UHIDs only have digits after their prefix, so this cannot make two UHIDs equal."""
+    key = re.sub(r"[^A-Z0-9]", "", _s(value).upper())
+    return key.translate(str.maketrans("OIL", "011"))
+
+
+def prescription_uhid_matches(printed_uhid, expected_uhid):
+    """True / False, or None when no UHID is printed on the sheet. Exact match only: UHIDs
+    are sequential, so a one-character 'fuzzy' match would accept the next patient."""
+    printed = _uhid_key(printed_uhid)
+    if len(printed) < 4:
+        return None
+    return printed == _uhid_key(expected_uhid)
+
+
+def prescription_identity_check(extracted, expected_uhid, expected_name):
+    """Does the scanned prescription belong to the selected patient?
+    Returns {ok, message, verified_by, printed_uhid, printed_name}."""
+    extracted = extracted or {}
+    printed_uhid = _s(extracted.get("patient_uhid"))
+    printed_name = _s(extracted.get("patient_name"))
+    uhid_ok = prescription_uhid_matches(printed_uhid, expected_uhid)
+    name_ok = prescription_name_matches(printed_name, expected_name)
+    result = {"ok": False, "message": None, "verified_by": None, "printed_uhid": printed_uhid, "printed_name": printed_name}
+    shown = f"{expected_name} ({expected_uhid})"
+
+    if uhid_ok is False and name_ok is False:
+        result["message"] = (f"UHID and patient name don't match. The prescription is for {printed_name} ({printed_uhid}), "
+                             f"but the selected patient is {shown}.")
+    elif uhid_ok is False:
+        result["message"] = f"UHID doesn't match. The prescription shows {printed_uhid}, but the selected patient's UHID is {expected_uhid}."
+    elif name_ok is False:
+        result["message"] = (f'Patient name doesn\'t match. The prescription is for "{printed_name}", '
+                             f"but the selected patient is {expected_name}.")
+    elif uhid_ok is None and name_ok is None:
+        result["message"] = (f"Couldn't read a UHID or patient name on this prescription, so it can't be confirmed as {shown}. "
+                             "Upload a clearer image that shows the patient's name or UHID.")
+    else:
+        result["ok"] = True
+        result["verified_by"] = "UHID and name" if (uhid_ok and name_ok) else ("UHID" if uhid_ok else "name")
+    return result
 
 
 def extract_prescription_fields(file_bytes):
