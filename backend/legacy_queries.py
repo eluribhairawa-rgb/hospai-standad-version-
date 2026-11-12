@@ -8928,6 +8928,8 @@ def settle_inpatient_discharge(db, data, username):
     advance_paid = float(data.get("advance_paid") or 0)
 
     preview = get_discharge_bill_preview(db, admission_id=admission_id, allocation_id=allocation_id)
+    if preview.get("admission") and preview["admission"].get("discharge_date"):
+        raise ValueError("This admission is already discharged and billed.")
     patient_id = preview["patient"]["patient_id"]
     bed_id = preview["bed"]["id"] if preview.get("bed") else allocation_id
     adm_id = preview["admission"]["id"] if preview.get("admission") else admission_id
@@ -8980,13 +8982,13 @@ def settle_inpatient_discharge(db, data, username):
             INSERT INTO invoices (
                 invoice_no, patient_id, module, doctor_name, clinic_name, referral_source,
                 subtotal, tax, discount, total_amount, paid_amount, due_amount, payment_status, created_by,
-                advance_amount, refunded_amount, admission_id
-            ) VALUES (?, ?, 'IP', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                advance_amount, refunded_amount, admission_id, payment_mode
+            ) VALUES (?, ?, 'IP', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 invoice_no, patient_id, preview["bed"].get("assigned_doctor") if preview.get("bed") else None,
                 "HospAI", None, subtotal, 0, discount, total_amount, paid_amount, due_amount,
-                "paid", username, advance_paid, 0, adm_id
+                "paid", username, advance_paid, 0, adm_id, payment_mode
             )
         )
         invoice_id = cursor.lastrowid

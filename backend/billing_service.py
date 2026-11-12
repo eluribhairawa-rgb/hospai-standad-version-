@@ -767,6 +767,81 @@ def _admission_pharmacy_charges(cursor, admission_id, patient_id, adm_date):
     return quantize_dec(max(D_ZERO, pharm_gross - pharm_returns)), pharmacy_insurance
 
 
+def _admission_settlement(cursor, admission_id):
+    """What has really been billed and paid for a discharged admission, from its discharge
+    invoice(s). Two screens can settle a discharge and they name the invoice differently:
+    Inpatient Patients > Discharge makes INV-DIS-* (linked by admission_id) and billing's own
+    settlement makes INV-IP-nnnn, so both are looked for. Returns None when there is no invoice.
+
+    advance_applied is whatever settled the bill that was not collected as a payment row, so the
+    figure is right whether an invoice's paid_amount includes the advance (billing) or not (the
+    inpatient discharge screen)."""
+    inv_no = f"INV-IP-{int(admission_id):04d}"
+    cursor.execute(
+        """
+        SELECT i.id, i.invoice_no, i.total_amount, i.subtotal, i.discount, i.paid_amount, i.due_amount,
+               i.payment_status, i.created_at
+        FROM invoices i
+        WHERE i.module = 'IP'
+          AND (i.admission_id = ? OR i.invoice_no = ?
+               OR i.id IN (SELECT oi.discharge_invoice_id FROM diag_order_items oi
+                           JOIN diag_orders o ON o.id = oi.order_id
+                           WHERE o.admission_id = ? AND oi.discharge_invoice_id IS NOT NULL))
+        ORDER BY i.id
+        """,
+        (admission_id, inv_no, admission_id),
+    )
+    invoices = [dict(r) for r in cursor.fetchall()]
+    if not invoices:
+        return None
+    ids = [i["id"] for i in invoices]
+    cursor.execute(
+        """
+        SELECT id, invoice_id, amount, payment_mode, gateway_ref, created_at, receipt_no, canonical_receipt_id
+        FROM invoice_payments WHERE invoice_id = ANY(?) ORDER BY created_at, id
+        """,
+        (ids,),
+    )
+    payments = [dict(r) for r in cursor.fetchall()]
+    total = quantize_dec(sum((to_decimal(i["total_amount"]) for i in invoices), D_ZERO))
+    due = quantize_dec(sum((to_decimal(i["due_amount"]) for i in invoices), D_ZERO))
+    collected = quantize_dec(sum((to_decimal(p["amount"]) for p in payments), D_ZERO))
+    discount = quantize_dec(sum((to_decimal(i["discount"]) for i in invoices), D_ZERO))
+    billed_gross = quantize_dec(sum(
+        (to_decimal(i["subtotal"]) if to_decimal(i["subtotal"]) > D_ZERO else to_decimal(i["total_amount"]) + to_decimal(i["discount"]))
+        for i in invoices
+    ))
+    advance = quantize_dec(max(D_ZERO, total - due - collected))
+    return {"invoices": invoices, "payments": payments, "total": total, "due": due, "collected": collected,
+            "discount": discount, "billed_gross": billed_gross, "advance_applied": advance}
+
+
+def _release_admission_beds(cursor, admission_id):
+    """Free the bed(s) of a discharged admission so Bed Management and Inpatient Patients agree with it,
+    and stop the bed charge from running on."""
+    now_dt = current_ist_datetime()
+    cursor.execute(
+        "SELECT id, ward, bed_no, allocated_at, amount_per_day FROM bed_allocations WHERE admission_id = ? AND status = 'active'",
+        (admission_id,),
+    )
+    for b in cursor.fetchall():
+        try:
+            start = datetime.fromisoformat(str(b["allocated_at"]).replace("Z", ""))
+            days = max(1, math.ceil((now_dt - start).total_seconds() / 86400.0))
+        except Exception:
+            days = 1
+        total = quantize_dec(Decimal(days) * to_decimal(b["amount_per_day"] or 1000))
+        cursor.execute(
+            "UPDATE bed_allocations SET status = 'released', released_at = CURRENT_TIMESTAMP, total_days = ?, total_amount = ? WHERE id = ?",
+            (days, float(total), b["id"]),
+        )
+        if b["ward"] and b["bed_no"]:
+            cursor.execute(
+                "UPDATE hospital_beds SET status = 'available' WHERE LOWER(ward) = LOWER(?) AND LOWER(bed_no) = LOWER(?)",
+                (str(b["ward"]).strip(), str(b["bed_no"]).strip()),
+            )
+
+
 def get_ip_discharge_details(db: Session, admission_id: Any):
     """
     Consolidates admission charges without creating duplicate bills (Check B).
@@ -1030,6 +1105,45 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
         )
         payment_items = [dict(py) for py in cursor.fetchall()]
 
+        # Once the stay is discharged, what matters is what was actually billed and paid on its
+        # discharge invoice(s), not a fresh recalculation that knows nothing about the payment.
+        settlement = _admission_settlement(cursor, admission_id) if adm["discharge_date"] else None
+        settled_summary = {"settled": False, "amount_paid": 0.0}
+        if settlement:
+            receipt_ids = {py["id"] for py in payment_items}
+            inv_by_id = {i["id"]: i for i in settlement["invoices"]}
+            for pay in settlement["payments"]:
+                if pay.get("canonical_receipt_id") in receipt_ids:
+                    continue  # already listed as a receipt
+                payment_items.append({
+                    "id": f"inv-pay-{pay['id']}",
+                    "receipt_no": pay.get("receipt_no") or inv_by_id[pay["invoice_id"]]["invoice_no"],
+                    "receipt_type": "Discharge bill",
+                    "total_amount": float(to_decimal(pay["amount"])),
+                    "created_at": pay.get("created_at"),
+                    "notes": f"Recorded with discharge invoice {inv_by_id[pay['invoice_id']]['invoice_no']}",
+                    "payment_mode": pay.get("payment_mode"),
+                })
+            payment_items.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+            net_bill = settlement["total"]
+            advance_applied = settlement["advance_applied"]
+            balance_to_collect = settlement["due"]
+            settled_summary = {
+                "settled": True,
+                "amount_paid": float(settlement["collected"]),
+                "billed_gross": float(settlement["billed_gross"]),
+                "billed_discount": float(settlement["discount"]),
+                # >0: charges on record now exceed what was billed; <0: the invoice(s) billed more than that.
+                "billed_vs_charges_difference": float(quantize_dec(gross_charges - settlement["billed_gross"])),
+                "invoice_count": len(settlement["invoices"]),
+                "settlement_invoices": [
+                    {"id": i["id"], "invoice_no": i["invoice_no"], "total": float(to_decimal(i["total_amount"])),
+                     "paid": float(to_decimal(i["paid_amount"])), "due": float(to_decimal(i["due_amount"])),
+                     "status": i["payment_status"]}
+                    for i in settlement["invoices"]
+                ],
+            }
+
         # Create charges_version hash
         version_str = f"{admission_id}:{gross_charges}:{net_bill}:{len(beds)}:{pharmacy_net}"
         charges_version = hashlib.md5(version_str.encode()).hexdigest()
@@ -1051,6 +1165,7 @@ def get_ip_discharge_details(db: Session, admission_id: Any):
                 "net_bill": float(net_bill),
                 "advance_applied": float(advance_applied),
                 "balance_to_collect": float(balance_to_collect),
+                **settled_summary,
             },
             "itemised": {
                 "beds": bed_items,
@@ -1090,6 +1205,17 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
 
         patient_id = adm["patient_id"]
 
+        # Already settled (by this screen or by Inpatient Patients > Discharge): settling again would
+        # raise a second invoice and collect the same bill twice.
+        if adm["discharge_date"]:
+            already = _admission_settlement(cursor, admission_id)
+            if already and already["due"] <= D_ZERO:
+                nos = ", ".join(i["invoice_no"] for i in already["invoices"])
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"This admission is already settled (invoice {nos}, ₹{already['collected']} collected). Nothing is left to collect.",
+                )
+
         # 2. Re-compute charges atomically under lock
         cursor.execute("SELECT * FROM bed_allocations WHERE admission_id = ? ORDER BY allocated_at ASC", (admission_id,))
         beds = cursor.fetchall()
@@ -1097,7 +1223,7 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
         now_dt = current_ist_datetime()
         for b in beds:
             alloc_time = b["allocated_at"]
-            rel_time = b.get("discharged_at") or now_dt
+            rel_time = b.get("released_at") or now_dt
             try:
                 dt_start = datetime.fromisoformat(str(alloc_time).replace("Z", ""))
                 dt_end = datetime.fromisoformat(str(rel_time).replace("Z", ""))
@@ -1334,6 +1460,7 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
             """,
             (user.get("username") or "Cashier", admission_id)
         )
+        _release_admission_beds(cursor, admission_id)
 
         conn.commit()
 

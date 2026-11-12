@@ -203,9 +203,16 @@ export default function IpDischargeBillingPage({
     balance_to_collect: 0,
   };
 
-  const discVal = Math.max(0, parseFloat(discountAmount) || 0);
-  const liveNetBill = Math.max(0, charges.gross_charges - discVal);
-  const liveBalance = Math.max(0, liveNetBill - (charges.advance_applied || 0));
+  // Once the stay is discharged and billed, the figures come from its discharge invoice(s) (what was
+  // really billed and paid). Before that they are a live calculation from the charges.
+  const isSettled = Boolean(charges.settled);
+  const discVal = isSettled ? Number(charges.billed_discount || 0) : Math.max(0, parseFloat(discountAmount) || 0);
+  const grossShown = isSettled ? Number(charges.billed_gross ?? charges.gross_charges) : charges.gross_charges;
+  const liveNetBill = isSettled ? Number(charges.net_bill || 0) : Math.max(0, charges.gross_charges - discVal);
+  const liveBalance = isSettled
+    ? Number(charges.balance_to_collect || 0)
+    : Math.max(0, liveNetBill - (charges.advance_applied || 0));
+  const amountPaid = Number(charges.amount_paid || 0);
 
   const handleFinaliseSubmit = async () => {
     if (!dischargeData?.admission?.id) return;
@@ -699,6 +706,8 @@ export default function IpDischargeBillingPage({
                   <span>
                     {admission.ward || "Ward"} · {admission.bed_no || "Bed"}
                   </span>
+                ) : admission.discharge_date ? (
+                  <span style={{ color: "#15803d", fontWeight: 600 }}>Discharged · bed released</span>
                 ) : (
                   <span style={{ color: "#d97706", fontWeight: 600 }}>
                     ⚠️ No Bed Allocated
@@ -710,7 +719,7 @@ export default function IpDischargeBillingPage({
                 {admission.admission_date
                   ? String(admission.admission_date).slice(0, 16).replace("T", " ")
                   : "N/A"}{" "}
-                | Discharge Review: {targetDate}
+                | {admission.discharge_date ? `Discharged: ${String(admission.discharge_date).slice(0, 10)}` : `Discharge Review: ${targetDate}`}
               </div>
             </div>
           </div>
@@ -1331,7 +1340,9 @@ export default function IpDischargeBillingPage({
                   </table>
                 ) : (
                   <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", textAlign: "center", color: "#64748b" }}>
-                    No payment collections recorded yet for this admission. Click "Review & finalise bill" to record settlement payment.
+                    {isSettled
+                      ? "No payment collections were recorded for this discharge."
+                      : 'No payment collections recorded yet for this admission. Click "Review & finalise bill" to record settlement payment.'}
                   </div>
                 )}
               </div>
@@ -1433,8 +1444,8 @@ export default function IpDischargeBillingPage({
 
             <div className="billing-card-body">
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
-                <span style={{ color: "#64748b" }}>Gross charges</span>
-                <span style={{ fontWeight: 600 }}>₹{fmt(charges.gross_charges)}</span>
+                <span style={{ color: "#64748b" }}>{isSettled ? "Gross charges (billed)" : "Gross charges"}</span>
+                <span style={{ fontWeight: 600 }}>₹{fmt(grossShown)}</span>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
@@ -1456,15 +1467,32 @@ export default function IpDischargeBillingPage({
                 <span style={{ fontWeight: 700 }}>₹{fmt(liveNetBill)}</span>
               </div>
 
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px", fontSize: "0.875rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: isSettled ? "8px" : "16px", fontSize: "0.875rem" }}>
                 <span style={{ color: "#64748b" }}>Advance applied</span>
                 <span style={{ color: "#16a34a", fontWeight: 600 }}>-₹{fmt(charges.advance_applied)}</span>
               </div>
 
+              {isSettled && Math.abs(Number(charges.billed_vs_charges_difference || 0)) >= 0.01 && (
+                <div style={{ marginBottom: "12px", padding: "8px 10px", borderRadius: "8px", background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: "0.78rem", lineHeight: 1.4 }}>
+                  Charges on record today (₹{fmt(charges.gross_charges)}) differ from what was billed (₹{fmt(grossShown)}) by ₹{fmt(Math.abs(Number(charges.billed_vs_charges_difference)))}
+                  {Number(charges.invoice_count || 0) > 1 ? `. This stay has ${charges.invoice_count} discharge invoices.` : "."} Check the itemised charges and the discharge invoice(s).
+                </div>
+              )}
+
+              {isSettled && (
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px", fontSize: "0.875rem" }}>
+                  <span style={{ color: "#64748b" }}>
+                    Amount paid
+                    {charges.settlement_invoices?.length ? ` (${charges.settlement_invoices.map((i: any) => i.invoice_no).join(", ")})` : ""}
+                  </span>
+                  <span style={{ color: "#16a34a", fontWeight: 600 }}>-₹{fmt(amountPaid)}</span>
+                </div>
+              )}
+
               {/* Highlight Box: Balance to Collect */}
               <div className="billing-highlight-box teal-emphasis">
                 <div>
-                  <span className="box-label">Balance to collect</span>
+                  <span className="box-label">{isSettled ? (liveBalance > 0 ? "Balance due" : "Balance due · settled in full") : "Balance to collect"}</span>
                 </div>
                 <span className="box-value">₹{fmt(liveBalance)}</span>
               </div>
@@ -1511,19 +1539,25 @@ export default function IpDischargeBillingPage({
               )}
 
               {/* Action Buttons */}
-              <button
-                type="button"
-                className="billing-btn-teal"
-                style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
-                onClick={() => setFinaliseModalOpen(true)}
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <polyline points="9 15 11 17 15 13" />
-                </svg>
-                Review & finalise bill
-              </button>
+              {isSettled && liveBalance <= 0 ? (
+                <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534", fontSize: "0.82rem", fontWeight: 600, textAlign: "center" }}>
+                  ✓ Discharge bill settled in full. Nothing left to collect.
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="billing-btn-teal"
+                  style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
+                  onClick={() => setFinaliseModalOpen(true)}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <polyline points="9 15 11 17 15 13" />
+                  </svg>
+                  {isSettled ? "Collect balance" : "Review & finalise bill"}
+                </button>
+              )}
 
               <button
                 type="button"
@@ -1536,7 +1570,7 @@ export default function IpDischargeBillingPage({
                   <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
                   <rect x="6" y="14" width="12" height="8" />
                 </svg>
-                Print estimate
+                {isSettled ? "Print final bill" : "Print estimate"}
               </button>
             </div>
           </div>
