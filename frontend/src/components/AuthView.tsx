@@ -133,7 +133,7 @@ export default function AuthView({ onLogin }: Props) {
               AI-Driven Healthcare Optimization
             </span>
             <h1 className="login-hero-headline">
-              Smarter care, <span className="login-hero-accent">connected.</span>
+              Where care meets <span className="login-hero-accent">intelligence.</span>
             </h1>
             <p className="login-hero-quote">
               One workspace for every step of the patient journey, with AI that drafts, reads and reaches out.
