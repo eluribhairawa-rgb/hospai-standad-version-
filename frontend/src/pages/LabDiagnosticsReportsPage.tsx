@@ -33,6 +33,8 @@ const EDITABLE_STATUSES = new Set(["draft", "returned_for_correction"]);
 
 type WhatsAppRecipient = "patient" | "doctor";
 
+const FOUR_EYES_HINT = "You entered these results or drafted this report, so another authorized user must review and authorize it (four-eyes rule).";
+
 export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Props) {
   const [status, setStatus] = useState("pending_review");
   const [rows, setRows] = useState<ReportRow[]>([]);
@@ -73,6 +75,12 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
     } catch {
       /* non-blocking */
     }
+  };
+
+  // Switching tabs must not leave a report from another tab open in the detail pane.
+  const changeStatus = (key: string) => {
+    setStatus(key);
+    setSelected((prev) => (prev && prev.status === key ? prev : null));
   };
 
   useEffect(() => { void load(); }, [status]);
@@ -313,7 +321,7 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
             <TabsTrigger
               key={t.key}
               active={status === t.key}
-              onClick={() => setStatus(t.key)}
+              onClick={() => changeStatus(t.key)}
             >
               {t.label}
             </TabsTrigger>
@@ -351,7 +359,7 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
       <div className="diag-worklist-shell">
         <div className="diag-card">
           <div className="diag-card-header"><h3>Report worklist</h3></div>
-          <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <Select value={status} onChange={(e) => changeStatus(e.target.value)}>
             {STATUS_OPTIONS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </Select>
           <div style={{ marginTop: "0.75rem" }}>
@@ -408,6 +416,7 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
                 </div>
               </div>
 
+              {selected.status === "pending_review" && selected.four_eyes_blocked && <div className="diag-note-box">{FOUR_EYES_HINT}</div>}
               {selected.status === "returned_for_correction" && selected.return_reason && <div className="diag-note-box">Returned for correction: {selected.return_reason}</div>}
               {selected.amendment_reason && <div className="diag-note-box">Amendment reason: {selected.amendment_reason}</div>}
               {selected.report_type === "LAB" && isEditable && (
@@ -475,8 +484,8 @@ export default function LabDiagnosticsReportsPage({ setNotice, onNavigate }: Pro
                 {selected.status === "pending_review" && (
                   <>
                     <Button variant="ghost" onClick={returnForCorrection}>Return for correction</Button>
-                    <Button variant="secondary" onClick={() => authorize(false)}>Authorize</Button>
-                    <Button variant="primary" onClick={() => authorize(true)}>Authorize & release</Button>
+                    <Button variant="secondary" disabled={!!selected.four_eyes_blocked} title={selected.four_eyes_blocked ? FOUR_EYES_HINT : undefined} onClick={() => authorize(false)}>Authorize</Button>
+                    <Button variant="primary" disabled={!!selected.four_eyes_blocked} title={selected.four_eyes_blocked ? FOUR_EYES_HINT : undefined} onClick={() => authorize(true)}>Authorize & release</Button>
                   </>
                 )}
                 {selected.status === "authorized" && <Button variant="primary" onClick={release}>Release</Button>}

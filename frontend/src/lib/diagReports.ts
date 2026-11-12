@@ -15,6 +15,8 @@ export type ReportRow = {
 };
 
 export type ReportDetail = ReportRow & {
+  /** True when the signed-in user entered the results or drafted this report and so cannot authorize it (four-eyes rule). */
+  four_eyes_blocked?: boolean;
   content?: any; drafted_by?: string; authorized_by?: string; authorized_at?: string; released_at?: string;
   return_reason?: string; amendment_reason?: string;
   order_item: any;

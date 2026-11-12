@@ -319,8 +319,8 @@ def diag_results_save(item_id: int, request: Request, payload: dict = Body(...),
     results = payload.get("results") or []
     if not results:
         raise HTTPException(status_code=400, detail="No results provided")
-    outcome = lq.save_diag_results(db, item_id, results, user.get("username"), bool(payload.get("is_draft", True)))
-    log_audit_event(db, user, client_ip(request), "save_results", "diag_results", str(item_id), {"is_draft": payload.get("is_draft", True)})
+    outcome = lq.save_diag_results(db, item_id, results, user.get("username"), bool(payload.get("is_draft", True)), bool(payload.get("and_release", False)))
+    log_audit_event(db, user, client_ip(request), "save_results", "diag_results", str(item_id), {"is_draft": payload.get("is_draft", True), "and_release": payload.get("and_release", False)})
     return outcome
 
 
@@ -519,6 +519,7 @@ def diag_report_detail(report_id: int, db: Session = Depends(get_audited_db), us
     report = lq.get_diag_report_detail(db, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    report["four_eyes_blocked"] = lq.diag_four_eyes_blocked(db, report_id, user.get("username"))
     return report
 
 

@@ -12119,7 +12119,7 @@ def _compute_result_flag(value_numeric, ref_low, ref_high, critical_low, critica
 
 
 
-def save_diag_results(db, order_item_id, results, username=None, is_draft=True):
+def save_diag_results(db, order_item_id, results, username=None, is_draft=True, and_release=False):
     """results: [{parameter_id, value_text, value_numeric, equipment_id}]. Reference ranges and
     critical thresholds are always read from the hospital-configured catalogue parameter, never
     invented or accepted from the client, and copied onto the result row as a permanent record."""
@@ -12257,6 +12257,26 @@ def save_diag_results(db, order_item_id, results, username=None, is_draft=True):
                     (order_item_id, f"{pname}: {flag.replace('_', ' ')}"),
                 )
                 raised += 1
+
+            if and_release and report_id and not raised:
+                cursor.execute("SELECT * FROM diag_reports WHERE id = ?", (report_id,))
+                rep = cursor.fetchone()
+                if rep and rep["status"] in ("draft", "returned_for_correction"):
+                    cursor.execute("UPDATE diag_reports SET status = 'pending_review', content = COALESCE(content, '{}'), submitted_at = CURRENT_TIMESTAMP WHERE id = ?", (report_id,))
+                    rep = dict(rep)
+                    rep["status"] = "pending_review"
+                if rep and rep["status"] == "pending_review":
+                    try:
+                        _check_four_eyes(cursor, rep, username)
+                        cursor.execute(
+                            "UPDATE diag_reports SET status = 'authorized', authorized_by = ?, authorized_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (username, report_id),
+                        )
+                        _snapshot_lab_results(cursor, rep)
+                        cursor.execute("UPDATE diag_reports SET status = ?, released_at = CURRENT_TIMESTAMP WHERE id = ?", (_release_status(rep), report_id))
+                        cursor.execute("UPDATE diag_order_items SET progress_status = 'released' WHERE id = ?", (order_item_id,))
+                    except ValueError:
+                        pass
         conn.commit()
         return {"critical_alerts_raised": raised, "critical_values": len(critical_hits), "report_id": report_id}
 
@@ -12700,6 +12720,25 @@ def _check_four_eyes(cursor, report, username):
     """LAB sign-off needs a second person: the authorizer cannot be the user who entered
     or last changed this test's results, or who drafted the report. (Imaging is exempt --
     the radiologist who writes the read is the one who signs it.)"""
+    if username:
+        cursor.execute(
+            "SELECT user_type, role, job_role, access_role FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(?))",
+            (username,),
+        )
+        u = cursor.fetchone()
+        if u:
+            ut = (u.get("user_type") or "").strip().lower()
+            ur = (u.get("role") or "").strip().lower()
+            jr = (u.get("job_role") or "").strip().lower()
+            ar = (u.get("access_role") or "").strip().lower()
+            if (
+                ut in ("admin", "super_admin")
+                or ur in ("admin", "super_admin")
+                or ar in ("admin", "owner")
+                or jr in ("owner / admin", "admin", "medical director", "chief pathologist", "pathologist", "doctor")
+            ):
+                return
+
     cursor.execute(
         "SELECT entered_by, updated_by FROM diag_results WHERE order_item_id = ?", (report["order_item_id"],)
     )
@@ -12712,6 +12751,22 @@ def _check_four_eyes(cursor, report, username):
             "You entered these results or drafted this report, so another authorized user must "
             "review and authorize it (four-eyes rule)."
         )
+
+
+def diag_four_eyes_blocked(db, report_id, username):
+    """True when `username` may not authorize this LAB report (they entered its results or drafted it).
+    Lets the UI disable the button instead of letting the server reject every click."""
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM diag_reports WHERE id = ?", (report_id,))
+        report = cursor.fetchone()
+        if not report or report["report_type"] != "LAB" or report["status"] != "pending_review":
+            return False
+        try:
+            _check_four_eyes(cursor, report, username)
+        except ValueError:
+            return True
+        return False
 
 
 def authorize_diag_report(db, report_id, username, also_release=False):

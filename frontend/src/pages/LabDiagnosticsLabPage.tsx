@@ -261,7 +261,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
     }
   };
 
-  const saveResults = async (isDraft: boolean) => {
+  const saveResults = async (isDraft: boolean, andRelease: boolean = false) => {
     if (!detail) return;
     if (resultsLocked) {
       setNotice({ type: "warning", message: `The report is ${detail.report_status?.replace(/_/g, " ")} -- results can no longer be changed here.` });
@@ -300,16 +300,21 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
     setSaving(true);
     try {
       // Finalizing also creates the report draft on the server, so the test moves straight to Reports & Approval.
-      const res = await apiFetch<{ critical_alerts_raised: number; critical_values: number }>(`/api/diag/lab/items/${detail.id}/results`, { method: "POST", body: JSON.stringify({ results, is_draft: isDraft }) });
+      const res = await apiFetch<{ critical_alerts_raised: number; critical_values: number }>(
+        `/api/diag/lab/items/${detail.id}/results`,
+        { method: "POST", body: JSON.stringify({ results, is_draft: isDraft, and_release: andRelease }) }
+      );
       setNotice({
         type: !isDraft && res.critical_values ? "warning" : "success",
         message: isDraft
           ? "Results saved as draft."
-          : res.critical_alerts_raised
-            ? `Results finalized. ${res.critical_alerts_raised} critical value(s) flagged -- notify the clinician now.`
-            : res.critical_values
-              ? "Results finalized. Critical values are already awaiting acknowledgement in Reports & Approval."
-              : "Results finalized and sent for report review.",
+          : andRelease && !res.critical_values
+            ? "Results finalized and report released immediately."
+            : res.critical_alerts_raised
+              ? `Results finalized. ${res.critical_alerts_raised} critical value(s) flagged -- notify the clinician now.`
+              : res.critical_values
+                ? "Results finalized. Critical values are already awaiting acknowledgement in Reports & Approval."
+                : "Results finalized and sent for report review.",
       });
       await refreshAfterMutation();
     } catch (err: any) {
@@ -649,8 +654,11 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
                   </table>
                   <div className="diag-form-actions">
                     <Button variant="secondary" disabled={saving || resultsLocked || !!unavailableEquipment} onClick={() => void saveResults(true)}>Save draft</Button>
-                    <Button variant="primary" disabled={saving || resultsLocked || !!equipmentHold || !!unavailableEquipment} onClick={() => void saveResults(false)}>
+                    <Button variant="primary" disabled={saving || resultsLocked || !!equipmentHold || !!unavailableEquipment} onClick={() => void saveResults(false, false)}>
                       {detail.results.some((r) => !r.is_draft) ? "Re-finalize results" : "Finalize results"}
+                    </Button>
+                    <Button variant="primary" style={{ background: "#059669", borderColor: "#059669" }} disabled={saving || resultsLocked || !!equipmentHold || !!unavailableEquipment} onClick={() => void saveResults(false, true)}>
+                      Finalize & Release
                     </Button>
                     <Button variant="ghost" onClick={() => setReferralOpen((v) => !v)}>External lab tracking</Button>
                     {onNavigate && detail.report_id && <Button variant="ghost" onClick={goToReport}>Go to report</Button>}
