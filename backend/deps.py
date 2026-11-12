@@ -64,11 +64,19 @@ HOSPITAL_OVERVIEW_USER_TYPES = ("admin", "super_admin")
 def can_view_hospital_overview(user: Optional[dict]) -> bool:
     """Hospital-wide executive figures (all revenue, collections, beds, every patient's activity).
 
-    Explicitly limited to Admin and Super Admin. Module grants do not unlock it: the
-    "reports" module covers the billing Reports & Day Close workflow only, and the
-    Analysis page (module "analytics") is not assignable to normal employees.
+    Admin and Super Admin always can. A normal employee can only when an admin has
+    explicitly granted the Analysis module ("analytics") to that login. No other module
+    unlocks it: the "reports" module covers the billing Reports & Day Close workflow only,
+    and a job title never grants anything.
     """
-    return bool(user) and user.get("user_type") in HOSPITAL_OVERVIEW_USER_TYPES
+    if not user:
+        return False
+    if user.get("user_type") in HOSPITAL_OVERVIEW_USER_TYPES:
+        return True
+    modules = security.normalize_module_access(
+        user.get("module_access"), user.get("user_type"), user.get("access_role"), user.get("role"),
+    )
+    return "analytics" in modules
 
 
 class require_hospital_overview:
@@ -83,7 +91,7 @@ class require_hospital_overview:
             raise HTTPException(
                 status_code=403,
                 detail={"error": "Forbidden", "message": "Hospital-wide dashboard data is limited to "
-                                                          "Admin and Super Admin logins."},
+                                                          "Admin and Super Admin logins, or employees granted Analysis access."},
             )
         return user
 

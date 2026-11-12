@@ -102,7 +102,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "settings", label: "Settings", module: "settings" },
 ];
 
-const EXCLUDED_MODULES: ModuleId[] = ["settings", "hrms", "insurance-desk", "consent-desk", "employees"];
+// "analytics" is hospital-wide executive data, limited to Admin / Super Admin on the backend.
+const EXCLUDED_MODULES: ModuleId[] = ["settings", "hrms", "insurance-desk", "consent-desk", "employees", "analytics"];
 
 const MODULE_CUSTOM_INFO: Partial<Record<ModuleId, { label: string; description: string }>> = {
   "ip-management": {
@@ -181,7 +182,7 @@ export const SUPER_ADMIN_PERMISSIONS: string[] = [
 
 export const MODULE_PERMISSIONS: Record<ModuleId, string[]> = {
   dashboard: ["patients.read"],
-  analytics: ["reports.read", "patients.read", "billing.read"],
+  analytics: ["reports.read", "patients.read"],
   "patient-registration": ["patients.write"],
   patients: ["patients.read", "patients.write"],
   "queue-management": ["patients.read", "patients.write"],

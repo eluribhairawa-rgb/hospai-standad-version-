@@ -41,6 +41,7 @@ ASSIGNABLE_MODULES = (
     "bed-management", "doctor-scheduling", "hrms", "insurance-desk", "consent-desk",
     "follow-up", "ip-management", "op-management", "settings", "lab-diagnostics",
     "lab", "ot", "accounts", "symptom_ai", "patient-reach-ai",
+    "emergency", "doctors-history", "analytics",
 )
 DEFAULT_NORMAL_MODULES = ("dashboard", "patients", "patient-reach-ai")
 
@@ -74,6 +75,11 @@ MODULE_PERMISSION_MAP = {
     "accounts": {"accounts.read", "accounts.write"},
     "symptom_ai": {"symptom_ai.use"},
     "patient-reach-ai": {"patients.read", "reach.read", "reach.write"},
+    "emergency": {"patients.read", "patients.write"},
+    "doctors-history": {"patients.read"},
+    # Analysis page: hospital-wide figures. Admins grant it per employee; the data
+    # endpoints behind it are also gated by deps.can_view_hospital_overview.
+    "analytics": {"reports.read", "patients.read"},
     # New Lab & Diagnostics department (Orders & Billing, Laboratory, Imaging,
     # Reports & Approval, Test Catalogue, Quality & Equipment). Distinct from
     # the legacy "laboratory"/"lab" outsourced-billing module above, which is

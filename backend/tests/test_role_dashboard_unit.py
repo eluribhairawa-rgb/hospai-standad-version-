@@ -126,9 +126,12 @@ class HospitalOverviewAccessTests(unittest.TestCase):
         # Explicitly Admin / Super Admin only: no module grant unlocks hospital-wide figures,
         # including Reports & Day Close ("reports") and every module at once.
         self.assertFalse(deps.can_view_hospital_overview(login("Accountant", ["dashboard", "reports"])))
-        self.assertFalse(deps.can_view_hospital_overview(login("Accountant", ["dashboard", "analytics"])))
+        # An admin can grant the Analysis module to a specific employee; that is the only module that unlocks it.
+        self.assertTrue(deps.can_view_hospital_overview(login("Accountant", ["dashboard", "analytics"])))
         self.assertFalse(deps.can_view_hospital_overview(login("Other", ["dashboard", "reports", "billing", "finance"])))
-        self.assertFalse(deps.can_view_hospital_overview(login("Other", list(security.ASSIGNABLE_MODULES))))
+        self.assertFalse(deps.can_view_hospital_overview(
+            login("Other", [m for m in security.ASSIGNABLE_MODULES if m != "analytics"])))
+        self.assertTrue(deps.can_view_hospital_overview(login("Other", list(security.ASSIGNABLE_MODULES))))
         self.assertFalse(deps.can_view_hospital_overview(login("Admin", ["dashboard", "reports"])))  # title is not a role
         for job, mods in (("Nurse", ["dashboard", "ip-management"]), ("Doctor", ["dashboard"]),
                           ("Pharmacist", ["dashboard", "pharmacy"]), ("Billing Executive", ["dashboard", "billing"])):
