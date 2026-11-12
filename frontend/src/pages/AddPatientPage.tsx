@@ -536,8 +536,9 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         allergies: noAllergies ? "" : allergies.trim(),
         no_known_allergies: noAllergies,
         symptoms: (visitType === "OP" || visitType === "IP") ? (symptoms.trim() || undefined) : undefined,
-        insurance_provider: insuranceProvider.trim() || undefined,
-        insurance_policy_no: policyNumber.trim() || undefined,
+        // OP registrations carry no insurance; a value typed before switching visit type is not saved.
+        insurance_provider: visitType !== "OP" ? insuranceProvider.trim() || undefined : undefined,
+        insurance_policy_no: visitType !== "OP" ? policyNumber.trim() || undefined : undefined,
       };
 
       if (onCreate) {
@@ -1957,7 +1958,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           </div>
         </div>
 
-        {/* Row 5: Insurance Provider, Policy Number */}
+        {/* Row 5: Insurance Provider, Policy Number (not for OP visits) */}
+        {visitType !== "OP" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "22px" }}>
           <div>
             <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
@@ -2011,6 +2013,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             />
           </div>
         </div>
+        )}
 
       </div>
 
