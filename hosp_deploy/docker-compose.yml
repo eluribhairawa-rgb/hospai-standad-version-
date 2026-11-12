@@ -33,6 +33,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_URL_PASSWORD}@db:5432/${POSTGRES_DB}
       SESSION_PEPPER: ${SESSION_PEPPER}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      # Minutes of inactivity before a login expires (the browser reads the same value from the server).
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-20}
       DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
