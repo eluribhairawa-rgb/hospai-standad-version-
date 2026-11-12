@@ -327,12 +327,16 @@ export async function generateClientPdf(
               </div>`;
             }
             const titleText = (b.hospital_title || "").trim();
-            const len = titleText.length;
-            const fontPx = len <= 20 ? 24 : len <= 32 ? 20 : len <= 48 ? 17 : len <= 65 ? 15 : 13;
-            const titleStyle = `font-size: ${fontPx}px; font-weight: 800; color: #000; text-transform: uppercase; line-height: 1.25; word-break: break-word; white-space: pre-line; text-align: center;`;
+            const lines = titleText.replace(/\\n/g, "\n").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const maxLineLen = lines.length ? Math.max(...lines.map(l => l.length)) : 0;
+            const fontPx = maxLineLen <= 20 ? 24 : maxLineLen <= 32 ? 20 : maxLineLen <= 48 ? 17 : maxLineLen <= 65 ? 15 : 13;
+            const titleContent = lines.length > 1
+              ? lines.map((l, idx) => `<div style="font-size: ${idx === 0 ? fontPx : Math.max(fontPx - 4, 12)}px; font-weight: ${idx === 0 ? 800 : 600}; color: ${idx === 0 ? "#000" : "#334155"}; text-transform: uppercase; line-height: 1.25;">${escapeBrandText(l)}</div>`).join("")
+              : `<div style="font-size: ${fontPx}px; font-weight: 800; color: #000; text-transform: uppercase; line-height: 1.25;">${escapeBrandText(titleText)}</div>`;
+            const titleContainer = `<div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">${titleContent}</div>`;
 
             if (!b.logo?.data_uri) {
-              return `<div style="text-align: center; width: 100%; ${titleStyle}">${escapeBrandText(titleText)}</div>`;
+              return `<div style="text-align: center; width: 100%;">${titleContent}</div>`;
             }
 
             const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
@@ -347,21 +351,21 @@ export async function generateClientPdf(
             if (b.logo_alignment === "center") {
               return `<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
                 <div>${logoImg}</div>
-                <div style="${titleStyle}">${escapeBrandText(titleText)}</div>
+                ${titleContainer}
               </div>`;
             }
 
             if (b.logo_alignment === "right") {
               return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                 <div style="width: ${px(w)}px; flex-shrink: 0; visibility: hidden;"></div>
-                <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+                ${titleContainer}
                 <div style="width: ${px(w)}px; flex-shrink: 0; display: flex; justify-content: flex-end;">${logoImg}</div>
               </div>`;
             }
 
             return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
               <div style="width: ${px(w)}px; flex-shrink: 0; display: flex; justify-content: flex-start;">${logoImg}</div>
-              <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+              ${titleContainer}
               <div style="width: ${px(w)}px; flex-shrink: 0; visibility: hidden;"></div>
             </div>`;
           })()}

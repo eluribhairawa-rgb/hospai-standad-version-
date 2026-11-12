@@ -59,6 +59,11 @@ def brand_title() -> str:
     return _latin(b["hospital_title"]) if b and b.get("hospital_title") else BRAND_NAME
 
 
+def brand_title_single_line() -> str:
+    """Flatten multiline hospital title to a single line with comma separation for inline metadata."""
+    return re.sub(r"[\r\n]+", ", ", brand_title()).strip()
+
+
 def _custom_image(pdf, path, mime, w_px, h_px, box_w, box_h, auto_fit, x_fn, y):
     """Draw a branding image scaled into its box (aspect ratio kept). Returns the drawn (x, w, h) or None."""
     import branding
@@ -92,31 +97,37 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
             drawn = None
     title = (brand_title() if b and b.get("hospital_title") else "").strip()
     if title:
-        t_len = len(title)
-        font_size = 18 if t_len <= 20 else (15.5 if t_len <= 32 else (13.5 if t_len <= 48 else (11.5 if t_len <= 65 else 9.5)))
+        raw_lines = [l.strip() for l in title.replace("\\n", "\n").splitlines() if l.strip()]
+        max_line_len = max(len(l) for l in raw_lines) if raw_lines else 0
+        font_size = 18 if max_line_len <= 20 else (15.5 if max_line_len <= 32 else (13.5 if max_line_len <= 48 else (11.5 if max_line_len <= 65 else 9.5)))
         pdf.set_text_color(0, 0, 0)
         align = (b.get("logo_alignment") if b else None) or "left"
-        lines = [line.strip() for line in title.splitlines() if line.strip()]
-        if len(lines) > 1:
-            line_height = 5 if len(lines) > 2 else 6
-            start_y = top_y + (16 if (drawn and align == "center") else 6)
-            for i, line in enumerate(lines):
-                pdf.set_xy(left_margin, start_y + i * line_height)
-                sub_font = font_size if i == 0 else max(font_size - 2.5, 9.0)
-                pdf.set_font("Helvetica", "B" if i == 0 else "", sub_font)
-                pdf.cell(195 - left_margin, line_height, line, align="C")
-        elif drawn:
-            pdf.set_font("Helvetica", "B", font_size)
-            if align == "center":
-                pdf.set_xy(left_margin, top_y + 20)
-                pdf.cell(195 - left_margin, 8, title, align="C")
-            else:
-                pdf.set_xy(left_margin, top_y + 8)
-                pdf.cell(195 - left_margin, 12, title, align="C")
+
+        if drawn:
+            x, w, h = drawn
+            if align == "left":
+                text_x = left_margin + w + 3
+                text_w = 195 - text_x
+                start_y = max(top_y + (h - (len(raw_lines) * 6)) / 2, top_y + 4) if len(raw_lines) > 1 else top_y + (h - 10) / 2
+            elif align == "right":
+                text_x = left_margin
+                text_w = x - left_margin - 3
+                start_y = max(top_y + (h - (len(raw_lines) * 6)) / 2, top_y + 4) if len(raw_lines) > 1 else top_y + (h - 10) / 2
+            else:  # center
+                text_x = left_margin
+                text_w = 195 - left_margin
+                start_y = top_y + h + 2
         else:
-            pdf.set_font("Helvetica", "B", font_size)
-            pdf.set_xy(left_margin, top_y + 8)
-            pdf.cell(195 - left_margin, 12, title, align="C")
+            text_x = left_margin
+            text_w = 195 - left_margin
+            start_y = top_y + 12 - (len(raw_lines) * 6) / 2 if len(raw_lines) > 1 else top_y + 8
+
+        line_h = 5.2 if len(raw_lines) > 2 else 6.2
+        for i, line in enumerate(raw_lines):
+            pdf.set_xy(text_x, start_y + i * line_h)
+            sub_font = font_size if i == 0 else max(font_size - 3, 9.0)
+            pdf.set_font("Helvetica", "B" if i == 0 else "", sub_font)
+            pdf.cell(text_w, line_h, _latin(line), align="C")
     elif not drawn:
         logo_path = None if (b and b.get("hospital_title") and not b.get("logo_file")) else _frontend_logo_path()
         if logo_path:
@@ -128,7 +139,7 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
             pdf.set_xy(left_margin, top_y + 3)
             pdf.set_font("Helvetica", "B", 15)
             pdf.set_text_color(0, 0, 0)
-            pdf.cell(120, 12, brand_title())
+            pdf.cell(120, 12, brand_title_single_line())
 
     pdf.set_draw_color(0, 0, 0)
     pdf.set_line_width(0.65)
@@ -288,7 +299,7 @@ def _generate_pdf(patient_name, doc_type, ocr_text, date_str=None) -> bytes:
         pdf.cell(105, 6, _pdf_clean(document_title), ln=True)
         pdf.set_x(left_margin)
         pdf.set_font("Helvetica", "", 8.5)
-        pdf.cell(105, 5, _pdf_clean(f"{brand_title()} | Pharmacy | Diagnostic" if _brand() and _brand().get("hospital_title") else "HospAI | Pharmacy | Diagnostic"))
+        pdf.cell(105, 5, _pdf_clean(f"{brand_title_single_line()} | Pharmacy | Diagnostic" if _brand() and _brand().get("hospital_title") else "HospAI | Pharmacy | Diagnostic"))
 
         try:
             generated_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M")

@@ -141,20 +141,28 @@ export default function BrandingPage({ setNotice }: Props) {
   const [lw, lh] = fitMm(cfg?.logo?.width_px ?? null, cfg?.logo?.height_px ?? null, logoBox[0], logoBox[1], autoFit);
   const [fw, fh] = fitMm(cfg?.footer?.width_px ?? null, cfg?.footer?.height_px ?? null, footerBox[0], footerBox[1], true);
   const trimmedTitle = title.trim();
-  const titleLen = trimmedTitle.length;
-  const titleFontSizePt = titleLen <= 20 ? 18 : titleLen <= 32 ? 15.5 : titleLen <= 48 ? 13.5 : titleLen <= 65 ? 11.5 : 10;
-  const titleStyle: React.CSSProperties = {
-    font: `800 ${titleFontSizePt}pt Arial, sans-serif`,
-    color: "#000",
-    textTransform: "uppercase",
-    lineHeight: 1.25,
-    letterSpacing: "-0.2px",
-    wordBreak: "break-word",
-    overflowWrap: "break-word",
-    whiteSpace: "pre-line",
-    textAlign: "center",
-  };
-  const titleEl = trimmedTitle ? <div style={{ flex: 1, ...titleStyle }}>{trimmedTitle}</div> : null;
+  const titleLines = trimmedTitle.replace(/\\n/g, "\n").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const maxLineLen = titleLines.length ? Math.max(...titleLines.map((l) => l.length)) : 0;
+  const titleFontSizePt = maxLineLen <= 20 ? 18 : maxLineLen <= 32 ? 15.5 : maxLineLen <= 48 ? 13.5 : maxLineLen <= 65 ? 11.5 : 10;
+  const titleEl = titleLines.length ? (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, textAlign: "center" }}>
+      {titleLines.map((line, idx) => (
+        <div
+          key={idx}
+          style={{
+            font: `${idx === 0 ? 800 : 600} ${idx === 0 ? titleFontSizePt : Math.max(titleFontSizePt - 3, 9.5)}pt Arial, sans-serif`,
+            color: idx === 0 ? "#000" : "#334155",
+            textTransform: "uppercase",
+            lineHeight: 1.25,
+            letterSpacing: "-0.2px",
+            wordBreak: "break-word",
+          }}
+        >
+          {line}
+        </div>
+      ))}
+    </div>
+  ) : null;
   const logoEl = cfg?.logo ? (
     <img src={logoSrc} alt="Logo preview" style={{ width: lw * PX_PER_MM, height: lh * PX_PER_MM, objectFit: "contain", position: "relative", left: ox * PX_PER_MM, top: oy * PX_PER_MM, display: "block" }} />
   ) : null;

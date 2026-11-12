@@ -98,12 +98,17 @@ function buildBrandRowHtml(): string {
       </div>`;
   }
   const titleText = (b.hospital_title || "").trim();
-  const fontSizePt = getPrintTitleFontSizePt(titleText);
-  const titleStyle = `font: 800 ${fontSizePt}pt Arial, Helvetica, sans-serif; color: #000; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px; word-break: break-word; overflow-wrap: break-word; white-space: pre-line; text-align: center;`;
+  const lines = titleText.replace(/\\n/g, "\n").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const maxLineLen = lines.length ? Math.max(...lines.map((l) => l.length)) : 0;
+  const fontSizePt = maxLineLen <= 20 ? 18 : maxLineLen <= 32 ? 15.5 : maxLineLen <= 48 ? 13.5 : maxLineLen <= 65 ? 11.5 : 10;
+  const titleContent = lines.length > 1
+    ? lines.map((l, idx) => `<div style="font: ${idx === 0 ? 800 : 600} ${idx === 0 ? fontSizePt : Math.max(fontSizePt - 3, 9.5)}pt Arial, Helvetica, sans-serif; color: ${idx === 0 ? "#000" : "#334155"}; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px;">${escapeBrandText(l)}</div>`).join("")
+    : `<div style="font: 800 ${fontSizePt}pt Arial, Helvetica, sans-serif; color: #000; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px;">${escapeBrandText(titleText)}</div>`;
+  const titleHtml = `<div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1mm;">${titleContent}</div>`;
 
   if (!b.logo?.data_uri) {
     return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: center; min-height: auto; padding-bottom: 2mm;">
-      <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+      ${titleHtml}
     </div>`;
   }
 
@@ -118,14 +123,14 @@ function buildBrandRowHtml(): string {
   if (b.logo_alignment === "center") {
     return `<div class="hospai-shared-brand-row" style="flex-direction: column; align-items: center; justify-content: center; min-height: auto; gap: 2.5mm; padding-bottom: 2mm;">
       <div>${logoImg}</div>
-      <div style="${titleStyle}">${escapeBrandText(titleText)}</div>
+      ${titleHtml}
     </div>`;
   }
 
   if (b.logo_alignment === "right") {
     return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding-bottom: 2mm;">
       <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; visibility: hidden;" aria-hidden="true"></div>
-      <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+      ${titleHtml}
       <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; justify-content: flex-end;">${logoImg}</div>
     </div>`;
   }
@@ -133,7 +138,7 @@ function buildBrandRowHtml(): string {
   // Default: left alignment
   return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding-bottom: 2mm;">
     <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; justify-content: flex-start;">${logoImg}</div>
-    <div style="flex: 1; ${titleStyle}">${escapeBrandText(titleText)}</div>
+    ${titleHtml}
     <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; visibility: hidden;" aria-hidden="true"></div>
   </div>`;
 }
