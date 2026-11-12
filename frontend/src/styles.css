@@ -458,15 +458,17 @@ a.link.danger {
   z-index: 2;
   width: 100%;
   max-width: 600px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 1.5rem;
+  /* Five rows: logo | spacer | headline + AI cards | spacer | footer line.
+     The spacers share the leftover height 1:2, so the block sits a little above the middle
+     (the logo already fills the top) without ever making the page taller than its content. */
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 2fr) auto;
+  justify-items: start;
 }
 
 /* Kalpra Tech logo: dark red/navy artwork, so it sits on a white badge to stay clearly visible */
 .login-hero-logo {
+  grid-row: 1;
   padding: 10px 16px;
   border-radius: 14px;
   background: #ffffff;
@@ -480,7 +482,9 @@ a.link.danger {
 }
 
 .login-hero-main {
+  grid-row: 3;
   width: 100%;
+  margin: 0.75rem 0;
 }
 
 .login-hero-eyebrow {
@@ -573,6 +577,8 @@ a.link.danger {
 }
 
 .login-hero-footer {
+  grid-row: 5;
+  align-self: end;
   margin: 0;
   font-size: 0.82rem;
   font-weight: 400;
@@ -773,7 +779,6 @@ a.link.danger {
 /* Short windows (e.g. a laptop browser with toolbars): keep the hero on one screen. */
 @media (max-height: 720px) {
   .login-hero { padding-top: 1.5rem; padding-bottom: 1.5rem; }
-  .login-hero-inner { gap: 1rem; }
   .login-hero-logo { padding: 8px 14px; }
   .login-hero-logo-img { height: 84px; }
   .login-hero-quote { display: none; }
