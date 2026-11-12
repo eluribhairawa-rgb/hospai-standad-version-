@@ -759,6 +759,36 @@ function App() {
     };
   }, []);
 
+  // Pick up access changes an admin makes while this employee is already signed in
+  // (a newly granted or revoked module). Without this the module list is only read at login
+  // or page load, so a grant stays invisible until the employee logs in again.
+  const signedIn = Boolean(user);
+  useEffect(() => {
+    if (!signedIn) return;
+    let cancelled = false;
+    const refreshAccess = () => {
+      // "background" so this never keeps an idle session alive.
+      apiFetch<{ user?: User }>("/api/auth/session", { background: true })
+        .then((data) => {
+          const fresh = data.user;
+          if (cancelled || !fresh) return;
+          setUser((current) => {
+            if (!current) return current;
+            const key = (u: User) => JSON.stringify([u.user_type, u.module_access, u.permissions]);
+            return key(current) === key(fresh) ? current : fresh;
+          });
+        })
+        .catch(() => undefined);
+    };
+    const timer = window.setInterval(refreshAccess, 60_000);
+    window.addEventListener("focus", refreshAccess);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshAccess);
+    };
+  }, [signedIn]);
+
   useEffect(() => {
     // The server rejected the session (idle timeout reached server-side, or
     // the employee signed in on another browser/device): drop all in-memory
