@@ -122,6 +122,17 @@ function OriginalDocumentPreview({ file }: { file?: File }) {
   );
 }
 
+/** "11 Nov, 11:46 PM" for the patient's most recent appointment, or "" when there is none. */
+function lastVisitLabel(patient: Patient): string {
+  const raw = patient.latest_appointment_date;
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "";
+  const date = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${date}, ${time}`;
+}
+
 export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, ocrLanguage, onNavigate }: Props) {
   const [query, setQuery] = useState("");
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -814,7 +825,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
             <TableCell>Gender</TableCell>
             <TableCell>Phone</TableCell>
             <TableCell>Queue Status</TableCell>
-            <TableCell>Appt. Time</TableCell>
+            <TableCell>Appt. Time / Last Visit</TableCell>
             <TableCell>Doctor</TableCell>
             <TableCell>Actions</TableCell>
           </TableHead>
@@ -863,8 +874,25 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                       {rowStatus === "Not in Queue" ? "Not in Today's Queue" : rowStatus}
                     </span>
                   </TableCell>
-                  <TableCell>{queueEntry?.time || "-"}</TableCell>
-                  <TableCell title={queueEntry?.department || undefined}>{queueEntry?.doctor || "-"}</TableCell>
+                  {/* In today's queue: today's time and doctor. Otherwise: the patient's last visit, shown muted. */}
+                  <TableCell>
+                    {queueEntry ? (
+                      queueEntry.time || "-"
+                    ) : lastVisitLabel(patient) ? (
+                      <span style={{ color: "#64748b" }} title="Last visit">{lastVisitLabel(patient)}</span>
+                    ) : (
+                      "-"
+                    )}
+                  </TableCell>
+                  <TableCell title={(queueEntry?.department || patient.latest_department) || undefined}>
+                    {queueEntry ? (
+                      queueEntry.doctor || "-"
+                    ) : patient.latest_doctor_name && patient.latest_doctor_name !== "-" ? (
+                      <span style={{ color: "#64748b" }} title="Doctor at last visit">{patient.latest_doctor_name}</span>
+                    ) : (
+                      "-"
+                    )}
+                  </TableCell>
                   <TableCell className="row-actions">
                     {inQueue ? (
                       <Button

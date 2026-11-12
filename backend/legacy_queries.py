@@ -1071,7 +1071,9 @@ def get_all_patients(db, hospital_id=None, visit_status=None):
                    (SELECT a4.doctor_name FROM appointments a4
                     WHERE a4.patient_id = p.patient_id ORDER BY a4.created_at DESC, a4.id DESC LIMIT 1) AS latest_doctor_name,
                    (SELECT a5.department FROM appointments a5
-                    WHERE a5.patient_id = p.patient_id ORDER BY a5.created_at DESC, a5.id DESC LIMIT 1) AS latest_department
+                    WHERE a5.patient_id = p.patient_id ORDER BY a5.created_at DESC, a5.id DESC LIMIT 1) AS latest_department,
+                   (SELECT a6.appointment_date FROM appointments a6
+                    WHERE a6.patient_id = p.patient_id ORDER BY a6.created_at DESC, a6.id DESC LIMIT 1) AS latest_appointment_date
             FROM patients p
             WHERE p.hospital_id = ?
             ORDER BY p.created_at DESC

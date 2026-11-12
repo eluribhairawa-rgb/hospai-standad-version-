@@ -268,6 +268,7 @@ export interface Patient {
   latest_visit_type?: string | null;
   latest_doctor_name?: string | null;
   latest_department?: string | null;
+  latest_appointment_date?: string | null;
   insurance_provider?: string | null;
   insurance_policy_no?: string | null;
   insurance_verified?: boolean;
