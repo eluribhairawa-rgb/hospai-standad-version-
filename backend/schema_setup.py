@@ -9,7 +9,7 @@ from database import engine
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MIGRATIONS = ["migrations_billing_v2.sql", "migrations_insurance_providers.sql", "migrations_user_types.sql", "migrations_grn_item_fields.sql", "migrations_diag_turnaround.sql", "migrations_schema_gaps.sql", "migrations_diag_external_sale.sql", "migrations_patient_reach_surveys.sql", "migrations_ward_indent_ip_orders.sql", "migrations_discharge_summaries.sql", "migrations_diag_result_reagent_lot.sql", "migrations_user_doctor_link.sql", "migrations_nurse_assignments.sql", "migrations_diag_service_types.sql", "migrations_patient_phone_country.sql", "migrations_phone_country_codes.sql", "migrations_pharmacy_profit_indexes.sql", "migrations_admission_payer.sql", "migrations_supplier_payments.sql", "migrations_doctor_statements_by_name.sql", "migrations_document_branding.sql"]
+MIGRATIONS = ["migrations_billing_v2.sql", "migrations_insurance_providers.sql", "migrations_user_types.sql", "migrations_grn_item_fields.sql", "migrations_diag_turnaround.sql", "migrations_schema_gaps.sql", "migrations_diag_external_sale.sql", "migrations_patient_reach_surveys.sql", "migrations_ward_indent_ip_orders.sql", "migrations_discharge_summaries.sql", "migrations_diag_result_reagent_lot.sql", "migrations_user_doctor_link.sql", "migrations_nurse_assignments.sql", "migrations_diag_service_types.sql", "migrations_patient_phone_country.sql", "migrations_phone_country_codes.sql", "migrations_pharmacy_profit_indexes.sql", "migrations_admission_payer.sql", "migrations_supplier_payments.sql", "migrations_doctor_statements_by_name.sql", "migrations_document_branding.sql", "migrations_timestamptz_utc.sql"]
 LOCK_ID = 7482915001
 
 

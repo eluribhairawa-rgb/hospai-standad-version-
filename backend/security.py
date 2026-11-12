@@ -150,6 +150,9 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -161,7 +164,8 @@ def _format_ts(value: datetime) -> str:
 def _parse_ts(value: Union[str, datetime]) -> datetime:
     parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        # The DB layer hands timestamptz values over as naive hospital-local (IST) datetimes.
+        parsed = parsed.replace(tzinfo=_IST)
     return parsed
 
 
@@ -349,7 +353,7 @@ def set_hospital_status(db: Session, hospital_code: str, status: str, reason: Op
         return False
     if status_value == "inactive":
         hospital.status = "inactive"
-        hospital.disabled_at = datetime.utcnow()
+        hospital.disabled_at = datetime.now()
         hospital.disabled_reason = reason
         db.query(Sessions).filter(Sessions.hospital_id == hospital.id).delete()
     else:
@@ -672,7 +676,7 @@ def authenticate(db: Session, username: str, password: str, hospital_id: Optiona
 # ---------------------------------------------------------------- session --
 
 def purge_expired_sessions(db: Session):
-    now = _now_utc().replace(tzinfo=None)
+    now = _now_utc()  # aware: session columns are timestamptz, so the instant is unambiguous
     db.query(Sessions).filter(Sessions.expires_at <= now).delete()
     db.commit()
 
@@ -695,7 +699,7 @@ def create_session(db: Session, user_id: int, hospital_id: int, ip_address: Opti
         try:
             session_row = Sessions(
                 user_id=user_id, hospital_id=hospital_id, token_hash=token_hash,
-                expires_at=expires_at.replace(tzinfo=None), ip_address=ip_address, user_agent=user_agent,
+                expires_at=expires_at, ip_address=ip_address, user_agent=user_agent,
             )
             db.add(session_row)
             db.commit()
@@ -746,11 +750,10 @@ def get_session_user(db: Session, token: Optional[str], extend: bool = True):
     new_expires_at = expires_at
     if extend:
         new_expires_at = now + timedelta(seconds=SESSION_TTL_SECONDS)
-        naive_now = now.replace(tzinfo=None)
         updated = (
             db.query(Sessions)
-            .filter(Sessions.id == session_id, Sessions.expires_at > naive_now)
-            .update({Sessions.expires_at: new_expires_at.replace(tzinfo=None), Sessions.last_seen: naive_now},
+            .filter(Sessions.id == session_id, Sessions.expires_at > now)
+            .update({Sessions.expires_at: new_expires_at, Sessions.last_seen: now},
                     synchronize_session=False)
         )
         db.commit()

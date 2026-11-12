@@ -14,8 +14,11 @@ function parseTimestamp(value: string): Date | null {
   }
 
   const normalized = trimmed.replace(" ", "T");
-  const hasOffset = /([zZ]|[+-]\d{2}:\d{2})$/.test(normalized);
-  const parsed = new Date(hasOffset ? normalized : `${normalized}Z`);
+  const hasOffset = /([zZ]|[+-]\d{2}:?\d{2})$/.test(normalized);
+  // The server stores timestamps as IST wall-clock time without an offset, so a value with
+  // no offset is IST (not UTC and not the browser's zone). Date-only values are IST midnight.
+  const withTime = /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T00:00:00` : normalized;
+  const parsed = new Date(hasOffset ? normalized : `${withTime}+05:30`);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
 }
@@ -57,7 +60,8 @@ function getISTDateTimeKeyFromDate(date: Date): string {
 
 export function formatDate(value?: string | null): string {
   if (!value) return "-";
-  return new Date(value).toLocaleDateString();
+  const parsed = parseTimestamp(value);
+  return parsed ? parsed.toLocaleDateString(undefined, { timeZone: IST_TIMEZONE }) : "-";
 }
 
 export function calculateAgeFromDob(dob: string): string {
@@ -140,7 +144,8 @@ export function calculateAgeFromDob(dob: string): string {
 
 export function formatDateTime(value?: string | null): string {
   if (!value) return "-";
-  return new Date(value).toLocaleString();
+  const parsed = parseTimestamp(value);
+  return parsed ? parsed.toLocaleString(undefined, { timeZone: IST_TIMEZONE }) : "-";
 }
 
 export function formatDateTimeIST(value?: string | null): string {

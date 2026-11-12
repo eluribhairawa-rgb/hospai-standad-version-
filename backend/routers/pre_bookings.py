@@ -259,7 +259,7 @@ def update_pre_booking(
     if "status" in payload:
         pb.status = str(payload["status"]).strip() or pb.status
 
-    pb.updated_at = datetime.datetime.utcnow()
+    pb.updated_at = datetime.datetime.now()
     db.commit()
     db.refresh(pb)
 
@@ -291,7 +291,7 @@ def convert_pre_booking_to_patient(
         except (ValueError, TypeError):
             pass
 
-    pb.updated_at = datetime.datetime.utcnow()
+    pb.updated_at = datetime.datetime.now()
     db.commit()
     db.refresh(pb)
 
@@ -327,6 +327,6 @@ def cancel_or_delete_pre_booking(
         return {"message": f"Pre-booking #{pre_booking_id} permanently deleted."}
     else:
         pb.status = "Cancelled"
-        pb.updated_at = datetime.datetime.utcnow()
+        pb.updated_at = datetime.datetime.now()
         db.commit()
         return {"message": f"Pre-booking #{pre_booking_id} marked as Cancelled."}

@@ -1590,10 +1590,8 @@ def add_admission(db, patient_id, notes="", hospital_id=None, payer=None):
                 f"Patient {patient_id} already has an open admission (#{open_adm['id']}). "
                 "Discharge it before creating another admission."
             )
-        # NOTE: admission_date stored as UTC via CURRENT_TIMESTAMP (matches
-        # patients.created_at pattern). Converted to IST only at display
-        # time via date_clause(). Do NOT store IST wall-clock time here --
-        # see deployment notes re: timezone consistency.
+        # NOTE: admission_date is a timestamptz (UTC in storage). CURRENT_TIMESTAMP is the
+        # instant; the session time zone (IST) only affects how it is read back.
         cursor.execute(
             """
             INSERT INTO admissions (hospital_id, patient_id, admission_date, notes)

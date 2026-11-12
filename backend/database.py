@@ -2,6 +2,7 @@ import os
 from contextlib import contextmanager
 from datetime import timedelta, timezone
 
+import psycopg2.extensions
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -24,8 +25,26 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("postgresql+"):
     DATABASE_URL = "postgresql+psycopg2://" + DATABASE_URL[len("postgresql://"):]
 
+# Time storage is universal: timestamptz columns hold UTC whatever the server's own time zone.
+# Every connection works in IST so day boundaries (CURRENT_DATE, ::date, to_char) and naive
+# datetimes written by the app mean hospital local time, never the host's zone.
+APP_TIMEZONE = "Asia/Kolkata"
+
+
+def _timestamptz_as_ist(value, cur):
+    """Hand timestamptz values to the app as naive IST datetimes, exactly as the app has always
+    seen them (the frontend reads an offset-less timestamp as IST)."""
+    parsed = psycopg2.extensions.PYDATETIMETZ(value, cur)
+    if parsed is None:
+        return None
+    return parsed.astimezone(IST_TIMEZONE).replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+psycopg2.extensions.register_type(psycopg2.extensions.new_type(psycopg2.extensions.PYDATETIMETZ.values, "TIMESTAMPTZ_IST", _timestamptz_as_ist))
+
 engine = create_engine(
     DATABASE_URL, pool_pre_ping=True, future=True,
+    connect_args={"options": f"-c timezone={APP_TIMEZONE}"},
     pool_size=int(os.getenv("DB_POOL_SIZE") or 10),
     max_overflow=int(os.getenv("DB_MAX_OVERFLOW") or 20),
     pool_timeout=float(os.getenv("DB_POOL_TIMEOUT") or 10),
