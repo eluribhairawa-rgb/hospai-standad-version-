@@ -63,9 +63,9 @@ export default function AuthView({ onLogin }: Props) {
 
   return (
     <div className="login-page">
-      <div className="login-hero" aria-hidden="true">
+      <div className="login-hero">
         {/* Hospital background photo */}
-        <div className="login-hero-bg">
+        <div className="login-hero-bg" aria-hidden="true">
           <img
             src={`${LOGO_BASE}hospital_bg.jpg`}
             alt=""
@@ -76,7 +76,7 @@ export default function AuthView({ onLogin }: Props) {
         </div>
 
         {/* SVG decorative elements: waves, crosses, circles */}
-        <svg className="login-hero-waves" viewBox="0 0 800 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+        <svg className="login-hero-waves" aria-hidden="true" viewBox="0 0 800 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
           {/* Flowing wave curves */}
           <path d="M0 320 C 200 260, 400 400, 600 330 S 860 280, 800 420 L 800 900 L 0 900 Z" fill="#1a5276" opacity="0.10" />
           <path d="M-30 500 C 160 440, 350 580, 580 500 S 790 440, 860 580" stroke="#4db8d1" strokeWidth="1.5" fill="none" opacity="0.18" />
@@ -112,49 +112,97 @@ export default function AuthView({ onLogin }: Props) {
           </g>
         </svg>
 
-        {/* Kalpra Tech logo at top-left */}
-        <div className="login-hero-logo">
-          <img
-            src={`${LOGO_BASE}kalpra_logo.png`}
-            alt="Kalpra Tech – Your AI & Gen AI Partner"
-            className="login-hero-logo-img"
-            loading="eager"
-            decoding="sync"
-          />
-        </div>
+        <div className="login-hero-inner">
+          {/* Kalpra Tech logo: top-left, on the same left edge as the text below */}
+          <div className="login-hero-logo">
+            <img
+              src={`${LOGO_BASE}kalpra_logo.png`}
+              alt="Kalpra Tech – Your AI & Gen AI Partner"
+              className="login-hero-logo-img"
+              loading="eager"
+              decoding="sync"
+            />
+          </div>
 
-        <div className="login-hero-content">
-          <h1 className="login-hero-headline">
-            Care starts with <span className="login-hero-accent">connection.</span>
-          </h1>
-          <p className="login-hero-quote">
-            Behind every patient record is a person who deserves care, clarity, and compassion.
-          </p>
-          <div className="login-hero-divider" />
+          <div className="login-hero-main">
+            <span className="login-hero-eyebrow">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z" />
+                <path d="M19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z" opacity="0.7" />
+              </svg>
+              AI-Driven Healthcare Optimization
+            </span>
+            <h1 className="login-hero-headline">
+              Care starts with <span className="login-hero-accent">connection.</span>
+            </h1>
+            <p className="login-hero-quote">
+              One workspace for every step of the patient journey, with AI that drafts, reads and reaches out.
+            </p>
+
+            <p className="login-ai-heading">AI that assists your team</p>
+            <ul className="login-ai-grid">
+              <li className="login-ai-card">
+                <span className="login-ai-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="14" y2="17" />
+                  </svg>
+                </span>
+                <span className="login-ai-text">
+                  <strong>AI Discharge Summaries</strong>
+                  <span className="login-ai-desc">Drafted from the patient's records across every module, for the doctor to review and approve.</span>
+                </span>
+              </li>
+              <li className="login-ai-card">
+                <span className="login-ai-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 3h6" />
+                    <path d="M10 3v6.5L4.5 19a1.5 1.5 0 0 0 1.3 2.25h12.4A1.5 1.5 0 0 0 19.5 19L14 9.5V3" />
+                    <path d="M7.5 15h9" />
+                  </svg>
+                </span>
+                <span className="login-ai-text">
+                  <strong>Lab Report Reading</strong>
+                  <span className="login-ai-desc">Reads results from uploaded lab reports and drafts the interpretation for the pathologist.</span>
+                </span>
+              </li>
+              <li className="login-ai-card">
+                <span className="login-ai-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z" />
+                  </svg>
+                </span>
+                <span className="login-ai-text">
+                  <strong>Patient Reach AI</strong>
+                  <span className="login-ai-desc">Patient outreach, WhatsApp messages and feedback surveys, tracked in one place.</span>
+                </span>
+              </li>
+              <li className="login-ai-card">
+                <span className="login-ai-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+                    <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                    <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+                    <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                    <line x1="7" y1="12" x2="17" y2="12" />
+                  </svg>
+                </span>
+                <span className="login-ai-text">
+                  <strong>Document Scanning</strong>
+                  <span className="login-ai-desc">Reads text from uploaded patient documents, so details don't have to be typed in again.</span>
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <p className="login-hero-footer">Every AI draft is reviewed by your clinical team.</p>
         </div>
-        <p className="login-hero-footer">One connected workspace for every step of the patient journey.</p>
       </div>
 
       <div className="login-panel">
         <div className="login-panel-inner">
-          <div className="login-help">
-            <span className="login-help-label">Need help?</span>
-            <button
-              type="button"
-              className="link login-help-link"
-              onClick={() => setShowAdminNote((value) => !value)}
-              aria-expanded={showAdminNote}
-            >
-              Contact your administrator
-            </button>
-          </div>
-          {showAdminNote && (
-            <div className="login-admin-note" role="note">
-              Access to HospAI is managed by your hospital's admin team. Reach out to them to get a username set up
-              or your password reset.
-            </div>
-          )}
-
           <div className="login-brand">
             <BrandLogo />
           </div>
@@ -246,8 +294,27 @@ export default function AuthView({ onLogin }: Props) {
           </form>
 
           <div className="login-footer">
+            <p className="login-help">
+              <span className="login-help-label">Need help?</span>
+              <button
+                type="button"
+                className="link login-help-link"
+                onClick={() => setShowAdminNote((value) => !value)}
+                aria-expanded={showAdminNote}
+              >
+                Contact your administrator
+              </button>
+            </p>
+            {showAdminNote && (
+              <div className="login-admin-note" role="note">
+                Access to HospAI is managed by your hospital's admin team. Reach out to them to get a username set up
+                or your password reset.
+              </div>
+            )}
             <p>Access is based on your assigned role.</p>
             <p className="login-footer-brand">HospAI • Connected care, simplified</p>
+            {/* Narrow screens hide the left panel, so the Kalpra Tech logo moves here. */}
+            <img className="login-footer-kalpra" src={`${LOGO_BASE}kalpra_logo.png`} alt="Kalpra Tech" loading="lazy" />
           </div>
         </div>
       </div>
