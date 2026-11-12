@@ -434,8 +434,10 @@ def billing_refunds_pay(refund_id: int, request: Request, payload: dict = Body(d
 
 @router.get("/doctor-payouts/summary")
 def billing_doctor_payouts_summary(month: str | None = None, department: str | None = None, q: str | None = None,
-                                   db: Session = Depends(get_db), user: dict = Depends(require_permissions("accounts.read"))):
-    return bs.get_doctor_payout_summary_and_statements(db, period_month=month, department=department, search=q)
+                                   db: Session = Depends(get_db), user: dict = Depends(require_permissions("accounts.read")),
+                                   hospital_id: int = Depends(current_hospital_id)):
+    return bs.get_doctor_payout_summary_and_statements(db, period_month=month, department=department, search=q,
+                                                       hospital_id=hospital_id)
 
 
 @router.post("/doctor-payouts/statements/{statement_id}/pay")

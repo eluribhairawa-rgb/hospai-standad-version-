@@ -1485,115 +1485,191 @@ def finalise_ip_discharge_settlement(db: Session, payload: dict, user: dict):
 # 5. DOCTOR PAYOUTS & AGREEMENTS (Check D)
 # ==============================================================================
 
-def get_doctor_payout_summary_and_statements(db: Session, period_month: str = None, department: str = None, search: str = None):
+def _doctor_key(name) -> str:
+    """Doctor names are matched ignoring case, spacing and a leading "Dr." (appointments, schedules
+    and logins are typed separately, so the same doctor appears as "hari", "Dr. Hari" ...)."""
+    return re.sub(r"^dr\.?\s+", "", str(name or "").strip(), flags=re.IGNORECASE).strip().lower()
+
+
+def _next_month_start(period_month: str) -> str:
+    year, month = int(period_month[:4]), int(period_month[5:7])
+    return f"{year + (month == 12)}-{1 if month == 12 else month + 1:02d}-01"
+
+
+def get_doctor_payout_summary_and_statements(db: Session, period_month: str = None, department: str = None,
+                                             search: str = None, hospital_id: int = None):
+    """Doctor fee statements for one month.
+
+    Every doctor in Doctor Scheduling (plus any doctor login, plus anyone with completed paid
+    consultations that month) gets a line, with the fees earned from their completed consultations.
+    Departments offered for filtering are the department list plus the departments doctors are
+    scheduled under. A statement is only stored once the doctor has fees to pay; open statements
+    follow the month's consultations until approved.
     """
-    Computes doctor payouts under contractual agreement rules (Check D).
-    Fees earned, Adjustments, Paid, Remaining Payable.
-    """
-    if not period_month:
-        period_month = current_ist_datetime().strftime("%Y-%m")
+    now_month = current_ist_datetime().strftime("%Y-%m")
+    period_month = (period_month or now_month).strip()
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period_month):
+        raise HTTPException(status_code=400, detail="Month must be in YYYY-MM format.")
+    scoped_hospital_id = hospital_id or resolve_hospital_id(db)
+    dept_filter = (department or "").strip()
+    dept_filter = "" if dept_filter.lower() == "all departments" else dept_filter.lower()
 
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()
 
-        # Find all doctors from users table
-        query = "SELECT id, full_name, username, department FROM users WHERE role IN ('doctor', 'consultant', 'admin')"
-        params = []
-        if department and department.lower() != "all departments":
-            query += " AND LOWER(department) = LOWER(?)"
-            params.append(department)
-        cursor.execute(query, tuple(params))
-        doctors = [dict(d) for d in cursor.fetchall()]
+        # 1. Doctors: the scheduling directory first (latest department per doctor) ...
+        doctors: Dict[str, dict] = {}
+        cursor.execute(
+            """
+            SELECT s.doctor_name, s.department
+            FROM doctor_schedules s
+            JOIN (SELECT LOWER(TRIM(doctor_name)) AS k, MAX(id) AS mid FROM doctor_schedules GROUP BY 1) m ON m.mid = s.id
+            WHERE TRIM(COALESCE(s.doctor_name, '')) <> ''
+            """
+        )
+        for r in cursor.fetchall():
+            doctors[_doctor_key(r["doctor_name"])] = {
+                "name": str(r["doctor_name"]).strip(), "department": (r["department"] or "").strip(), "user_id": None,
+            }
+        # ... linked to their login when they have one (and logins of doctors who are not scheduled).
+        cursor.execute(
+            """
+            SELECT id, doctor_name, full_name, username, department FROM users
+            WHERE hospital_id = ? AND (TRIM(COALESCE(doctor_name, '')) <> '' OR LOWER(COALESCE(job_role, '')) = 'doctor')
+            """,
+            (scoped_hospital_id,),
+        )
+        for u in cursor.fetchall():
+            name = (u["doctor_name"] or u["full_name"] or u["username"] or "").strip()
+            key = _doctor_key(name)
+            if not key:
+                continue
+            entry = doctors.setdefault(key, {"name": name, "department": (u["department"] or "").strip(), "user_id": None})
+            entry["user_id"] = entry["user_id"] or u["id"]
+            entry["department"] = entry["department"] or (u["department"] or "").strip()
 
-        total_fees = D_ZERO
-        total_adj = D_ZERO
-        total_paid = D_ZERO
+        # 2. Fees earned that month: completed consultations, per doctor.
+        cursor.execute(
+            """
+            SELECT doctor_name, consultation_fee FROM appointments
+            WHERE status = 'completed' AND TRIM(COALESCE(doctor_name, '')) <> ''
+              AND appointment_date >= CAST(? AS date) AND appointment_date < CAST(? AS date)
+            """,
+            (period_month + "-01", _next_month_start(period_month)),
+        )
+        earned: Dict[str, dict] = {}
+        for r in cursor.fetchall():
+            e = earned.setdefault(_doctor_key(r["doctor_name"]), {"name": str(r["doctor_name"]).strip(), "fees": D_ZERO, "count": 0})
+            e["fees"] += to_decimal(r["consultation_fee"])
+            e["count"] += 1
+        # Someone paid for consultations but is not in the directory: still shown (pseudo-doctors with no fees are not).
+        for key, e in earned.items():
+            if key not in doctors and e["fees"] > D_ZERO:
+                doctors[key] = {"name": e["name"], "department": "", "user_id": None}
+
+        # 3. Departments to offer in the filter.
+        cursor.execute("SELECT department_name FROM department_master WHERE hospital_id = ?", (scoped_hospital_id,))
+        dept_rows = cursor.fetchall()
+        if not dept_rows:
+            cursor.execute("SELECT department_name FROM department_master")
+            dept_rows = cursor.fetchall()
+        dept_names = {str(r["department_name"]).strip() for r in dept_rows if str(r["department_name"] or "").strip()}
+        for d in doctors.values():
+            if d["department"] and d["department"].lower() not in {n.lower() for n in dept_names}:
+                dept_names.add(d["department"])
+
+        # 4. One statement line per doctor.
+        total_fees = total_adj = total_paid = D_ZERO
         statements = []
+        for key in sorted(doctors, key=lambda k: doctors[k]["name"].lower()):
+            doc = doctors[key]
+            if dept_filter and doc["department"].lower() != dept_filter:
+                continue
+            fees = earned.get(key, {}).get("fees", D_ZERO)
+            count = earned.get(key, {}).get("count", 0)
 
-        for doc in doctors:
-            doc_id = doc["id"]
-            doc_name = doc["full_name"] or doc["username"]
-            doc_dept = doc["department"] or "General Medicine"
-
-            # Check or create doctor_statements row
             cursor.execute(
-                "SELECT * FROM doctor_statements WHERE doctor_id = ? AND period_month = ?",
-                (doc_id, period_month)
+                "SELECT * FROM doctor_statements WHERE LOWER(TRIM(doctor_name)) = ? AND period_month = ?",
+                (key, period_month),
             )
             stmt = cursor.fetchone()
-            if not stmt:
-                # Count consultations in period (use DATE_TRUNC for PostgreSQL month match)
-                try:
-                    cursor.execute(
-                        """
-                        SELECT COALESCE(SUM(consultation_fee), 0), COUNT(*)
-                        FROM appointments
-                        WHERE (LOWER(doctor_name) = LOWER(?) OR doctor_name = ?)
-                          AND DATE_TRUNC('month', appointment_date) = DATE_TRUNC('month', CAST(? AS date))
-                          AND status = 'completed'
-                        """,
-                        (doc_name, doc["username"], period_month + "-01")
-                    )
-                    appt_row = cursor.fetchone()
-                    consult_sum = to_decimal(appt_row[0]) if appt_row else D_ZERO
-                except Exception:
-                    consult_sum = D_ZERO
-
-                # Use real earnings; zero if no completed appointments this period
-                earned = consult_sum
-                adj = D_ZERO  # No hardcoded adjustments — must be entered manually
-                net_pay = quantize_dec(max(D_ZERO, earned + adj))
-                paid = D_ZERO  # New statement starts unpaid
-                due = net_pay
-                p_status = "unpaid" if due > D_ZERO else "paid"
-                s_status = "ready_for_review"
-
-                cursor.execute("SELECT COUNT(*) FROM doctor_statements")
-                cnt = cursor.fetchone()[0] + 1
-                stmt_no = f"ST-{cnt:04d}"
-
+            if not stmt and fees > D_ZERO and period_month <= now_month:
+                cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM doctor_statements")
+                stmt_no = f"ST-{cursor.fetchone()[0]:04d}"
                 cursor.execute(
                     """
-                    INSERT INTO doctor_statements (statement_no, doctor_id, doctor_name, department, period_month, fees_earned, adjustments, net_payable, paid_amount, remaining_payable, status, payment_status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO doctor_statements (statement_no, doctor_id, doctor_name, department, period_month, fees_earned,
+                                                   adjustments, net_payable, paid_amount, remaining_payable, status, payment_status)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 'ready_for_review', 'unpaid')
                     RETURNING *
                     """,
-                    (stmt_no, doc_id, doc_name, doc_dept, period_month, float(earned), float(adj), float(net_pay), float(paid), float(due), s_status, p_status)
+                    (stmt_no, doc["user_id"], doc["name"], doc["department"] or None, period_month,
+                     float(fees), float(fees), float(fees)),
                 )
                 stmt = cursor.fetchone()
-                conn.commit()
+            elif stmt and stmt["status"] != "approved":
+                # An open statement follows the month's consultations; an approved one is frozen.
+                adj = to_decimal(stmt["adjustments"])
+                paid = to_decimal(stmt["paid_amount"])
+                net = quantize_dec(max(D_ZERO, fees + adj))
+                due = quantize_dec(max(D_ZERO, net - paid))
+                pay_status = "paid" if (due <= D_ZERO and net > D_ZERO) else ("partially_paid" if paid > D_ZERO else "unpaid")
+                if (to_decimal(stmt["fees_earned"]), to_decimal(stmt["net_payable"]), to_decimal(stmt["remaining_payable"])) != (fees, net, due) \
+                        or (stmt["department"] or "") != (doc["department"] or stmt["department"] or ""):
+                    cursor.execute(
+                        """
+                        UPDATE doctor_statements
+                        SET fees_earned = ?, net_payable = ?, remaining_payable = ?, payment_status = ?,
+                            department = COALESCE(NULLIF(?, ''), department), updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (float(fees), float(net), float(due), pay_status, doc["department"], stmt["id"]),
+                    )
+                    cursor.execute("SELECT * FROM doctor_statements WHERE id = ?", (stmt["id"],))
+                    stmt = cursor.fetchone()
 
-            s_dict = dict(stmt)
-            earned_dec = to_decimal(s_dict["fees_earned"])
-            adj_dec = to_decimal(s_dict["adjustments"])
-            paid_dec = to_decimal(s_dict["paid_amount"])
-            due_dec = to_decimal(s_dict["remaining_payable"])
-
-            total_fees += earned_dec
-            total_adj += adj_dec
-            total_paid += paid_dec
-
-            if not search or search.lower() in doc_name.lower():
-                statements.append(s_dict)
+            if stmt:
+                row = dict(stmt)
+            else:
+                row = {"id": None, "statement_no": None, "doctor_name": doc["name"], "department": doc["department"],
+                       "period_month": period_month, "fees_earned": 0, "adjustments": 0, "net_payable": 0,
+                       "paid_amount": 0, "remaining_payable": 0, "status": "no_fees", "payment_status": "unpaid"}
+            row["department"] = row.get("department") or doc["department"]
+            row["consultations"] = count
+            total_fees += to_decimal(row["fees_earned"])
+            total_adj += to_decimal(row["adjustments"])
+            total_paid += to_decimal(row["paid_amount"])
+            if not search or search.strip().lower() in doc["name"].lower():
+                statements.append(row)
+        conn.commit()
 
         total_payable = quantize_dec(total_fees + total_adj - total_paid)
 
-        # Recent payout history
+        # Payments made for this month's statements (same doctors as listed above).
+        shown = {_doctor_key(s["doctor_name"]) for s in statements}
         cursor.execute(
             """
-            SELECT dpp.id, dpp.amount, dpp.paid_date, dpp.payment_mode, dp.doctor_name, dp.payout_month as statement_no
+            SELECT dpp.id, dpp.amount, dpp.paid_date, dpp.payment_mode, dp.doctor_name, st.statement_no
             FROM doctor_payout_payments dpp
             JOIN doctor_payouts dp ON dp.id = dpp.payout_id
-            ORDER BY dpp.paid_date DESC LIMIT 10
-            """
+            LEFT JOIN doctor_statements st ON LOWER(TRIM(st.doctor_name)) = LOWER(TRIM(dp.doctor_name)) AND st.period_month = dp.payout_month
+            WHERE dp.payout_month = ?
+            ORDER BY dpp.paid_date DESC, dpp.id DESC LIMIT 100
+            """,
+            (period_month,),
         )
         payout_history = []
-        try:
-            payout_history = [dict(r) for r in cursor.fetchall()]
-        except Exception:
-            pass
+        for r in cursor.fetchall():
+            if _doctor_key(r["doctor_name"]) not in shown:
+                continue
+            h = dict(r)
+            h["payout_no"] = f"PAY-{h['id']:04d}"
+            h["paid_date"] = str(h["paid_date"])[:10] if h.get("paid_date") else None
+            payout_history.append(h)
 
         return {
+            "period_month": period_month,
+            "departments": sorted(dept_names, key=str.lower),
             "summary": {
                 "fees_earned": float(total_fees),
                 "adjustments": float(total_adj),

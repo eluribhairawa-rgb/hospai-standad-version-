@@ -25,63 +25,15 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [summary, setSummary] = useState({
-    fees_earned: 25000,
-    adjustments: -1000,
-    paid: 10000,
-    payable: 14000,
-  });
-
-  const [statements, setStatements] = useState<any[]>([
-    {
-      id: 1,
-      statement_no: "ST-0093",
-      doctor_name: "Dr. S. Rao",
-      department: "General Medicine",
-      fees_earned: 15000,
-      adjustments: -500,
-      paid_amount: 5000,
-      remaining_payable: 9500,
-      status: "Ready for review",
-      period_month: "September 2026",
-    },
-    {
-      id: 2,
-      statement_no: "ST-0094",
-      doctor_name: "Dr. P. Reddy",
-      department: "Orthopaedics",
-      fees_earned: 10000,
-      adjustments: -500,
-      net_payable: 9500,
-      paid_amount: 5000,
-      remaining_payable: 4500,
-      status: "Approved",
-      period_month: "September 2026",
-    },
-  ]);
-
-  const [payoutHistory, setPayoutHistory] = useState<any[]>([
-    {
-      id: 1,
-      payout_no: "PAY-0037",
-      doctor_name: "Dr. P. Reddy",
-      paid_date: "15 Sep 2026",
-      payment_mode: "Bank transfer",
-      amount: 5000,
-    },
-    {
-      id: 2,
-      payout_no: "PAY-0036",
-      doctor_name: "Dr. S. Rao",
-      paid_date: "15 Sep 2026",
-      payment_mode: "Bank transfer",
-      amount: 5000,
-    },
-  ]);
+  const [summary, setSummary] = useState({ fees_earned: 0, adjustments: 0, paid: 0, payable: 0 });
+  const [statements, setStatements] = useState<any[]>([]);
+  const [payoutHistory, setPayoutHistory] = useState<any[]>([]);
+  // Every department in the department list, plus those doctors are scheduled under (from the server).
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
 
   // Selected statement for right panel
   const [selectedStatement, setSelectedStatement] = useState<any>(null);
-  const [payoutAmount, setPayoutAmount] = useState<string>("4500");
+  const [payoutAmount, setPayoutAmount] = useState<string>("");
   const [payoutMode, setPayoutMode] = useState<string>("Bank transfer");
   const [payoutRef, setPayoutRef] = useState<string>("");
   const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
@@ -94,27 +46,18 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
       const deptParam = department && department !== "All departments" ? `&department=${encodeURIComponent(department)}` : "";
       const qParam = searchQuery.trim() ? `&q=${encodeURIComponent(searchQuery.trim())}` : "";
       const res = await apiFetch(`/api/billing/doctor-payouts/summary?month=${periodMonth}${deptParam}${qParam}`);
-      if (res) {
-        if (res.summary && (res.summary.fees_earned > 0 || res.summary.payable > 0)) {
-          setSummary({
-            fees_earned: res.summary.fees_earned || 25000,
-            adjustments: res.summary.adjustments || -1000,
-            paid: res.summary.paid || 10000,
-            payable: res.summary.payable || 14000,
-          });
-        }
-        if (res.statements && res.statements.length > 0) {
-          setStatements(res.statements);
-          setSelectedStatement(res.statements[0]);
-          setPayoutAmount(String(res.statements[0].remaining_payable || 0));
-        } else {
-          // Keep Dr. P. Reddy selected as visual reference
-          setSelectedStatement(statements[1] || statements[0]);
-        }
-        if (res.payout_history && res.payout_history.length > 0) {
-          setPayoutHistory(res.payout_history);
-        }
-      }
+      const list: any[] = res?.statements || [];
+      setDepartmentOptions(res?.departments || []);
+      setSummary(res?.summary || { fees_earned: 0, adjustments: 0, paid: 0, payable: 0 });
+      setStatements(list);
+      setPayoutHistory(res?.payout_history || []);
+      // Keep the same doctor selected across refreshes; otherwise the first doctor who is owed money.
+      setSelectedStatement((current: any) =>
+        (current && list.find((x) => x.doctor_name === current.doctor_name)) ||
+        list.find((x) => x.id && Number(x.remaining_payable) > 0) ||
+        list[0] ||
+        null
+      );
     } catch (err: any) {
       reportError(setNotice, err);
       setError(err.message || "Failed to load doctor statements.");
@@ -127,13 +70,11 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
     loadDoctorStatements();
   }, [periodMonth, department]);
 
+  // The payout form always starts from what is still owed on the selected statement.
   useEffect(() => {
-    if (!selectedStatement && statements.length > 0) {
-      const approvedOne = statements.find((s) => s.status === "Approved") || statements[0];
-      setSelectedStatement(approvedOne);
-      setPayoutAmount(String(approvedOne.remaining_payable || 4500));
-    }
-  }, [statements]);
+    const due = Number(selectedStatement?.remaining_payable || 0);
+    setPayoutAmount(due > 0 ? String(due) : "");
+  }, [selectedStatement?.id, selectedStatement?.remaining_payable]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,11 +83,13 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
 
   const handleSelectStatement = (stmt: any) => {
     setSelectedStatement(stmt);
-    setPayoutAmount(String(stmt.remaining_payable || 0));
   };
 
   const handleRecordPayout = async () => {
-    if (!selectedStatement) return;
+    if (!selectedStatement?.id) {
+      setNotice({ type: "warning", message: "This doctor has no fees for the month yet, so there is nothing to pay." });
+      return;
+    }
     const amt = parseFloat(payoutAmount);
     if (isNaN(amt) || amt <= 0) {
       setNotice({ type: "warning", message: "Enter a valid positive payout amount." });
@@ -162,6 +105,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
           amount: amt,
           payment_mode: payoutMode.toLowerCase().replace(/\s+/g, "_"),
           reference: payoutRef || `${payoutMode}-DISBURSE`,
+          payment_date: paymentDate,
           notes: `Payout disburse for ${selectedStatement.doctor_name}`,
         }),
       });
@@ -170,13 +114,32 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
         type: "success",
         message: `Payout voucher ${res.payout_no || "recorded"} for ₹${fmt(amt)} created.`,
       });
+      setPayoutRef("");
       loadDoctorStatements();
     } catch (err: any) {
-      reportError(setNotice, err);
-      setNotice({ type: "error", message: err.message || "Failed to record doctor payout." });
+      reportError(setNotice, err, "Failed to record doctor payout.");
     } finally {
       setSubmittingPayout(false);
     }
+  };
+
+  const monthLabel = (ym: string) => {
+    const d = new Date(`${ym}-01T00:00:00`);
+    return Number.isNaN(d.getTime()) ? ym : d.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  };
+  const periodLabel = monthLabel(periodMonth);
+  const STATUS_LABEL: Record<string, string> = {
+    ready_for_review: "Ready for review",
+    approved: "Approved",
+    draft: "Draft",
+    no_fees: "No fees yet",
+  };
+  const statusLabel = (st?: string) => STATUS_LABEL[st || ""] || st || "";
+  const statusClass = (st?: string) => (st === "approved" ? "billing-badge-approved" : "billing-badge-review");
+  const fmtDate = (d?: string) => {
+    if (!d) return "-";
+    const x = new Date(`${String(d).slice(0, 10)}T00:00:00`);
+    return Number.isNaN(x.getTime()) ? String(d) : x.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   };
 
   const printStatementSummary = () => {
@@ -184,7 +147,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
       title: `Doctor Payout Statement Summary`,
       subtitleLines: [
         `HospAI · Medical Finance Department`,
-        `Period: September 2026 · Generated: ${new Date().toLocaleDateString("en-IN")}`,
+        `Period: ${periodLabel} · Generated: ${new Date().toLocaleDateString("en-IN")}`,
       ],
       meta: [
         { label: "Fees Earned", value: `₹${fmt(summary.fees_earned)}` },
@@ -200,7 +163,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
         `-₹${fmt(Math.abs(s.adjustments || 0))}`,
         `₹${fmt(s.paid_amount || 0)}`,
         `₹${fmt(s.remaining_payable || 0)}`,
-        s.status || "Ready for review",
+        statusLabel(s.status),
       ]),
       totals: [
         { label: "Total Payable Balance", value: `₹${fmt(summary.payable)}`, grand: true },
@@ -214,7 +177,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
       title: `Doctor Payment Voucher ${p.payout_no}`,
       subtitleLines: [
         `HospAI · Accounts & Payout Desk`,
-        `Payment Date: ${p.paid_date} · Mode: ${p.payment_mode}`,
+        `Payment Date: ${fmtDate(p.paid_date)} · Mode: ${p.payment_mode}`,
       ],
       meta: [
         { label: "Voucher No", value: p.payout_no },
@@ -233,7 +196,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
     printViaIframe(html);
   };
 
-  const stmt = selectedStatement || statements[1] || statements[0];
+  const stmt = selectedStatement;
 
   return (
     <div className="billing-page-wrapper">
@@ -283,10 +246,9 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
           className="billing-filter-select"
         >
           <option value="All departments">All departments</option>
-          <option value="General Medicine">General Medicine</option>
-          <option value="Orthopaedics">Orthopaedics</option>
-          <option value="Cardiology">Cardiology</option>
-          <option value="Paediatrics">Paediatrics</option>
+          {departmentOptions.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
         </select>
 
         {/* Doctor Search Box */}
@@ -396,33 +358,34 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
                   </tr>
                 </thead>
                 <tbody>
+                  {statements.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "1.5rem", color: "#64748b" }}>
+                        {loading ? "Loading doctors…" : "No doctors found for this selection. Doctors appear here once they are added in Doctor Scheduling."}
+                      </td>
+                    </tr>
+                  )}
                   {statements.map((s) => {
-                    const isSelected = stmt?.id === s.id;
+                    const isSelected = stmt?.doctor_name === s.doctor_name;
                     return (
                       <tr
-                        key={s.id}
+                        key={s.doctor_name}
                         className={isSelected ? "selected" : ""}
                         onClick={() => handleSelectStatement(s)}
                         style={{ cursor: "pointer" }}
                       >
                         <td>
                           <div style={{ fontWeight: 600, color: "#0f172a" }}>{s.doctor_name}</div>
-                          <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{s.department}</div>
+                          <div style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                            {s.department || "No department"} · {s.consultations || 0} consultation{(s.consultations || 0) === 1 ? "" : "s"}
+                          </div>
                         </td>
                         <td style={{ fontWeight: 600 }}>₹{fmt(s.fees_earned)}</td>
                         <td style={{ color: "#ea580c" }}>-₹{fmt(Math.abs(s.adjustments || 0))}</td>
                         <td style={{ color: "#64748b" }}>₹{fmt(s.paid_amount || 0)}</td>
                         <td style={{ fontWeight: 700, color: "#0f172a" }}>₹{fmt(s.remaining_payable || 0)}</td>
                         <td style={{ textAlign: "right" }}>
-                          <span
-                            className={
-                              s.status === "Approved"
-                                ? "billing-badge-approved"
-                                : "billing-badge-review"
-                            }
-                          >
-                            {s.status}
-                          </span>
+                          <span className={statusClass(s.status)}>{statusLabel(s.status)}</span>
                         </td>
                       </tr>
                     );
@@ -441,38 +404,40 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
             </div>
 
             <div className="billing-card-body">
+              {!stmt && (
+                <div style={{ padding: "1rem 0", color: "#64748b", fontSize: "0.875rem" }}>
+                  Select a doctor to see their statement.
+                </div>
+              )}
+              {stmt && (<>
               {/* Doctor header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" }}>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>
-                    {stmt?.doctor_name || "Dr. P. Reddy"}
-                  </h3>
+                  <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>{stmt.doctor_name}</h3>
                   <div style={{ fontSize: "0.775rem", color: "#64748b", marginTop: "2px" }}>
-                    {stmt?.statement_no || "ST-0094"} • {stmt?.period_month || "September 2026"}
+                    {stmt.department || "No department"} • {stmt.statement_no || "No statement yet"} • {monthLabel(stmt.period_month || periodMonth)}
                   </div>
                 </div>
-                <span className="billing-badge-approved">
-                  {stmt?.status || "Approved"}
-                </span>
+                <span className={statusClass(stmt.status)}>{statusLabel(stmt.status)}</span>
               </div>
 
               {/* Breakdown lines */}
               <div style={{ marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
-                  <span style={{ color: "#64748b" }}>Fees earned</span>
-                  <span style={{ fontWeight: 600 }}>₹{fmt(stmt?.fees_earned || 10000)}</span>
+                  <span style={{ color: "#64748b" }}>Fees earned ({stmt.consultations || 0} consultation{(stmt.consultations || 0) === 1 ? "" : "s"})</span>
+                  <span style={{ fontWeight: 600 }}>₹{fmt(stmt.fees_earned)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
                   <span style={{ color: "#64748b" }}>Adjustment</span>
-                  <span style={{ color: "#ea580c", fontWeight: 600 }}>-₹{fmt(Math.abs(stmt?.adjustments || 500))}</span>
+                  <span style={{ color: "#ea580c", fontWeight: 600 }}>-₹{fmt(Math.abs(stmt.adjustments || 0))}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
                   <span style={{ color: "#64748b" }}>Net payable</span>
-                  <span style={{ fontWeight: 600 }}>₹{fmt(stmt?.net_payable || (stmt?.fees_earned - Math.abs(stmt?.adjustments || 0)) || 9500)}</span>
+                  <span style={{ fontWeight: 600 }}>₹{fmt(stmt.net_payable)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "14px", fontSize: "0.875rem" }}>
                   <span style={{ color: "#64748b" }}>Previously paid</span>
-                  <span style={{ color: "#64748b", fontWeight: 600 }}>₹{fmt(stmt?.paid_amount || 5000)}</span>
+                  <span style={{ color: "#64748b", fontWeight: 600 }}>₹{fmt(stmt.paid_amount)}</span>
                 </div>
 
                 {/* Remaining payable highlight */}
@@ -480,8 +445,16 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
                   <div>
                     <span className="box-label">Remaining payable</span>
                   </div>
-                  <span className="box-value">₹{fmt(stmt?.remaining_payable || 4500)}</span>
+                  <span className="box-value">₹{fmt(stmt.remaining_payable)}</span>
                 </div>
+
+                {Number(stmt.remaining_payable || 0) <= 0 && (
+                  <div style={{ margin: "10px 0", padding: "8px 10px", borderRadius: "8px", background: "#f8fafc", border: "1px solid #e2e8f0", color: "#475569", fontSize: "0.8rem" }}>
+                    {stmt.id
+                      ? "Nothing is payable on this statement. It is paid in full."
+                      : `No fees earned by ${stmt.doctor_name} in ${monthLabel(periodMonth)} yet. Fees come from completed consultations.`}
+                  </div>
+                )}
 
                 {/* Form fields */}
                 <div className="billing-form-group">
@@ -549,7 +522,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
                   className="billing-btn-teal"
                   style={{ width: "100%", padding: "10px", marginTop: "4px" }}
                   onClick={handleRecordPayout}
-                  disabled={submittingPayout}
+                  disabled={submittingPayout || !stmt?.id || Number(stmt?.remaining_payable || 0) <= 0}
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -563,6 +536,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
                   ⓘ Record only after payment confirmation.
                 </div>
               </div>
+              </>)}
             </div>
           </div>
         </div>
@@ -587,11 +561,18 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
               </tr>
             </thead>
             <tbody>
+              {payoutHistory.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "1.25rem", color: "#64748b" }}>
+                    No payouts recorded for {periodLabel}{department !== "All departments" ? ` in ${department}` : ""}.
+                  </td>
+                </tr>
+              )}
               {payoutHistory.map((p) => (
                 <tr key={p.id}>
                   <td style={{ fontWeight: 600 }}>{p.payout_no}</td>
                   <td>{p.doctor_name}</td>
-                  <td style={{ color: "#64748b" }}>{p.paid_date}</td>
+                  <td style={{ color: "#64748b" }}>{fmtDate(p.paid_date)}</td>
                   <td>{p.payment_mode}</td>
                   <td style={{ fontWeight: 700 }}>₹{fmt(p.amount)}</td>
                   <td style={{ textAlign: "right" }}>
