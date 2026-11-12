@@ -99,6 +99,7 @@ export const NAV_ITEMS: NavItem[] = [
 
   // 9. Administration
   { id: "employees", label: "Employee Management", group: "admin", module: "employees", permission: "admin.users.read", deniedHint: "Only Super Admins can access Employee Management." },
+  { id: "branding", label: "Branding & Templates", group: "admin", permission: "admin.use", deniedHint: "Only administrators can manage document branding." },
   { id: "settings", label: "Settings", module: "settings" },
 ];
 

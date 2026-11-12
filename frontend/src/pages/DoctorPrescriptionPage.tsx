@@ -5,7 +5,7 @@ import { apiFetch, reportError, getHospitalCode } from "../lib/api";
 import { API_BASE } from "../lib/constants";
 import type { Notice } from "../types";
 import BrandLogo from "../components/BrandLogo";
-import { HOSPAI_PRINT_FOOTER_CSS } from "../lib/printViaIframe";
+import { buildHospaiPrintFooterCss } from "../lib/printViaIframe";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -1617,7 +1617,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
           .doctor-rx-sub-header {
             display: none !important;
           }
-          ${HOSPAI_PRINT_FOOTER_CSS}
+          ${buildHospaiPrintFooterCss()}
         }
       `}</style>
 

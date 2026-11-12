@@ -1,4 +1,5 @@
 import { PRINT_BRAND_HEADER_DATA_URI } from "./printBrand";
+import { brandTitle, escapeBrandText, fitMm, getBranding } from "./branding";
 
 /**
  * printViaIframe – shared print utility
@@ -40,20 +41,61 @@ const FOOTER_TEXT_BOX = `
  * so it prints even with "Background graphics" unchecked. !important keeps a
  * document's own smaller @page margin from squeezing the footer out.
  */
-export const HOSPAI_PRINT_FOOTER_CSS = `
+export function buildHospaiPrintFooterCss(): string {
+  const b = getBranding();
+  const raw = b?.footer_text || `Thank you for choosing ${brandTitle()}.`;
+  // CSS string literal: escape backslash/quote and flatten newlines.
+  const cssText = raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
+  let centre = `@bottom-center { content: image-set(url("${PRINT_BRAND_HEADER_DATA_URI}") 20x); width: 16mm; margin-top: 1.5mm; vertical-align: top; text-align: center; }`;
+  if (b?.footer?.data_uri) {
+    // Custom footer image, scaled into its box with the aspect ratio kept.
+    const [w, h] = fitMm(b.footer.width_px, b.footer.height_px, b.footer_box_mm[0] * 0.6, b.footer_box_mm[1], true);
+    if (b.footer.mime === "image/svg+xml") {
+      centre = `@bottom-center { content: ""; width: ${w.toFixed(1)}mm; height: ${h.toFixed(1)}mm; margin-top: 1.5mm; background: url("${b.footer.data_uri}") center / contain no-repeat; -webkit-print-color-adjust: exact; print-color-adjust: exact; }`;
+    } else {
+      const dppx = (b.footer.width_px || 1) / (w * 3.7795);
+      centre = `@bottom-center { content: image-set(url("${b.footer.data_uri}") ${dppx.toFixed(3)}x); width: ${w.toFixed(1)}mm; margin-top: 1.5mm; vertical-align: top; text-align: center; }`;
+    }
+  } else if (b && b.hospital_title) {
+    centre = `@bottom-center { content: ""; }`;
+  }
+  return `
   @page {
     margin-bottom: 22mm !important;
-    @bottom-left { content: "Thank you for choosing HospAI."; text-align: left; ${FOOTER_TEXT_BOX} }
-    @bottom-center { content: image-set(url("${PRINT_BRAND_HEADER_DATA_URI}") 20x); width: 16mm; margin-top: 1.5mm; vertical-align: top; text-align: center; }
+    @bottom-left { content: "${cssText}"; text-align: left; ${FOOTER_TEXT_BOX} }
+    ${centre}
     @bottom-right { content: "Page " counter(page) " of " counter(pages); text-align: right; ${FOOTER_TEXT_BOX} }
   }`;
+}
+
+/** Default footer (no custom branding) -- kept for existing imports. */
+export const HOSPAI_PRINT_FOOTER_CSS = buildHospaiPrintFooterCss();
 
 function appendSharedHospaiPrintFooter(html: string): string {
   if (html.includes("data-hospai-print-footer-style")) return html;
   // Appended last so it wins over any @page rule the document declares itself.
-  const style = `<style data-hospai-print-footer-style>${HOSPAI_PRINT_FOOTER_CSS}</style>`;
+  const style = `<style data-hospai-print-footer-style>${buildHospaiPrintFooterCss()}</style>`;
   const bodyEnd = html.lastIndexOf("</body>");
   return bodyEnd >= 0 ? `${html.slice(0, bodyEnd)}${style}${html.slice(bodyEnd)}` : `${html}${style}`;
+}
+
+/** Letterhead row: the built-in HospAI logo by default, or the hospital's own logo/title
+ * (alignment, offsets, auto-fit) from Branding & Templates. */
+function buildBrandRowHtml(): string {
+  const b = getBranding();
+  if (!b || (!b.logo?.data_uri && !b.hospital_title)) {
+    return `<div class="hospai-shared-brand-row">
+        <img class="hospai-shared-brand-logo" src="${PRINT_BRAND_HEADER_DATA_URI}" alt="HospAI, Pharmacy and Diagnostic" />
+      </div>`;
+  }
+  const title = b.hospital_title ? `<div style="font:800 15pt Arial,Helvetica,sans-serif;color:#000;">${escapeBrandText(b.hospital_title)}</div>` : "";
+  if (!b.logo?.data_uri) return `<div class="hospai-shared-brand-row" style="align-items:center;">${title}</div>`;
+  const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
+  const logo = `<img src="${b.logo.data_uri}" alt="${escapeBrandText(b.hospital_title || "Hospital logo")}" style="display:block;width:${w.toFixed(2)}mm;height:${h.toFixed(2)}mm;max-width:100%;object-fit:contain;position:relative;left:${b.logo_offset_x_mm}mm;top:${b.logo_offset_y_mm}mm;" />`;
+  const justify = b.logo_alignment === "center" ? "center" : b.logo_alignment === "right" ? "flex-end" : "flex-start";
+  const withTitle = b.logo_alignment === "center" || !title ? logo : b.logo_alignment === "right" ? `${title}${logo}` : `${logo}${title}`;
+  const rowJustify = b.logo_alignment === "center" || !title ? justify : "space-between";
+  return `<div class="hospai-shared-brand-row" style="justify-content:${rowJustify};">${withTitle}</div>`;
 }
 
 function applySharedHospaiPrintFrame(html: string): string {
@@ -85,7 +127,7 @@ function applySharedHospaiPrintFrame(html: string): string {
       </style>`;
     const compactHeader = `
       <div class="hospai-shared-label-mark" data-hospai-shared-print-shell>
-        <div class="brand">HospAI</div>
+        <div class="brand">${escapeBrandText(brandTitle())}</div>
         <div class="meta">${title} &middot; ${printDate} ${printTime}</div>
         <div class="rule"></div>
       </div>`;
@@ -184,15 +226,13 @@ function applySharedHospaiPrintFrame(html: string): string {
 
   const header = `
     <header class="hospai-shared-print-shell" data-hospai-shared-print-shell>
-      <div class="hospai-shared-brand-row">
-        <img class="hospai-shared-brand-logo" src="${PRINT_BRAND_HEADER_DATA_URI}" alt="HospAI, Pharmacy and Diagnostic" />
-      </div>
+      ${buildBrandRowHtml()}
       <div class="hospai-shared-header-divider"></div>
       <div class="hospai-shared-report-row">
-        <div class="hospai-shared-report-title"><h1>${title}</h1><p>HospAI | Pharmacy | Diagnostic</p></div>
+        <div class="hospai-shared-report-title"><h1>${title}</h1><p>${escapeBrandText(brandTitle())} | Pharmacy | Diagnostic</p></div>
         <table class="hospai-shared-report-meta" aria-label="Print information"><tbody>
           <tr><td>Print Date</td><td>:</td><td>${printDate}</td></tr>
-          <tr><td>Generated By</td><td>:</td><td>HospAI System</td></tr>
+          <tr><td>Generated By</td><td>:</td><td>${escapeBrandText(brandTitle())} System</td></tr>
           <tr><td>Generated Time</td><td>:</td><td>${printTime}</td></tr>
         </tbody></table>
       </div>

@@ -98,7 +98,7 @@ def reports_export_csv(db: Session = Depends(get_db), user: dict = Depends(requi
 @router.get("/reports/export/pdf")
 def reports_export_pdf(db: Session = Depends(get_db), user: dict = Depends(require_permissions("reports.read"))):
     overview = lq.get_reports_overview(db)
-    pdf_bytes = generate_pdf("Hospital Operations", "reports_overview", _build_reports_export_text(overview), datetime.now().strftime("%Y-%m-%d %H:%M"))
+    pdf_bytes = generate_pdf("Hospital Operations", "reports_overview", _build_reports_export_text(overview), datetime.now().strftime("%Y-%m-%d %H:%M"), hospital_id=user.get("hospital_id"))
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
                               headers={"Content-Disposition": 'attachment; filename="reports-overview.pdf"'})
 
@@ -157,7 +157,7 @@ def _dashboard_pdf_text(payload):
 def dashboard_export_pdf(db: Session = Depends(get_db), user: dict = Depends(require_hospital_overview()), hospital_id: int = Depends(current_hospital_id)):
     try:
         payload = _build_dashboard_export_payload(db, hospital_id)
-        pdf_bytes = generate_pdf("Executive Dashboard", "executive_dashboard", _dashboard_pdf_text(payload), payload["generated_at"])
+        pdf_bytes = generate_pdf("Executive Dashboard", "executive_dashboard", _dashboard_pdf_text(payload), payload["generated_at"], hospital_id=hospital_id)
         return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
                                   headers={"Content-Disposition": 'attachment; filename="executive-dashboard.pdf"'})
     except Exception as exc:
@@ -224,10 +224,10 @@ def standard_module_report_export_pdf(payload: dict = Body(default={}), db: Sess
     payload with no `sections` at all falls back to the hospital-operations
     overview, matching this endpoint's original GET behavior."""
     if payload and payload.get("sections"):
-        pdf_bytes = generate_standard_report_pdf(payload)
+        pdf_bytes = generate_standard_report_pdf(payload, hospital_id=user.get("hospital_id"))
     else:
         overview = lq.get_reports_overview(db)
-        pdf_bytes = generate_pdf("Hospital Operations", "reports_overview", _build_reports_export_text(overview), datetime.now().strftime("%Y-%m-%d %H:%M"))
+        pdf_bytes = generate_pdf("Hospital Operations", "reports_overview", _build_reports_export_text(overview), datetime.now().strftime("%Y-%m-%d %H:%M"), hospital_id=user.get("hospital_id"))
     filename = str((payload or {}).get("filename") or "Hospital_Report.pdf")
     if not filename.lower().endswith(".pdf"):
         filename += ".pdf"

@@ -41,19 +41,76 @@ def _footer_logo_path():
     return next((path for path in candidates if path and os.path.exists(path)), None)
 
 
+def _brand():
+    """Custom document branding (Admin > Branding & Templates), or None for the built-in defaults."""
+    try:
+        import branding
+        return branding.get_branding()
+    except Exception:
+        return None
+
+
+def _latin(value: str) -> str:
+    return (value or "").encode("latin-1", "replace").decode("latin-1")
+
+
+def brand_title() -> str:
+    b = _brand()
+    return _latin(b["hospital_title"]) if b and b.get("hospital_title") else BRAND_NAME
+
+
+def _custom_image(pdf, path, mime, w_px, h_px, box_w, box_h, auto_fit, x_fn, y):
+    """Draw a branding image scaled into its box (aspect ratio kept). Returns the drawn (x, w, h) or None."""
+    import branding
+    w, h = branding.fit_mm(w_px, h_px, box_w, box_h, auto_fit)
+    if h > box_h:  # auto-fit off: still never exceed the vertical space reserved for it
+        w, h = branding.fit_mm(w_px, h_px, box_w, box_h, True)
+    x = x_fn(w)
+    pdf.image(path, x=x, y=y, w=w, h=h)
+    return x, w, h
+
+
 def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: float = 120):
-    """Draw the approved HospAI logo header (no address) used by every PDF export."""
-    logo_path = _frontend_logo_path()
-    if logo_path:
+    """Draw the letterhead used by every PDF export: the hospital's custom logo/title
+    when configured in Branding & Templates, otherwise the approved HospAI logo."""
+    b = _brand()
+    drawn = None
+    if b and b.get("logo_file"):
         try:
-            pdf.image(logo_path, x=left_margin, y=top_y, w=0, h=28)
+            import branding
+            align = b.get("logo_alignment") or "left"
+            right_edge = 195
+            bw, bh = branding.LOGO_BOX_MM
+
+            def x_for(w):
+                base = {"left": left_margin, "center": (left_margin + right_edge - w) / 2, "right": right_edge - w}.get(align, left_margin)
+                return min(max(base + b["logo_offset_x_mm"], 0), 210 - w)
+            y = min(max(top_y + b["logo_offset_y_mm"], 0), top_y + 33 - 4)
+            drawn = _custom_image(pdf, b["logo_file"], b.get("logo_mime"), b.get("logo_width_px"), b.get("logo_height_px"),
+                                  bw, bh, bool(b.get("auto_fit_scaling")), x_for, y)
         except Exception:
-            logo_path = None
-    if not logo_path:
-        pdf.set_xy(left_margin, top_y + 3)
-        pdf.set_font("Helvetica", "B", 15)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(82, 12, BRAND_NAME)
+            drawn = None
+    if drawn:
+        x, w, _h = drawn
+        title = brand_title() if b.get("hospital_title") else ""
+        if title and (b.get("logo_alignment") or "left") != "center":
+            on_left = (b.get("logo_alignment") or "left") == "right"
+            pdf.set_xy(left_margin if on_left else 195 - 80, top_y + 8)
+            pdf.set_font("Helvetica", "B", 15)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(80, 12, title, align="L" if on_left else "R")
+    else:
+        logo_path = None if (b and b.get("hospital_title") and not b.get("logo_file")) else _frontend_logo_path()
+        if logo_path:
+            try:
+                pdf.image(logo_path, x=left_margin, y=top_y, w=0, h=28)
+            except Exception:
+                logo_path = None
+        if not logo_path:
+            pdf.set_xy(left_margin, top_y + 3)
+            pdf.set_font("Helvetica", "B", 15)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(120, 12, brand_title())
 
     pdf.set_draw_color(0, 0, 0)
     pdf.set_line_width(0.65)
@@ -62,26 +119,45 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
 
 
 def draw_pdf_brand_footer(pdf):
-    """Draw the approved HospAI footer (rule - logo - rule, thank-you line, "Page X of Y")
-    at the bottom of the current page. Call from FPDF.footer(); needs pdf.alias_nb_pages()."""
+    """Draw the footer (rule - logo - rule, thank-you line, "Page X of Y") at the bottom of
+    the current page, honouring a custom footer image/text from Branding & Templates.
+    Call from FPDF.footer(); needs pdf.alias_nb_pages()."""
+    b = _brand()
+    custom_img = None
+    if b and b.get("footer_file"):
+        custom_img = b
     pdf.set_draw_color(0, 0, 0)
     pdf.set_line_width(0.45)
-    pdf.line(15, 280.2, 99.0, 280.2)
-    pdf.line(111.0, 280.2, 195.0, 280.2)
-    logo_path = _footer_logo_path()
-    if logo_path:
+    if custom_img:
+        pdf.line(15, 280.2, 195.0, 280.2)
         try:
-            # w=0 maintains aspect ratio relative to h=8.0
-            pdf.image(logo_path, x=100.2, y=276.2, w=0, h=8.0)
+            import branding
+            bw, bh = branding.FOOTER_BOX_MM
+            _custom_image(pdf, b["footer_file"], b.get("footer_mime"), b.get("footer_width_px"), b.get("footer_height_px"),
+                          bw, bh, True, lambda w: 15 + (180 - w) / 2, 281.0)
         except Exception:
             pass
-    pdf.set_y(-13.8)
+        text_y = -7.0
+    else:
+        pdf.line(15, 280.2, 99.0, 280.2)
+        pdf.line(111.0, 280.2, 195.0, 280.2)
+        logo_path = None if (b and b.get("hospital_title")) else _footer_logo_path()
+        if logo_path:
+            try:
+                # w=0 maintains aspect ratio relative to h=8.0
+                pdf.image(logo_path, x=100.2, y=276.2, w=0, h=8.0)
+            except Exception:
+                pass
+        text_y = -13.8
+    custom_text = _latin(b["footer_text"]) if b and b.get("footer_text") else ""
+    default_text = f"Thank you for choosing {brand_title()}."
+    pdf.set_y(text_y)
     pdf.set_font("Helvetica", "I", 7.5)
     pdf.set_text_color(0, 0, 0)
     pdf.set_x(15)
-    pdf.cell(82, 5, "Thank you for choosing HospAI.", align="L")
-    pdf.set_x(113)
-    pdf.cell(82, 5, f"Page {pdf.page_no()} of {{nb}}", align="R")
+    pdf.cell(110 if custom_text else 82, 5, custom_text or default_text, align="L")
+    pdf.set_x(155)
+    pdf.cell(40, 5, f"Page {pdf.page_no()} of {{nb}}", align="R")
 
 
 def parse_markdown_line(line):
@@ -134,8 +210,14 @@ def parse_bold_segments(text):
 _NON_PATIENT_DOC_TYPES = {"executive_dashboard", "reports_overview"}
 
 
-def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str = None) -> bytes:
+def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str = None, hospital_id: int = None) -> bytes:
     """Generate a hospital-standard A4 PDF with client hospital branding."""
+    import branding
+    with branding.use_hospital(hospital_id):
+        return _generate_pdf(patient_name, doc_type, ocr_text, date_str)
+
+
+def _generate_pdf(patient_name, doc_type, ocr_text, date_str=None) -> bytes:
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -188,7 +270,7 @@ def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str 
         pdf.cell(105, 6, _pdf_clean(document_title), ln=True)
         pdf.set_x(left_margin)
         pdf.set_font("Helvetica", "", 8.5)
-        pdf.cell(105, 5, _pdf_clean("HospAI | Pharmacy | Diagnostic"))
+        pdf.cell(105, 5, _pdf_clean(f"{brand_title()} | Pharmacy | Diagnostic" if _brand() and _brand().get("hospital_title") else "HospAI | Pharmacy | Diagnostic"))
 
         try:
             generated_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M")
@@ -196,7 +278,7 @@ def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str 
             generated_dt = datetime.now()
         meta = (
             ("Print Date", generated_dt.strftime("%d/%m/%Y")),
-            ("Generated By", "HospAI System"),
+            ("Generated By", f"{brand_title()} System"),
             ("Generated Time", generated_dt.strftime("%I:%M:%S %p")),
         )
         y = 45
@@ -273,7 +355,7 @@ def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str 
             ("Patient Name", patient_name or "-"),
             ("Document Type", document_title),
             ("Generated On", date_str),
-            ("Hospital System", BRAND_NAME),
+            ("Hospital System", brand_title()),
         ])
     else:
         _section("Document Information")
@@ -281,7 +363,7 @@ def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str 
             ("Report Title", patient_name or document_title),
             ("Document Type", document_title),
             ("Generated On", date_str),
-            ("Hospital System", BRAND_NAME),
+            ("Hospital System", brand_title()),
         ])
     _section("Clinical Document Details")
 
@@ -363,7 +445,13 @@ def generate_pdf(patient_name: str, doc_type: str, ocr_text: str, date_str: str 
     return bytes(out) if isinstance(out, bytearray) else (out if isinstance(out, bytes) else out.encode("latin-1"))
 
 
-def generate_standard_report_pdf(payload: dict) -> bytes:
+def generate_standard_report_pdf(payload: dict, hospital_id: int = None) -> bytes:
+    import branding
+    with branding.use_hospital(hospital_id):
+        return _generate_standard_report_pdf(payload)
+
+
+def _generate_standard_report_pdf(payload: dict) -> bytes:
     """Renders the frontend's StandardPdfPayload (title/subtitle/patient_info/
     sections-of-real-table-rows/totals/payment_details) into a real branded
     PDF. Used by every module's generic 'Download PDF' button (Dashboard,

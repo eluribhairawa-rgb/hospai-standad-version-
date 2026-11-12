@@ -17,6 +17,8 @@ import OpQueuePage from "./pages/OpQueuePage";
 import DashboardPage from "./pages/DashboardPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import EmployeesPage from "./pages/EmployeesPage";
+import BrandingPage from "./pages/BrandingPage";
+import { applyBranding, loadBranding } from "./lib/branding";
 import BillingClaimsPage from "./pages/BillingClaimsPage";
 import BillingOverviewPage from "./pages/billing/BillingOverviewPage";
 import PatientBillsPaymentsPage from "./pages/billing/PatientBillsPaymentsPage";
@@ -114,7 +116,7 @@ export const normalizeRouteAlias = (rawPage: string): string => {
 // back to the dashboard instead of rendering a blank page.
 const VALID_PAGE_IDS = new Set([
   "access-denied", "accounts", "accounts-doctor-payouts", "accounts-ledger", "accounts-overview", "analytics",
-  "accounts-vendor-payments", "add", "registration", "registration-desk", "patient-registration", "admin", "bed-management",
+  "accounts-vendor-payments", "add", "registration", "registration-desk", "patient-registration", "admin", "branding", "bed-management",
   "billing", "billing-aging", "billing-create-invoice", "billing-record-payment",
   "billing-insurance-claims", "billing-invoices", "billing-mode-breakdown", "billing-module-collections",
   "billing-reconciliation", "billing-overview", "billing-patient-bills", "billing-ip-discharge",
@@ -182,6 +184,7 @@ const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   "accounts-doctor-payouts": "billing",
   reports: "dashboard",
   employees: "employees",
+  branding: "employees",
   settings: "settings",
   "doctors-history": "appointment",
   "doctor-prescription": "prescription",
@@ -732,6 +735,13 @@ function App() {
       window.history.replaceState({}, "", "/dashboard");
     }
   }, []);
+
+  // Global document branding feeds every print/PDF path; falls back to HospAI defaults if none/unavailable.
+  const brandingUserKey = user ? `${user.username || ""}` : "";
+  useEffect(() => {
+    if (brandingUserKey) void loadBranding();
+    else applyBranding(null);
+  }, [brandingUserKey]);
 
   useEffect(() => {
     let active = true;
@@ -1920,6 +1930,8 @@ function App() {
         )}
 
         {page === "employees" && hasPermission("admin.users.read") && <EmployeesPage key={pageKeys[page] || 0} setNotice={setNotice} canWriteEmployees={hasPermission("admin.users.update") || hasPermission("admin.users.create")} />}
+
+        {page === "branding" && hasPermission("admin.use") && <BrandingPage key={pageKeys[page] || 0} setNotice={setNotice} />}
 
         {page === "admin" && hasPermission("admin.users.create") && <AdminPage key={pageKeys[page] || 0} setNotice={setNotice} />}
 

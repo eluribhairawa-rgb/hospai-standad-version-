@@ -1,0 +1,56 @@
+import { apiFetch } from "./api";
+import { setPrintLogoOverride } from "./printBrand";
+
+/** Hospital document branding configured in Admin > Branding & Templates. */
+export type BrandingAsset = { mime: string; width_px: number | null; height_px: number | null; url: string; data_uri?: string };
+export type BrandingConfig = {
+  configured: boolean;
+  hospital_title: string;
+  logo_alignment: "left" | "center" | "right";
+  logo_offset_x_mm: number;
+  logo_offset_y_mm: number;
+  auto_fit_scaling: boolean;
+  footer_text: string;
+  logo: BrandingAsset | null;
+  footer: BrandingAsset | null;
+  logo_box_mm: [number, number];
+  footer_box_mm: [number, number];
+};
+
+let current: BrandingConfig | null = null;
+
+export function getBranding(): BrandingConfig | null {
+  return current && current.configured ? current : null;
+}
+
+export function applyBranding(cfg: BrandingConfig | null): void {
+  current = cfg;
+  setPrintLogoOverride(cfg?.configured ? cfg.logo?.data_uri : null);
+}
+
+/** Fetch the global branding. Never throws: on any failure the built-in HospAI defaults stay in place. */
+export async function loadBranding(): Promise<void> {
+  try {
+    applyBranding(await apiFetch<BrandingConfig>("/api/branding/public", { background: true }));
+  } catch {
+    applyBranding(null);
+  }
+}
+
+export function brandTitle(): string {
+  return getBranding()?.hospital_title || "HospAI";
+}
+
+export function escapeBrandText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** Scale (w,h) into a box keeping the aspect ratio; with auto-fit off keep natural 96-dpi size (capped at the page width). */
+export function fitMm(wPx: number | null, hPx: number | null, boxW: number, boxH: number, autoFit: boolean): [number, number] {
+  if (!wPx || !hPx) return [boxW, boxH];
+  const ratio = wPx / hPx;
+  let w = autoFit ? Math.min(boxW, boxH * ratio) : Math.min((wPx * 25.4) / 96, 180);
+  let h = w / ratio;
+  if (h > boxH) { h = boxH; w = h * ratio; }
+  return [w, h];
+}

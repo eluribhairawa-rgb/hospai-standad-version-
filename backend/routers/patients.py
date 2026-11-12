@@ -629,7 +629,7 @@ def ocr_extract(user: dict = Depends(require_permissions("patients.write")), fil
 
 @router.post("/export/pdf")
 def export_pdf(payload: dict = Body(...), user: dict = Depends(require_permissions("patients.read"))):
-    pdf_bytes = generate_pdf(payload.get("patient_name", ""), payload.get("doc_type", "document"), payload.get("ocr_text", ""), payload.get("date"))
+    pdf_bytes = generate_pdf(payload.get("patient_name", ""), payload.get("doc_type", "document"), payload.get("ocr_text", ""), payload.get("date"), hospital_id=user.get("hospital_id"))
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="document.pdf"'})
 
 
