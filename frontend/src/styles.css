@@ -610,9 +610,10 @@ a.link.danger {
 
 .login-brand .brand-logo-img,
 .login-brand .brand-logo-fallback {
-  width: 190px !important;
-  height: auto !important;
-  max-height: 68px !important;
+  width: auto !important;
+  height: 112px !important;
+  max-height: none !important;
+  object-fit: contain;
 }
 
 .login-title {
@@ -781,7 +782,10 @@ a.link.danger {
   .login-ai-card { padding: 0.6rem 0.8rem; }
   .login-ai-icon { width: 32px; height: 32px; }
   .login-panel { padding: 1rem 1.5rem; }
-  .login-panel-inner { padding-top: 1.5rem; }
+  .login-panel-inner { padding-top: 1.25rem; }
+  .login-brand { margin-bottom: 0.5rem; }
+  .login-brand .brand-logo-img,
+  .login-brand .brand-logo-fallback { height: 88px !important; }
 }
 
 @media (max-height: 540px) {
