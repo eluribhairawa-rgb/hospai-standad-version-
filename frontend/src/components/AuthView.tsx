@@ -152,7 +152,6 @@ export default function AuthView({ onLogin }: Props) {
                 </span>
                 <span className="login-ai-text">
                   <strong>AI Discharge Summaries</strong>
-                  <span className="login-ai-desc">Drafted from the patient's records across every module, for the doctor to review and approve.</span>
                 </span>
               </li>
               <li className="login-ai-card">
@@ -165,7 +164,6 @@ export default function AuthView({ onLogin }: Props) {
                 </span>
                 <span className="login-ai-text">
                   <strong>Lab Report Reading</strong>
-                  <span className="login-ai-desc">Reads results from uploaded lab reports and drafts the interpretation for the pathologist.</span>
                 </span>
               </li>
               <li className="login-ai-card">
@@ -176,7 +174,6 @@ export default function AuthView({ onLogin }: Props) {
                 </span>
                 <span className="login-ai-text">
                   <strong>Patient Reach AI</strong>
-                  <span className="login-ai-desc">Patient outreach, WhatsApp messages and feedback surveys, tracked in one place.</span>
                 </span>
               </li>
               <li className="login-ai-card">
@@ -191,7 +188,6 @@ export default function AuthView({ onLogin }: Props) {
                 </span>
                 <span className="login-ai-text">
                   <strong>Document Scanning</strong>
-                  <span className="login-ai-desc">Reads text from uploaded patient documents, so details don't have to be typed in again.</span>
                 </span>
               </li>
             </ul>
