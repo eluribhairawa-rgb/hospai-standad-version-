@@ -172,7 +172,7 @@ def diag_home_visit_cancel(order_id: int, request: Request, payload: dict = Body
 
 @router.get("/diag/order-history")
 def diag_order_history(service_type: Optional[str] = None, date_from: Optional[str] = None, date_to: Optional[str] = None,
-                       q: Optional[str] = None, status: Optional[str] = None, page: int = 1, page_size: int = 50,
+                       q: Optional[str] = None, status: Optional[str] = None, payment_mode: Optional[str] = None, page: int = 1, page_size: int = 50,
                        db: Session = Depends(get_audited_db), user: dict = Depends(require_permissions("diag.read")),
                        scope: set | None = Depends(patient_scope)):
     service_type = (service_type or "").upper() or None
@@ -181,7 +181,7 @@ def diag_order_history(service_type: Optional[str] = None, date_from: Optional[s
     for label, value in (("date_from", date_from), ("date_to", date_to)):
         if value and not _is_iso_date(value):
             raise HTTPException(status_code=400, detail=f"{label} must be YYYY-MM-DD.")
-    return dst.list_order_history(db, service_type, date_from, date_to, q, status, page, page_size, allowed_patient_ids=scope)
+    return dst.list_order_history(db, service_type, date_from, date_to, q, status, page, page_size, allowed_patient_ids=scope, payment_mode=payment_mode)
 
 
 def _is_iso_date(value: str) -> bool:

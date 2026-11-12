@@ -653,7 +653,7 @@ HISTORY_PAGE_SIZE_MAX = 200
 
 
 def list_order_history(db, service_type=None, date_from=None, date_to=None, search=None, status=None,
-                       page=1, page_size=50, allowed_patient_ids=None):
+                       page=1, page_size=50, allowed_patient_ids=None, payment_mode=None):
     """One row per order with its tests and bill. Counts per service type use the same
     date/search/status filters so the tab badges match what each tab would show.
     allowed_patient_ids: patient scope for doctor-linked logins (None = no restriction);
@@ -672,6 +672,21 @@ def list_order_history(db, service_type=None, date_from=None, date_to=None, sear
     if status:
         clauses.append("o.status = ?")
         params.append(status)
+    if payment_mode:
+        pm = payment_mode.strip().lower()
+        if pm and pm != "all":
+            if pm in ("unpaid", "due"):
+                clauses.append("((i.payment_status IN ('unpaid', 'due')) OR (i.paid_amount IS NULL OR i.paid_amount = 0))")
+            elif pm in ("bank", "bank_transfer", "net_banking"):
+                clauses.append(
+                    "((LOWER(i.payment_mode) IN ('bank', 'bank_transfer', 'net_banking')) "
+                    "OR EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = o.invoice_id AND LOWER(ip.payment_mode) IN ('bank', 'bank_transfer', 'net_banking')))"
+                )
+            else:
+                clauses.append(
+                    "((LOWER(i.payment_mode) = ?) OR EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = o.invoice_id AND LOWER(ip.payment_mode) = ?))"
+                )
+                params.extend([pm, pm])
     if search:
         like = f"%{search.strip().lower()}%"
         clauses.append(
@@ -684,7 +699,7 @@ def list_order_history(db, service_type=None, date_from=None, date_to=None, sear
     if allowed_patient_ids is not None:
         clauses.append("o.patient_id = ANY(?)")
         params.append(sorted(allowed_patient_ids))
-    base_from = "FROM diag_orders o LEFT JOIN patients p ON p.patient_id = o.patient_id"
+    base_from = "FROM diag_orders o LEFT JOIN patients p ON p.patient_id = o.patient_id LEFT JOIN invoices i ON i.id = o.invoice_id"
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
     with get_connection(db) as conn:
@@ -706,10 +721,10 @@ def list_order_history(db, service_type=None, date_from=None, date_to=None, sear
                    COALESCE(NULLIF(TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')), ''), o.walkin_name) AS patient_name,
                    COALESCE(p.phone, o.walkin_mobile) AS patient_phone,
                    i.invoice_no, i.total_amount, i.paid_amount, i.due_amount, i.payment_status,
+                   COALESCE(i.payment_mode, (SELECT ip.payment_mode FROM invoice_payments ip WHERE ip.invoice_id = o.invoice_id AND ip.amount > 0 ORDER BY ip.id DESC LIMIT 1)) AS payment_mode,
                    (SELECT COALESCE(SUM(oi.amount), 0) FROM diag_order_items oi WHERE oi.order_id = o.id AND oi.cancelled_at IS NULL)
                        + COALESCE(o.home_visit_fee, 0) AS order_amount
             {base_from}
-            LEFT JOIN invoices i ON i.id = o.invoice_id
             {row_where}
             ORDER BY o.created_at DESC, o.id DESC
             LIMIT ? OFFSET ?

@@ -3,7 +3,7 @@
 import { forwardRef, useCallback, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FiSearch } from "react-icons/fi";
-import { Button, Input, Modal } from "../components/ui";
+import { Button, Input, Modal, Select } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
 import { openReportForItem } from "../lib/diagReports";
@@ -26,6 +26,7 @@ type HistoryRow = {
   id: number; order_no: string; created_at: string; service_type: ServiceType; status: string; patient_id?: string | null;
   patient_name?: string; patient_phone?: string; invoice_no?: string | null; tests: string; total: number;
   paid_amount?: number | null; due_amount?: number | null; payment_status?: string | null; invoice_id?: number | null;
+  payment_mode?: string | null;
   visit_status?: string | null; outsourced_count: number; items: LabOrderItem[];
 };
 type HistoryResponse = { orders: HistoryRow[]; counts: Record<TypeTab, number>; page: number; page_size: number; total: number };
@@ -58,6 +59,7 @@ const LabOrderHistoryPage = forwardRef<HTMLDivElement, Props>(function LabOrderH
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [paymentMode, setPaymentMode] = useState("ALL");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,13 +70,14 @@ const LabOrderHistoryPage = forwardRef<HTMLDivElement, Props>(function LabOrderH
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { if (preset) { setTab("ALL"); setSearch(preset.query); setDateFrom(""); setDateTo(""); } }, [preset]);
+  useEffect(() => { if (preset) { setTab("ALL"); setSearch(preset.query); setDateFrom(""); setDateTo(""); setPaymentMode("ALL"); } }, [preset]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
       if (tab !== "ALL") params.set("service_type", tab);
+      if (paymentMode && paymentMode !== "ALL") params.set("payment_mode", paymentMode);
       if (search.trim()) params.set("q", search.trim());
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
@@ -84,13 +87,13 @@ const LabOrderHistoryPage = forwardRef<HTMLDivElement, Props>(function LabOrderH
     } finally {
       setLoading(false);
     }
-  }, [tab, search, dateFrom, dateTo, page, setNotice]);
+  }, [tab, search, dateFrom, dateTo, paymentMode, page, setNotice]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 250);
     return () => clearTimeout(t);
   }, [load, refreshKey]);
-  useEffect(() => { setPage(1); }, [tab, search, dateFrom, dateTo]);
+  useEffect(() => { setPage(1); }, [tab, search, dateFrom, dateTo, paymentMode]);
 
   const openDetail = async (id: number) => {
     try {
@@ -145,6 +148,20 @@ const LabOrderHistoryPage = forwardRef<HTMLDivElement, Props>(function LabOrderH
           <Input type="date" aria-label="From date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} />
           <span className="muted">to</span>
           <Input type="date" aria-label="To date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} />
+          <Select
+            aria-label="Filter by payment mode"
+            value={paymentMode}
+            onChange={(e) => setPaymentMode(e.target.value)}
+            style={{ width: "auto", minWidth: 160 }}
+          >
+            <option value="ALL">All Payment Modes</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="upi">Online - UPI</option>
+            <option value="bank">Bank Transfer</option>
+            <option value="insurance">Insurance</option>
+            <option value="unpaid">Unpaid / Due</option>
+          </Select>
           <div className="lab-ob-search-box">
             <FiSearch aria-hidden />
             <Input className="search-input-with-icon" placeholder="Search by UHID, Patient Name or Invoice No." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -170,7 +187,14 @@ const LabOrderHistoryPage = forwardRef<HTMLDivElement, Props>(function LabOrderH
                   <td>{r.patient_id || "-"}</td>
                   <td style={{ maxWidth: 260 }}>{r.tests || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{money(r.total)}{(r.due_amount || 0) > 0 && r.payment_status !== "paid" && <div className="muted" style={{ fontSize: 12 }}>due {money(r.due_amount)}</div>}</td>
-                  <td><span className={`diag-badge ${st.cls}`}>{st.text}</span></td>
+                  <td>
+                    <span className={`diag-badge ${st.cls}`}>{st.text}</span>
+                    {r.payment_mode && (
+                      <div className="muted" style={{ fontSize: 11, marginTop: 2, textTransform: "capitalize", fontWeight: 500 }}>
+                        {r.payment_mode === "upi" ? "UPI" : r.payment_mode}
+                      </div>
+                    )}
+                  </td>
                   <td><Button size="sm" variant="secondary" onClick={() => void openDetail(r.id)}>View</Button></td>
                 </tr>
               );
