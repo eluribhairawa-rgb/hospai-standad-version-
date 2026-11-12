@@ -8028,15 +8028,18 @@ button.hosp-rev-due-row:hover .hosp-pay-pill {
 .hosp-revenue-pop-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 .readmit-results-table .table-head,
 .readmit-results-table .table-row {
-  grid-template-columns: minmax(140px, 1.2fr) minmax(120px, 1fr) minmax(48px, 0.35fr) minmax(64px, 0.5fr) minmax(100px, 0.8fr) minmax(150px, 1fr) minmax(70px, 0.55fr) minmax(110px, 0.9fr) minmax(112px, 0.7fr);
-  min-width: 980px;
+  grid-template-columns: minmax(130px, 1.1fr) minmax(138px, 1fr) minmax(48px, 0.35fr) minmax(64px, 0.5fr) minmax(100px, 0.8fr) minmax(150px, 1fr) minmax(140px, 1fr) minmax(105px, 0.9fr) minmax(160px, 0.8fr);
+  min-width: 1120px;
   align-items: center;
 }
 .readmit-results-table .table-row > span,
 .readmit-results-table .table-head > span {
   min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.readmit-results-table .table-row > span.row-actions { overflow: visible; }
 .readmit-results-table { overflow-x: auto; }
 .readmit-results-table .table-head > span:last-child {
   position: sticky;
@@ -8053,6 +8056,13 @@ button.hosp-rev-due-row:hover .hosp-pay-pill {
   box-shadow: -6px 0 8px -6px rgba(15, 23, 42, 0.18);
   align-items: center;
   justify-content: flex-start;
+}
+/* Tablet widths: keep every column (including the Follow-up button) and scroll sideways,
+   instead of the generic rule that hides columns 4+ on all tables. */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .readmit-results-table .table-head > span,
+  .readmit-results-table .table-row > span { display: block; }
+  .readmit-results-table .table-row > span.row-actions { display: flex; }
 }
 
 @media (max-width: 1100px) {

@@ -825,7 +825,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
             <TableCell>Gender</TableCell>
             <TableCell>Phone</TableCell>
             <TableCell>Queue Status</TableCell>
-            <TableCell>Appt. Time / Last Visit</TableCell>
+            <TableCell>Appt. / Last Visit</TableCell>
             <TableCell>Doctor</TableCell>
             <TableCell>Actions</TableCell>
           </TableHead>
