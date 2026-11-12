@@ -15,6 +15,7 @@ const ACCEPT = ".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml";
 export default function BrandingPage({ setNotice }: Props) {
   const [cfg, setCfg] = useState<BrandingConfig | null>(null);
   const [title, setTitle] = useState("");
+  const [titleFontSize, setTitleFontSize] = useState("");
   const [footerText, setFooterText] = useState("");
   const [alignment, setAlignment] = useState<Alignment>("left");
   const [offsetX, setOffsetX] = useState("0");
@@ -29,6 +30,7 @@ export default function BrandingPage({ setNotice }: Props) {
   const hydrate = useCallback((data: BrandingConfig) => {
     setCfg(data);
     setTitle(data.hospital_title || "");
+    setTitleFontSize(data.title_font_size_pt != null ? String(data.title_font_size_pt) : "");
     setFooterText(data.footer_text || "");
     setAlignment(data.logo_alignment || "left");
     setOffsetX(String(data.logo_offset_x_mm ?? 0));
@@ -82,10 +84,12 @@ export default function BrandingPage({ setNotice }: Props) {
     setBusy("save");
     setError("");
     try {
+      const customPt = titleFontSize.trim() ? Number(titleFontSize) : null;
       const data = await apiFetch<BrandingConfig>("/api/branding", {
         method: "PUT",
         body: JSON.stringify({
           hospital_title: title,
+          title_font_size_pt: customPt != null && !isNaN(customPt) ? customPt : null,
           footer_text: footerText,
           logo_alignment: alignment,
           logo_offset_x_mm: Number(offsetX) || 0,
@@ -112,7 +116,7 @@ export default function BrandingPage({ setNotice }: Props) {
       await apiFetch("/api/branding/footer", { method: "DELETE" });
       const data = await apiFetch<BrandingConfig>("/api/branding", {
         method: "PUT",
-        body: JSON.stringify({ hospital_title: "", footer_text: "", logo_alignment: "left", logo_offset_x_mm: 0, logo_offset_y_mm: 0, auto_fit_scaling: true }),
+        body: JSON.stringify({ hospital_title: "", title_font_size_pt: null, footer_text: "", logo_alignment: "left", logo_offset_x_mm: 0, logo_offset_y_mm: 0, auto_fit_scaling: true }),
       });
       hydrate(data);
       applyBranding(null);
@@ -143,7 +147,10 @@ export default function BrandingPage({ setNotice }: Props) {
   const trimmedTitle = title.trim();
   const titleLines = trimmedTitle.replace(/\\n/g, "\n").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const maxLineLen = titleLines.length ? Math.max(...titleLines.map((l) => l.length)) : 0;
-  const titleFontSizePt = maxLineLen <= 20 ? 18 : maxLineLen <= 32 ? 15.5 : maxLineLen <= 48 ? 13.5 : maxLineLen <= 65 ? 11.5 : 10;
+  const customPt = titleFontSize.trim() ? Number(titleFontSize) : null;
+  const titleFontSizePt = (customPt && !isNaN(customPt) && customPt >= 6 && customPt <= 36)
+    ? customPt
+    : (maxLineLen <= 20 ? 18 : maxLineLen <= 32 ? 15.5 : maxLineLen <= 48 ? 13.5 : maxLineLen <= 65 ? 11.5 : 10);
   const titleEl = titleLines.length ? (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, textAlign: "center" }}>
       {titleLines.map((line, idx) => (
@@ -201,6 +208,52 @@ export default function BrandingPage({ setNotice }: Props) {
             placeholder={"e.g. Sunrise Multispeciality Hospital\nShivaji Nagar, Siddipet"}
             style={{ resize: "vertical", minHeight: 64, fontFamily: "inherit" }}
           />
+
+          <div style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <label htmlFor="branding-font-size" className="muted" style={{ fontSize: 12, fontWeight: 600 }}>
+                Font size (pt)
+              </label>
+              <span className="muted" style={{ fontSize: 11 }}>
+                {titleFontSize.trim() ? `${titleFontSize} pt (custom)` : "Auto (scales dynamically)"}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ width: 100 }}>
+                <Input
+                  id="branding-font-size"
+                  type="number"
+                  min={8}
+                  max={36}
+                  step={0.5}
+                  value={titleFontSize}
+                  onChange={(e) => setTitleFontSize(e.target.value)}
+                  placeholder="Auto"
+                />
+              </div>
+              <div role="group" aria-label="Font size presets" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={!titleFontSize.trim() ? "primary" : "secondary"}
+                  onClick={() => setTitleFontSize("")}
+                >
+                  Auto
+                </Button>
+                {[10, 11, 12, 13.5, 15, 16.5, 18, 20].map((pt) => (
+                  <Button
+                    key={pt}
+                    type="button"
+                    size="sm"
+                    variant={titleFontSize.trim() === String(pt) ? "primary" : "secondary"}
+                    onClick={() => setTitleFontSize(String(pt))}
+                  >
+                    {pt} pt
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
         </section>
 
         <section style={section}>

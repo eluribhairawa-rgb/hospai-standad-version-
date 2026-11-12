@@ -99,7 +99,10 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
     if title:
         raw_lines = [l.strip() for l in title.replace("\\n", "\n").splitlines() if l.strip()]
         max_line_len = max(len(l) for l in raw_lines) if raw_lines else 0
-        font_size = 18 if max_line_len <= 20 else (15.5 if max_line_len <= 32 else (13.5 if max_line_len <= 48 else (11.5 if max_line_len <= 65 else 9.5)))
+        custom_font_size = float(b.get("title_font_size_pt") or 0) if b else 0
+        font_size = custom_font_size if custom_font_size >= 6.0 else (
+            18 if max_line_len <= 20 else (15.5 if max_line_len <= 32 else (13.5 if max_line_len <= 48 else (11.5 if max_line_len <= 65 else 9.5)))
+        )
         pdf.set_text_color(0, 0, 0)
         align = (b.get("logo_alignment") if b else None) or "left"
 

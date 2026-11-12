@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS document_branding (
     hospital_id      INTEGER PRIMARY KEY,
     hospital_title   VARCHAR(200),
+    title_font_size_pt NUMERIC(4,1),
     logo_path        VARCHAR(500),
     logo_mime        VARCHAR(50),
     logo_width_px    INTEGER,

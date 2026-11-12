@@ -329,7 +329,10 @@ export async function generateClientPdf(
             const titleText = (b.hospital_title || "").trim();
             const lines = titleText.replace(/\\n/g, "\n").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
             const maxLineLen = lines.length ? Math.max(...lines.map(l => l.length)) : 0;
-            const fontPx = maxLineLen <= 20 ? 24 : maxLineLen <= 32 ? 20 : maxLineLen <= 48 ? 17 : maxLineLen <= 65 ? 15 : 13;
+            const customPt = b.title_font_size_pt ? Number(b.title_font_size_pt) : null;
+            const fontPx = (customPt && customPt >= 6 && customPt <= 36)
+              ? Math.round(customPt * 1.333)
+              : (maxLineLen <= 20 ? 24 : maxLineLen <= 32 ? 20 : maxLineLen <= 48 ? 17 : maxLineLen <= 65 ? 15 : 13);
             const titleContent = lines.length > 1
               ? lines.map((l, idx) => `<div style="font-size: ${idx === 0 ? fontPx : Math.max(fontPx - 4, 12)}px; font-weight: ${idx === 0 ? 800 : 600}; color: ${idx === 0 ? "#000" : "#334155"}; text-transform: uppercase; line-height: 1.25;">${escapeBrandText(l)}</div>`).join("")
               : `<div style="font-size: ${fontPx}px; font-weight: 800; color: #000; text-transform: uppercase; line-height: 1.25;">${escapeBrandText(titleText)}</div>`;

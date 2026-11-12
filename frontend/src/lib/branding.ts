@@ -7,6 +7,7 @@ export type BrandingAsset = { mime: string; width_px: number | null; height_px: 
 export type BrandingConfig = {
   configured: boolean;
   hospital_title: string;
+  title_font_size_pt?: number | null;
   logo_alignment: "left" | "center" | "right";
   logo_offset_x_mm: number;
   logo_offset_y_mm: number;

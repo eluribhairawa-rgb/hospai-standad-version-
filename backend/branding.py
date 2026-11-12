@@ -214,6 +214,11 @@ def get_branding(hospital_id=None):
             result["footer_file"] = abs_path(row.get("footer_path"))
             for k in ("logo_offset_x_mm", "logo_offset_y_mm"):
                 result[k] = float(result.get(k) or 0)
+            if result.get("title_font_size_pt") is not None:
+                try:
+                    result["title_font_size_pt"] = float(result["title_font_size_pt"])
+                except (ValueError, TypeError):
+                    result["title_font_size_pt"] = None
     except Exception:
         logger.exception("[branding] lookup failed; using defaults")
         result = None

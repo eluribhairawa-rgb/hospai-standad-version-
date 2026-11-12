@@ -34,6 +34,7 @@ def _serialize(row, with_data=False):
     return {
         "configured": svc._is_custom(row),
         "hospital_title": row.get("hospital_title") or "",
+        "title_font_size_pt": float(row.get("title_font_size_pt")) if row.get("title_font_size_pt") is not None else None,
         "logo_alignment": row.get("logo_alignment") or "left",
         "logo_offset_x_mm": float(row.get("logo_offset_x_mm") or 0),
         "logo_offset_y_mm": float(row.get("logo_offset_y_mm") or 0),
@@ -85,13 +86,22 @@ def update_branding_settings(request: Request, payload: dict = Body(...), db: Se
     lim = svc.OFFSET_LIMIT_MM
     if not (-lim <= ox <= lim and -lim <= oy <= lim):
         raise HTTPException(400, f"Offsets must be between -{lim:g} and {lim:g} mm.")
+    raw_font_size = payload.get("title_font_size_pt")
+    font_size_pt = None
+    if raw_font_size not in (None, "", "auto", 0, "0"):
+        try:
+            font_size_pt = round(float(raw_font_size), 1)
+            if not (6.0 <= font_size_pt <= 36.0):
+                raise HTTPException(400, "Title font size must be between 6 and 36 pt.")
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Title font size must be a valid number.")
     # No control characters in text that is drawn onto documents (preserves \r and \n).
     title, footer_text = (re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]", " ", v) for v in (title, footer_text))
     _ensure_row(db, hospital_id, user.get("username"))
-    db.execute(text("""UPDATE document_branding SET hospital_title = :t, footer_text = :f, logo_alignment = :a,
+    db.execute(text("""UPDATE document_branding SET hospital_title = :t, title_font_size_pt = :fs, footer_text = :f, logo_alignment = :a,
                        logo_offset_x_mm = :ox, logo_offset_y_mm = :oy, auto_fit_scaling = :af,
                        version = version + 1, updated_by = :u, updated_at = NOW() WHERE hospital_id = :h"""),
-               {"t": title or None, "f": footer_text or None, "a": align, "ox": ox, "oy": oy,
+               {"t": title or None, "fs": font_size_pt, "f": footer_text or None, "a": align, "ox": ox, "oy": oy,
                 "af": bool(payload.get("auto_fit_scaling", True)), "u": user.get("username"), "h": hospital_id})
     log_audit_event(db, user, client_ip(request), "update", "branding", str(hospital_id), {"title": title, "alignment": align})
     db.commit()

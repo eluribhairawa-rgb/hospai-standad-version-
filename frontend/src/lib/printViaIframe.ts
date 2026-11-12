@@ -100,7 +100,10 @@ function buildBrandRowHtml(): string {
   const titleText = (b.hospital_title || "").trim();
   const lines = titleText.replace(/\\n/g, "\n").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const maxLineLen = lines.length ? Math.max(...lines.map((l) => l.length)) : 0;
-  const fontSizePt = maxLineLen <= 20 ? 18 : maxLineLen <= 32 ? 15.5 : maxLineLen <= 48 ? 13.5 : maxLineLen <= 65 ? 11.5 : 10;
+  const customPt = b.title_font_size_pt ? Number(b.title_font_size_pt) : null;
+  const fontSizePt = (customPt && customPt >= 6 && customPt <= 36)
+    ? customPt
+    : (maxLineLen <= 20 ? 18 : maxLineLen <= 32 ? 15.5 : maxLineLen <= 48 ? 13.5 : maxLineLen <= 65 ? 11.5 : 10);
   const titleContent = lines.length > 1
     ? lines.map((l, idx) => `<div style="font: ${idx === 0 ? 800 : 600} ${idx === 0 ? fontSizePt : Math.max(fontSizePt - 3, 9.5)}pt Arial, Helvetica, sans-serif; color: ${idx === 0 ? "#000" : "#334155"}; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px;">${escapeBrandText(l)}</div>`).join("")
     : `<div style="font: 800 ${fontSizePt}pt Arial, Helvetica, sans-serif; color: #000; text-transform: uppercase; line-height: 1.25; letter-spacing: -0.2px;">${escapeBrandText(titleText)}</div>`;
