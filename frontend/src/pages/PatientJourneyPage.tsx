@@ -4,6 +4,7 @@ import { apiFetch, reportError } from "../lib/api";
 import { formatPhone, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import { generatePDFBlob, downloadPDF, printPDF, patientFilename } from "../lib/exportService";
 import type { StandardPdfPayload } from "../lib/exportService";
+import { Button, Modal } from "../components/ui";
 import type { Notice, Patient } from "../types";
 
 type Props = {
@@ -32,6 +33,8 @@ type JourneyEvent = {
   subtitle: string;
   charge: number | null;
   received: number | null;
+  gst?: number;
+  subtotal?: number;
   items?: { name: string; quantity: number; unit_price: number; amount: number }[];
   report_id?: number;
   invoice_no?: string | null;
@@ -65,6 +68,16 @@ type JourneyBill = {
   live: boolean; as_of?: string | null; since?: string | null; days_stayed: number; hours_stayed?: number | null; rate_per_day: number;
   bed_total: number; pharmacy_count: number; pharmacy_total: number; diag_count: number; diag_total: number; grand_total: number | null;
 };
+
+type ModuleHistory = { title: string; sections: { title: string; columns: string[]; rows: (string | number)[][]; note?: string | null }[] };
+type HistoryModule = "bills" | "pharmacy" | "diagnostics" | "discharge";
+const HISTORY_FULL_PAGE: Record<HistoryModule, { page: string; storageKey: string; label: string }> = {
+  bills: { page: "billing-patient-bills", storageKey: "selected_billing_patient", label: "Bills & Payment" },
+  pharmacy: { page: "pharmacy-op-dispense", storageKey: "selected_pharmacy_patient", label: "Pharmacy" },
+  diagnostics: { page: "diag-orders-billing", storageKey: "selected_diag_patient", label: "Diagnostics" },
+  discharge: { page: "billing-ip-discharge", storageKey: "selected_discharge_admission", label: "IP Discharge Billing" },
+};
+const HISTORY_MONEY = /^(total|paid|due|amount|unit price|used|refunded|rate)/i;
 
 type Journey = {
   patient: { patient_id: string; name: string; age: number | null; gender: string | null; phone?: string | null; phone_country_code?: string | null; address?: string | null; email?: string | null };
@@ -124,6 +137,24 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
   const [expandAll, setExpandAll] = useState(false);
   const [eventFilter, setEventFilter] = useState("all");
+  // Module history shown in this page (Bills & Payment, Pharmacy, Diagnostics, IP Discharge) -- no navigation away.
+  const [historyModule, setHistoryModule] = useState<HistoryModule | null>(null);
+  const [historyData, setHistoryData] = useState<ModuleHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const openHistory = async (module: HistoryModule) => {
+    if (!journey?.patient) return;
+    setHistoryModule(module);
+    setHistoryData(null);
+    setHistoryLoading(true);
+    try {
+      setHistoryData(await apiFetch<ModuleHistory>(`/api/patients/${encodeURIComponent(journey.patient.patient_id)}/module-history/${module}`));
+    } catch (error) {
+      setHistoryModule(null);
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to load this history.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
   const [deptFilter, setDeptFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState<"oldest" | "newest">("oldest");
   const [exporting, setExporting] = useState<"" | "pdf" | "print">("");
@@ -270,13 +301,18 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
       } else if ((e.type === "pharmacy_issued" || e.type === "lab_bill") && e.items?.length) {
         const isLab = e.type === "lab_bill";
         const total = e.items.reduce((sum, it) => sum + it.amount, 0);
+        const rows: [string, string, string, string][] = e.items.map((it) => (isLab ? [it.name, formatCurrency(it.amount), "", ""] : [it.name, `${it.quantity}`, formatCurrency(it.unit_price), formatCurrency(it.amount)]));
+        if (!isLab && e.gst && e.gst > 0) {
+          rows.push(["Subtotal", "", "", formatCurrency(e.subtotal || total)]);
+          rows.push(["GST / Tax", "", "", `+${formatCurrency(e.gst)}`]);
+          rows.push(["Total (incl. GST)", "", "", formatCurrency(e.charge || (total + e.gst))]);
+        } else {
+          rows.push(isLab ? ["Total", formatCurrency(total), "", ""] : ["Total", "", "", formatCurrency(total)]);
+        }
         detailSections.push({
           title: `${isLab ? "Lab & Diagnostics Bill" : "Pharmacy Bill"}${e.invoice_no ? ` · ${e.invoice_no}` : ""} · ${e.date}`,
           headers: isLab ? ["Test / Service", "Amount"] : ["Medicine", "Quantity", "Unit price", "Amount"],
-          rows: [
-            ...e.items.map((it) => (isLab ? [it.name, formatCurrency(it.amount)] : [it.name, `${it.quantity}`, formatCurrency(it.unit_price), formatCurrency(it.amount)])),
-            isLab ? ["Total", formatCurrency(total)] : ["Total", "", "", formatCurrency(total)],
-          ],
+          rows: isLab ? rows.map(([name, amt]) => [name, amt]) : rows,
         });
       }
     });
@@ -421,16 +457,13 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
           <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>Registration, care, services and payments — in time order</p>
         </div>
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-          {journey && journey.patient && onNavigate && (
+          {journey && journey.patient && (
             <>
               <button
                 type="button"
                 className="pharmacy-btn-outline"
                 style={{ height: "38px", padding: "0 14px", fontWeight: 600 }}
-                onClick={() => {
-                  localStorage.setItem("selected_billing_patient", journey.patient.patient_id);
-                  onNavigate("billing-patient-bills");
-                }}
+                onClick={() => void openHistory("bills")}
               >
                 💳 Bills &amp; Payment
               </button>
@@ -438,10 +471,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                 type="button"
                 className="pharmacy-btn-outline"
                 style={{ height: "38px", padding: "0 14px", fontWeight: 600 }}
-                onClick={() => {
-                  localStorage.setItem("selected_pharmacy_patient", journey.patient.patient_id);
-                  onNavigate("pharmacy-op-dispense");
-                }}
+                onClick={() => void openHistory("pharmacy")}
               >
                 💊 Pharmacy
               </button>
@@ -449,10 +479,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                 type="button"
                 className="pharmacy-btn-outline"
                 style={{ height: "38px", padding: "0 14px", fontWeight: 600 }}
-                onClick={() => {
-                  localStorage.setItem("selected_diag_patient", journey.patient.patient_id);
-                  onNavigate("diag-orders-billing");
-                }}
+                onClick={() => void openHistory("diagnostics")}
               >
                 🔬 Diagnostics
               </button>
@@ -460,10 +487,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                 type="button"
                 className="pharmacy-btn-outline"
                 style={{ height: "38px", padding: "0 14px", fontWeight: 600 }}
-                onClick={() => {
-                  localStorage.setItem("selected_discharge_admission", journey.patient.patient_id);
-                  onNavigate("billing-ip-discharge");
-                }}
+                onClick={() => void openHistory("discharge")}
               >
                 🛏️ IP Discharge
               </button>
@@ -734,10 +758,27 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                                   <span>{formatCurrency(it.amount)}</span>
                                 </div>
                               ))}
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, color: "#0f172a", borderTop: "1px solid #e2e8f0", marginTop: "4px", paddingTop: "4px" }}>
-                                <span>Total</span>
-                                <span>{formatCurrency(e.items.reduce((sum, it) => sum + it.amount, 0))}</span>
-                              </div>
+                              {e.type === "pharmacy_issued" && e.gst && e.gst > 0 ? (
+                                <>
+                                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "#64748b", borderTop: "1px solid #e2e8f0", marginTop: "4px", paddingTop: "4px" }}>
+                                    <span>Subtotal</span>
+                                    <span>{formatCurrency(e.subtotal || e.items.reduce((sum, it) => sum + it.amount, 0))}</span>
+                                  </div>
+                                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "#64748b" }}>
+                                    <span>GST / Tax</span>
+                                    <span>+{formatCurrency(e.gst)}</span>
+                                  </div>
+                                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, color: "#0f172a" }}>
+                                    <span>Total (incl. GST)</span>
+                                    <span>{formatCurrency(e.charge || (e.items.reduce((sum, it) => sum + it.amount, 0) + e.gst))}</span>
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, color: "#0f172a", borderTop: "1px solid #e2e8f0", marginTop: "4px", paddingTop: "4px" }}>
+                                  <span>Total</span>
+                                  <span>{formatCurrency(e.items.reduce((sum, it) => sum + it.amount, 0))}</span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -870,6 +911,64 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
           </div>
         </div>
       )}
+      <Modal
+        open={!!historyModule}
+        onClose={() => setHistoryModule(null)}
+        title={historyData?.title || (historyModule ? `${HISTORY_FULL_PAGE[historyModule].label} history` : "")}
+        description={journey?.patient ? `${journey.patient.name} · ${journey.patient.patient_id}` : undefined}
+        className="analysis-drill-modal"
+      >
+        {historyLoading && <p style={{ color: "#64748b", fontSize: 13 }}>Loading history…</p>}
+        {historyData && historyData.sections.map((sec) => (
+          <div key={sec.title} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#334155", textTransform: "uppercase", margin: "0 0 6px" }}>{sec.title} ({sec.rows.length})</div>
+            {sec.rows.length === 0 ? (
+              <p style={{ color: "#94a3b8", fontSize: 13, margin: 0 }}>No records for this patient.</p>
+            ) : (
+              <div style={{ overflow: "auto", maxHeight: "34vh", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ background: "#f1f5f9" }}>
+                      {sec.columns.map((c) => (
+                        <th key={c} style={{ padding: "7px 10px", position: "sticky", top: 0, background: "#f1f5f9", whiteSpace: "nowrap", textAlign: HISTORY_MONEY.test(c) ? "right" : "left" }}>{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sec.rows.map((row, ri) => (
+                      <tr key={ri} style={{ borderTop: "1px solid #f1f5f9" }}>
+                        {row.map((cell, ci) => {
+                          const money = HISTORY_MONEY.test(sec.columns[ci] || "") && typeof cell === "number";
+                          return (
+                            <td key={ci} style={{ padding: "6px 10px", textAlign: HISTORY_MONEY.test(sec.columns[ci] || "") ? "right" : "left", fontWeight: money ? 700 : 400 }}>
+                              {money ? formatCurrency(cell as number) : (cell === "" ? "—" : cell)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ))}
+        {historyModule && onNavigate && journey?.patient && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                const target = HISTORY_FULL_PAGE[historyModule];
+                localStorage.setItem(target.storageKey, journey.patient.patient_id);
+                setHistoryModule(null);
+                onNavigate(target.page);
+              }}
+            >
+              Open {HISTORY_FULL_PAGE[historyModule].label} →
+            </Button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

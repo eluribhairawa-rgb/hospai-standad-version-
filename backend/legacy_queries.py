@@ -1250,7 +1250,7 @@ def add_patient_vitals(db, patient_id, data):
         except ValueError: return None
 
     pulse = parse_int(data.get("pulse"))
-    temperature = parse_float(data.get("temperature"))
+    temperature = normalize_temperature_c(data.get("temperature"))
     weight = parse_float(data.get("weight"))
     height = parse_float(data.get("height"))
     spo2 = parse_float(data.get("spo2"))
@@ -1296,6 +1296,25 @@ def add_patient_vitals(db, patient_id, data):
         return None
 
 
+def normalize_temperature_c(value, strict=False):
+    """Body temperature in degrees Celsius. A reading of 50 or more can only be Fahrenheit (older forms, OCR) and is
+    converted. Out-of-range values (not 30-45 C) raise ValueError when strict, else are dropped."""
+    if value in ("", None, "null"):
+        return None
+    try:
+        t = float(str(value).replace("°", "").replace("C", "").replace("F", "").strip())
+    except (TypeError, ValueError):
+        return None
+    if t >= 50:
+        t = (t - 32.0) * 5.0 / 9.0
+    t = round(t, 1)
+    if not 30.0 <= t <= 45.0:
+        if strict:
+            raise ValueError("Temperature must be between 30 and 45 °C.")
+        return None
+    return t
+
+
 def record_vitals(db, patient_id, data, username, encounter_id=None, admission_id=None):
     """Explicit nurse/triage charting action: unlike add_patient_vitals (an
     incidental side-effect of editing patient demographics, which
@@ -1331,7 +1350,7 @@ def record_vitals(db, patient_id, data, username, encounter_id=None, admission_i
                 patient_id,
                 str(data.get("bp") or "").strip() or None,
                 parse_int(data.get("pulse")),
-                parse_float(data.get("temperature")),
+                normalize_temperature_c(data.get("temperature"), strict=True),
                 parse_float(data.get("spo2")),
                 parse_float(data.get("weight")),
                 parse_float(data.get("height")),
@@ -6936,13 +6955,13 @@ def create_pharmacy_dispense(db, data, username):
                 claim_id = cursor.lastrowid
             else:
                 if is_external:
-                    ref_src = customer_name
+                    ref_src = customer_name or "Walk-in customer"
                 else:
                     ref_src = "Emergency" if "EMERGENCY" in billing_type.upper() else None
 
                 notes_val = remarks
                 if is_external:
-                    ext_parts = ["External Sale", f"Customer: {customer_name}"]
+                    ext_parts = ["External Sale"] + ([f"Customer: {customer_name}"] if customer_name else [])
                     if customer_phone:
                         ext_parts.append(f"Mobile: {customer_phone}")
                     if customer_age:
@@ -7065,8 +7084,8 @@ def create_pharmacy_dispense(db, data, username):
             )
 
         patient_name = ""
-        if is_external and customer_name:
-            patient_name = customer_name
+        if is_external:
+            patient_name = customer_name or "Walk-in customer"
         elif patient_id:
             cursor.execute("SELECT name, last_name, phone, age FROM patients WHERE patient_id = ?", (patient_id,))
             p_row = cursor.fetchone()
@@ -7511,6 +7530,9 @@ def list_pharmacy_sales(db, medicine_name=None, invoice_id=None, patient_id=None
                    inv.invoice_no,
                    inv.payment_status,
                    inv.due_amount,
+                   inv.tax AS gst_amount,
+                   inv.subtotal,
+                   inv.total_amount AS invoice_total,
                    COALESCE((
                        SELECT SUM(pr.quantity) FROM pharmacy_returns pr
                        WHERE pr.original_sale_id = ps.id AND pr.status != 'rejected'
@@ -14142,7 +14164,7 @@ def get_admission_clinical_history(db, identifier, hospital_id=None):
                 bp_str = f"BP: {v.get('bp_systolic')}/{v.get('bp_diastolic')} mmHg" if v.get("bp_systolic") else (f"BP: {v.get('blood_pressure')}" if v.get("blood_pressure") else "")
                 pulse_str = f"Pulse: {v.get('heart_rate') or v.get('pulse')} bpm" if (v.get('heart_rate') or v.get('pulse')) else ""
                 spo2_str = f"SpO2: {v.get('spo2')}%" if v.get('spo2') else ""
-                temp_str = f"Temp: {v.get('temperature')}°F" if v.get('temperature') else ""
+                temp_str = f"Temp: {v.get('temperature')}°C" if v.get('temperature') else ""
                 v_parts = ", ".join(filter(None, [bp_str, pulse_str, temp_str, spo2_str]))
                 treatment_lines.append(f"   [{v_time_str}] {v_parts or 'Vitals stable'}")
         else:

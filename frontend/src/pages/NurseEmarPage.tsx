@@ -406,7 +406,7 @@ export default function NurseEmarPage({ setNotice }: Props) {
                   <div className="diag-form-grid">
                     <div><Label>BP</Label><Input value={vitalsForm.bp} inputMode="numeric" onChange={(e) => setVitalsForm({ ...vitalsForm, bp: filterBP(e.target.value) })} placeholder="120/80" /></div>
                     <div><Label>Pulse</Label><Input value={vitalsForm.pulse} inputMode="numeric" onChange={(e) => setVitalsForm({ ...vitalsForm, pulse: filterInteger(e.target.value) })} placeholder="bpm" /></div>
-                    <div><Label>Temp (F)</Label><Input value={vitalsForm.temperature} inputMode="decimal" onChange={(e) => setVitalsForm({ ...vitalsForm, temperature: filterDecimal(e.target.value) })} placeholder="98.6" /></div>
+                    <div><Label>Temp (°C)</Label><Input value={vitalsForm.temperature} inputMode="decimal" onChange={(e) => setVitalsForm({ ...vitalsForm, temperature: filterDecimal(e.target.value) })} placeholder="37.0" /></div>
                     <div><Label>SpO2 (%)</Label><Input value={vitalsForm.spo2} inputMode="decimal" onChange={(e) => setVitalsForm({ ...vitalsForm, spo2: filterDecimal(e.target.value) })} placeholder="98" /></div>
                     <div><Label>Resp. Rate</Label><Input value={vitalsForm.respiratory_rate} inputMode="numeric" onChange={(e) => setVitalsForm({ ...vitalsForm, respiratory_rate: filterInteger(e.target.value) })} placeholder="/min" /></div>
                     <div><Label>Blood Glucose</Label><Input value={vitalsForm.blood_sugar} inputMode="decimal" onChange={(e) => setVitalsForm({ ...vitalsForm, blood_sugar: filterDecimal(e.target.value) })} placeholder="mg/dL" /></div>

@@ -2061,7 +2061,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             {[
               { label: "BP", value: vitalsBp, set: (v: string) => setVitalsBp(v.replace(/[^0-9/]/g, "").slice(0, 7)), placeholder: "120/80" },
               { label: "Pulse (bpm)", value: vitalsPulse, set: (v: string) => setVitalsPulse(v.replace(/\D/g, "").slice(0, 3)), placeholder: "72" },
-              { label: "Temp (°F)", value: vitalsTemp, set: (v: string) => setVitalsTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "98.6" },
+              { label: "Temp (°C)", value: vitalsTemp, set: (v: string) => setVitalsTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "37.0" },
               { label: "SpO2 (%)", value: vitalsSpo2, set: (v: string) => setVitalsSpo2(v.replace(/\D/g, "").slice(0, 3)), placeholder: "98" },
               { label: "Resp. Rate", value: vitalsRespRate, set: (v: string) => setVitalsRespRate(v.replace(/\D/g, "").slice(0, 3)), placeholder: "/min" },
               { label: "Height (cm)", value: vitalsHeight, set: (v: string) => setVitalsHeight(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "170" },
@@ -2431,7 +2431,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                       min="0"
                       value={consultationFee}
                       onChange={(e) => setConsultationFee(e.target.value)}
-                      placeholder="0"
+                      placeholder=""
                       style={{
                         height: "42px",
                         padding: "0 12px",
@@ -2767,7 +2767,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               {[
                 { label: "BP", value: emergencyBp, set: (v: string) => setEmergencyBp(v.replace(/[^0-9/]/g, "").slice(0, 7)), placeholder: "120/80" },
                 { label: "Pulse", value: emergencyPulse, set: (v: string) => setEmergencyPulse(v.replace(/\D/g, "").slice(0, 3)), placeholder: "bpm" },
-                { label: "Temp (°F)", value: emergencyTemp, set: (v: string) => setEmergencyTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "98.6" },
+                { label: "Temp (°C)", value: emergencyTemp, set: (v: string) => setEmergencyTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "37.0" },
                 { label: "SpO2 (%)", value: emergencySpo2, set: (v: string) => setEmergencySpo2(v.replace(/\D/g, "").slice(0, 3)), placeholder: "98" },
                 { label: "Resp. Rate", value: emergencyRespRate, set: (v: string) => setEmergencyRespRate(v.replace(/\D/g, "").slice(0, 3)), placeholder: "/min" },
                 { label: "Pain (0-10)", value: emergencyPainScore, set: (v: string) => setEmergencyPainScore(clampPainScore(v)), placeholder: "0-10" },

@@ -143,7 +143,7 @@ def _ip_stay_events(cursor, patient_id, admission_id, admission, beds, window_st
     for v in _all(cursor):
         d, t = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
         vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
-                f"Temp {v['temperature']}" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
+                f"Temp {v['temperature']} °C" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
                 f"RR {v['respiratory_rate']}" if v.get("respiratory_rate") else "", f"Sugar {v['blood_sugar']}" if v.get("blood_sugar") else ""]
         events.append({"date": d, "time": t, "type": "vitals", "title": "Vitals recorded",
                         "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})
@@ -365,18 +365,27 @@ def _pharmacy_bill_events(cursor, pharmacy_rows, title="Pharmacy bill"):
     for lines in grouped.values():
         invoice_id = lines[0].get("invoice_id")
         invoice_no = None
+        gst_amount = 0.0
+        invoice_total = None
         if invoice_id:
-            cursor.execute("SELECT invoice_no FROM invoices WHERE id = ?", (invoice_id,))
+            cursor.execute("SELECT invoice_no, tax, total_amount FROM invoices WHERE id = ?", (invoice_id,))
             row = cursor.fetchone()
-            invoice_no = row["invoice_no"] if row else None
+            if row:
+                invoice_no = row["invoice_no"]
+                gst_amount = float(row["tax"] or 0)
+                if row["total_amount"] is not None:
+                    invoice_total = float(row["total_amount"])
         d, t = _split_dt(lines[0]["sold_at"])
-        total = sum(float(l["amount"] or 0) for l in lines)
+        subtotal = sum(float(l["amount"] or 0) for l in lines)
+        final_charge = invoice_total if invoice_total is not None else round(subtotal + gst_amount, 2)
         events.append({
             "date": d, "time": t, "type": "pharmacy_issued", "title": title,
             "subtitle": " · ".join(p for p in [invoice_no or "", f"{len(lines)} item(s)"] if p),
             # Invoiced sales get their own "Payment received" events; only un-invoiced cash sales are shown as paid here.
-            "charge": total, "received": None if invoice_id else total,
+            "charge": final_charge, "received": None if invoice_id else final_charge,
             "invoice_no": invoice_no,
+            "subtotal": subtotal,
+            "gst": gst_amount,
             "items": [{"name": l["medicine_name"], "quantity": l["quantity"], "unit_price": float(l["unit_price"] or 0),
                        "amount": float(l["amount"] or 0)} for l in lines],
         })
@@ -716,8 +725,8 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                                 "charge": None, "received": None})
 
             consultation_fee = 0.0
+            consultation_invoice = None
             if appt_day:
-                consultation_invoice = None
                 if appointment_id:
                     cursor.execute("SELECT * FROM invoices WHERE patient_id = ? AND module = 'OP' AND appointment_id = ? ORDER BY created_at LIMIT 1",
                                    (patient_id, appointment_id))
@@ -777,7 +786,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                         continue
                     vd, vt = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
                     vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
-                            f"Temp {v['temperature']}" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
+                            f"Temp {v['temperature']} °C" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
                             f"Weight {v['weight']} kg" if v.get("weight") else "", f"Height {v['height']} cm" if v.get("height") else ""]
                     events.append({"date": vd, "time": vt, "type": "vitals", "title": "Vitals recorded",
                                     "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})
@@ -857,17 +866,40 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                         "received": float(inv["paid_amount"] or 0),
                     })
 
+            consult_inv_id = consultation_invoice["id"] if (appointment_id and consultation_invoice) else None
+            consult_paid = 0.0
             for iid in list(invoice_ids):
                 cursor.execute("SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY created_at", (iid,))
                 for pay in cursor.fetchall():
                     d, t = _split_dt(pay["created_at"])
+                    amount = float(pay["amount"] or 0)
+                    if iid == consult_inv_id:
+                        # The consultation fee: shown as Received on the consultation row itself (charge and received side by side).
+                        consult_paid += amount
+                        events.append({"date": d, "time": t, "type": "payment", "title": "Payment received",
+                                        "subtitle": f"{(pay['payment_mode'] or 'cash').upper()} · Receipt PMT-{pay['id']} · ₹{amount:,.2f} against the consultation fee",
+                                        "charge": None, "received": None})
+                        continue
                     events.append({"date": d, "time": t, "type": "payment", "title": "Payment received",
                                     "subtitle": f"{(pay['payment_mode'] or 'cash').upper()} · Receipt PMT-{pay['id']}",
-                                    "charge": None, "received": float(pay["amount"] or 0)})
+                                    "charge": None, "received": amount})
+            if consult_inv_id:
+                if consult_paid <= 0:
+                    consult_paid = float(consultation_invoice["paid_amount"] or 0)
+                for e in events:
+                    if e.get("type") == "consultation" and e.get("title") == "Doctor consultation" and e.get("charge"):
+                        e["received"] = round(min(consult_paid, float(e["charge"])), 2) or None
+                        break
 
             lab_total = sum(float(it["amount"] or 0) for it in items if (it["department_type"] or "").upper() == "LAB")
             imaging_total = sum(float(it["amount"] or 0) for it in items if (it["department_type"] or "").upper() == "IMAGING")
             pharmacy_total = sum(float(r["amount"] or 0) for r in pharmacy_rows)
+            for iid in list(invoice_ids):
+                cursor.execute("SELECT tax FROM invoices WHERE id = ? AND (UPPER(COALESCE(module, '')) = 'PHARMACY' OR invoice_no ILIKE 'INV-PHM-%' OR invoice_no ILIKE 'INV-PHARM-%')", (iid,))
+                inv_tax_row = cursor.fetchone()
+                if inv_tax_row and inv_tax_row["tax"]:
+                    pharmacy_total += float(inv_tax_row["tax"])
+            pharmacy_total = round(pharmacy_total, 2)
             if lab_total == 0 or pharmacy_total == 0:
                 cursor.execute(
                     "SELECT total_amount, module, invoice_no, created_at FROM invoices WHERE id = ANY(?)",

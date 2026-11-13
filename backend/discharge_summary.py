@@ -386,7 +386,7 @@ Return ONLY a JSON object with exactly these keys (strings):
 
 Rules:
 - Plain prose, 1-3 sentences per section, no bullet points, no code fences, no commentary.
-- Copy numbers (vitals, results, doses, dates) exactly as written in the records.
+- Copy numbers (vitals, results, doses, dates) exactly as written in the records. Body temperatures are in degrees Celsius (°C).
 - Do not list discharge medications; they are taken from the doctor's prescription separately.
 
 Visit records JSON:

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { useBranding } from "../lib/branding";
 
 /**
  * Full-screen waiting-hall TV display for the OP queue.
@@ -88,6 +89,7 @@ const callText = (card: DoctorCard) =>
   card.next ? `Token ${card.next.token}. ${card.next.name}. Please proceed to ${docLabel(card.doctor)}.` : "";
 
 export default function OpQueueTvDisplay({ onClose }: Props) {
+  const branding = useBranding();
   const [cards, setCards] = useState<DoctorCard[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -259,7 +261,11 @@ export default function OpQueueTvDisplay({ onClose }: Props) {
     <div className="optv-root" role="dialog" aria-label="OP queue TV display">
       <header className="optv-header">
         <div className="optv-brand">
-          <div className="optv-logo">+</div>
+          {branding?.logo?.data_uri ? (
+            <img className="optv-logo-img" src={branding.logo.data_uri} alt={branding.hospital_title || "Hospital logo"} />
+          ) : (
+            <div className="optv-logo">+</div>
+          )}
           <div>
             <h1>Outpatient Department</h1>
             <p>Please wait for your name to be called</p>
@@ -355,6 +361,15 @@ export default function OpQueueTvDisplay({ onClose }: Props) {
         {pageCount > 1 && <span className="optv-page">Page {page + 1} / {pageCount}</span>}
         {offline && <span className="optv-page">Reconnecting…</span>}
       </footer>
+      <div className="optv-marquee" aria-label="Powered by HospAI">
+        <div className="optv-marquee-track">
+          {[0, 1].map((half) => (
+            <div className="optv-marquee-half" key={half} aria-hidden={half === 1}>
+              {Array.from({ length: 4 }).map((_, i) => <span key={i}>Powered by HospAI<em>✦</em></span>)}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -73,34 +73,34 @@ def dashboard_hospital_summary(date: str | None = None, db: Session = Depends(ge
 
 
 @router.get("/dashboard/revenue-breakdown")
-def dashboard_revenue_breakdown(date: str | None = None, period: str = "today", db: Session = Depends(get_db),
+def dashboard_revenue_breakdown(date: str | None = None, period: str = "today", date_to: str | None = None, db: Session = Depends(get_db),
                                 user: dict = Depends(require_hospital_overview("patients.read"))):
     """Revenue by module (OP, IP, Pharmacy, Lab) for the day or month to date; rows add up to the total."""
     import revenue_details
     try:
-        return revenue_details.revenue_breakdown(db, date, period)
+        return revenue_details.revenue_breakdown(db, date, period, date_to)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/dashboard/revenue-details")
-def dashboard_revenue_details(category: str, date: str | None = None, period: str = "today", db: Session = Depends(get_db),
+def dashboard_revenue_details(category: str, date: str | None = None, period: str = "today", date_to: str | None = None, db: Session = Depends(get_db),
                               user: dict = Depends(require_hospital_overview("patients.read"))):
     """Patient-level payments / sales behind one revenue row (or the bills still due)."""
     import revenue_details
     try:
-        return revenue_details.revenue_details(db, date, period, category)
+        return revenue_details.revenue_details(db, date, period, category, date_to)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/dashboard/payment-mode-details")
-def dashboard_payment_mode_details(mode: str | None = None, date: str | None = None, period: str = "today", db: Session = Depends(get_db),
+def dashboard_payment_mode_details(mode: str | None = None, date: str | None = None, period: str = "today", date_to: str | None = None, db: Session = Depends(get_db),
                                    user: dict = Depends(require_hospital_overview("patients.read"))):
     """Patient-level transactions behind a payment mode (Cash, Card, UPI, or all)."""
     import revenue_details
     try:
-        return revenue_details.payment_mode_details(db, date, period, mode)
+        return revenue_details.payment_mode_details(db, date, period, mode, date_to)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -518,13 +518,22 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
                     (appointment_id, prescription_id),
                 )
 
-            if payload.get("complete_consultation") and appointment_id:
-                cursor.execute(
-                    "UPDATE appointments SET status = 'completed', "
-                    "consultation_started_at = COALESCE(consultation_started_at, CURRENT_TIMESTAMP), "
-                    "consultation_completed_at = COALESCE(consultation_completed_at, CURRENT_TIMESTAMP) WHERE id = ?",
-                    (appointment_id,),
-                )
+            if payload.get("complete_consultation"):
+                if appointment_id:
+                    cursor.execute(
+                        "UPDATE appointments SET status = 'completed', "
+                        "consultation_started_at = COALESCE(consultation_started_at, CURRENT_TIMESTAMP), "
+                        "consultation_completed_at = COALESCE(consultation_completed_at, CURRENT_TIMESTAMP) WHERE id = ?",
+                        (appointment_id,),
+                    )
+                elif patient_id:
+                    cursor.execute(
+                        "UPDATE appointments SET status = 'completed', "
+                        "consultation_started_at = COALESCE(consultation_started_at, CURRENT_TIMESTAMP), "
+                        "consultation_completed_at = COALESCE(consultation_completed_at, CURRENT_TIMESTAMP) "
+                        "WHERE id = (SELECT id FROM appointments WHERE patient_id = ? AND status NOT IN ('completed', 'cancelled') ORDER BY id DESC LIMIT 1)",
+                        (patient_id,),
+                    )
 
             conn.commit()
             return {"success": True, "prescription_id": prescription_id, "ip_order": ip_order}

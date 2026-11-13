@@ -14780,3 +14780,12 @@ label,
 }
 .hosp-kpi-chip { white-space: normal; max-width: 100%; min-width: 0; flex-wrap: wrap; }
 .analysis-drill-modal { max-width: min(1040px, 96vw); width: 96vw; }
+
+.optv-logo-img{height:clamp(44px,4.2vw,76px);max-width:16vw;width:auto;object-fit:contain;background:#fff;border-radius:12px;padding:5px 8px;flex-shrink:0}
+.optv-marquee{background:#0b2540;color:#9fe7dd;overflow:hidden;white-space:nowrap;padding:.9vh 0;border-top:1px solid rgba(255,255,255,.12)}
+.optv-marquee-track{display:inline-flex;width:max-content;animation:optv-scroll 32s linear infinite}
+.optv-marquee-half{display:inline-flex}
+.optv-marquee-half span{font-size:clamp(13px,1.1vw,21px);font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding-right:6vw}
+.optv-marquee-half em{font-style:normal;margin-left:6vw;color:#14b8a6}
+@keyframes optv-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion: reduce){.optv-marquee-track{animation-duration:90s}}

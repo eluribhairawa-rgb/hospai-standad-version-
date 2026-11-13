@@ -1382,7 +1382,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
             </Label>
             <Label>
               Approved Amount
-              <Input type="number" value={(insuranceForm as any).approved_amount || ""} onChange={(event) => setInsuranceForm((prev) => ({ ...prev, approved_amount: event.target.value } as any))} placeholder="0" />
+              <Input type="number" value={(insuranceForm as any).approved_amount || ""} onChange={(event) => setInsuranceForm((prev) => ({ ...prev, approved_amount: event.target.value } as any))} placeholder="" />
             </Label>
             <Label>
               Document Reference
@@ -1645,7 +1645,7 @@ const activeDepartments = (data.departments || []).filter((department) => {
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px", fontSize: "0.82rem", color: "#334155" }}>
                     {selectedAppointmentPatient.bp && <span><strong>BP:</strong> {selectedAppointmentPatient.bp}</span>}
-                    {selectedAppointmentPatient.temperature && <span><strong>Temp:</strong> {selectedAppointmentPatient.temperature}°F</span>}
+                    {selectedAppointmentPatient.temperature && <span><strong>Temp:</strong> {selectedAppointmentPatient.temperature}°C</span>}
                     {selectedAppointmentPatient.pulse && <span><strong>Pulse:</strong> {selectedAppointmentPatient.pulse} bpm</span>}
                     {selectedAppointmentPatient.spo2 && <span><strong>SpO2:</strong> {selectedAppointmentPatient.spo2}%</span>}
                     {selectedAppointmentPatient.weight && <span><strong>Weight:</strong> {selectedAppointmentPatient.weight} kg</span>}
@@ -1681,8 +1681,8 @@ const activeDepartments = (data.departments || []).filter((department) => {
               <Label>
                 Temperature
                 <div className="vital-input-wrap">
-                  <Input value={appointmentForm.temperature} onChange={(event) => setAppointmentForm((prev) => ({ ...prev, temperature: filterDecimal(event.target.value) }))} placeholder="98.6" inputMode="decimal" />
-                  <span className="vital-unit-badge">°F</span>
+                  <Input value={appointmentForm.temperature} onChange={(event) => setAppointmentForm((prev) => ({ ...prev, temperature: filterDecimal(event.target.value) }))} placeholder="37.0" inputMode="decimal" />
+                  <span className="vital-unit-badge">°C</span>
                 </div>
               </Label>
               <Label>

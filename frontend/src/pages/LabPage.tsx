@@ -1854,7 +1854,7 @@ export default function LabPage({ setNotice, user }: Props) {
                 max={grandTotal}
                 value={paidAmount}
                 onChange={(event) => setPaidAmount(event.target.value)}
-                placeholder="0.00"
+                placeholder=""
                 aria-label="Paid Amount"
                 disabled={selectedRecord !== null}
                 required
@@ -1908,7 +1908,7 @@ export default function LabPage({ setNotice, user }: Props) {
                   max={100}
                   value={discountPercentage}
                   onChange={(event) => setDiscountPercentage(event.target.value.replace(/[^0-9.]/g, ""))}
-                  placeholder="0"
+                  placeholder=""
                   className="no-spin"
                   onWheel={(e) => (e.target as HTMLElement).blur()}
                   aria-label="Discount Percentage"
@@ -1921,7 +1921,7 @@ export default function LabPage({ setNotice, user }: Props) {
                   min={0}
                   value={discountFixedAmount}
                   onChange={(event) => setDiscountFixedAmount(event.target.value.replace(/[^0-9.]/g, ""))}
-                  placeholder="0.00"
+                  placeholder=""
                   className="no-spin"
                   onWheel={(e) => (e.target as HTMLElement).blur()}
                   aria-label="Fixed Discount Amount"

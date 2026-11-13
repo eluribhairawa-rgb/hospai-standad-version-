@@ -28,7 +28,7 @@ CATEGORY_LABELS = {
 }
 
 CATEGORY_ORDER = ('op', 'ip', 'pharmacy', 'lab', 'other')
-PERIODS = ('today', 'month')
+PERIODS = ('today', 'month', 'range')
 
 _MODULE_CASE = """CASE
     WHEN UPPER(COALESCE(i.module, '')) = 'OP' THEN 'op'
@@ -51,23 +51,32 @@ def _parse_date(value):
         raise ValueError('date must be YYYY-MM-DD.')
 
 
-def _range_clause(column, period, target):
-    """(SQL condition, params) for the selected day, or the whole calendar month of it."""
+def _range_clause(column, period, target, date_to=None):
+    """(SQL condition, params) for the selected day, the whole calendar month of it, or a from..to date range."""
     if period == 'today':
         return (f"{date_clause(column)} = DATE(?)", [target])
+    if period == 'range':
+        return (f"{date_clause(column)} BETWEEN DATE(?) AND DATE(?)", [target, date_to])
     return (f"to_char({column}, 'YYYY-MM') = ?", [target[:7]])
 
 
-def collection_entries(db, target_date, period='today'):
+def _range_end(period, date_to):
+    if period != 'range':
+        return None
+    return _parse_date(date_to)
+
+
+def collection_entries(db, target_date, period='today', date_to=None):
     """Every amount that makes up the period's revenue total, one row per payment / sale."""
     if period not in PERIODS:
-        raise ValueError("period must be 'today' or 'month'.")
+        raise ValueError("period must be 'today', 'month' or 'range'.")
     target = _parse_date(target_date)
+    end = _range_end(period, date_to)
 
-    pay_cond, pay_params = _range_clause('ip.created_at', period, target)
-    bill_cond, bill_params = _range_clause('i.created_at', period, target)
-    diag_cond, diag_params = _range_clause('d.created_at', period, target)
-    sale_cond, sale_params = _range_clause('ps.sold_at', period, target)
+    pay_cond, pay_params = _range_clause('ip.created_at', period, target, end)
+    bill_cond, bill_params = _range_clause('i.created_at', period, target, end)
+    diag_cond, diag_params = _range_clause('d.created_at', period, target, end)
+    sale_cond, sale_params = _range_clause('ps.sold_at', period, target, end)
 
     parts = [f"""
         SELECT ip.created_at AS at, {_MODULE_CASE} AS category, i.patient_id,
@@ -121,9 +130,10 @@ def collection_entries(db, target_date, period='today'):
         return [_entry(r) for r in cursor.fetchall()]
 
 
-def due_entries(db, target_date):
-    """Bills raised on the selected date that still have a balance (the dashboard's Pending / Due)."""
+def due_entries(db, target_date, date_to=None):
+    """Bills raised on the selected date (or from..to) that still have a balance (the dashboard's Pending / Due)."""
     target = _parse_date(target_date)
+    end = _parse_date(date_to) if date_to else target
     with get_connection(db) as conn:
         cursor = conn.cursor()
         cursor.execute(f"""
@@ -131,15 +141,15 @@ def due_entries(db, target_date):
                    {_PATIENT_NAME.format(fallback='i.patient_name')} AS patient_name,
                    i.invoice_no AS reference, i.due_amount AS amount, i.module AS mode, 'due' AS source
             FROM invoices i LEFT JOIN patients p ON p.patient_id = i.patient_id
-            WHERE {date_clause('i.created_at')} = DATE(?) AND i.due_amount > 0
+            WHERE {date_clause('i.created_at')} BETWEEN DATE(?) AND DATE(?) AND i.due_amount > 0
             UNION ALL
             SELECT d.created_at, 'due', d.patient_id, {_PATIENT_NAME.format(fallback='d.patient_name')},
                    COALESCE(d.test_name, 'Lab test'), d.due_amount, 'LAB', 'due'
             FROM diagnostics d LEFT JOIN patients p ON p.patient_id = d.patient_id
-            WHERE {date_clause('d.created_at')} = DATE(?) AND d.due_amount > 0
+            WHERE {date_clause('d.created_at')} BETWEEN DATE(?) AND DATE(?) AND d.due_amount > 0
               AND (d.invoice_no IS NULL OR TRIM(d.invoice_no) = '')
             ORDER BY at DESC
-            """, (target, target))
+            """, (target, end, target, end))
         return [_entry(r) for r in cursor.fetchall()]
 
 
@@ -158,16 +168,16 @@ def _entry(row):
     }
 
 
-def revenue_breakdown(db, target_date=None, period='today'):
+def revenue_breakdown(db, target_date=None, period='today', date_to=None):
     """Module rows that add up to the period's revenue total, plus Pending / Due."""
-    entries = collection_entries(db, target_date, period)
+    entries = collection_entries(db, target_date, period, date_to)
     sums = {c: 0.0 for c in CATEGORY_ORDER}
     counts = {c: 0 for c in CATEGORY_ORDER}
     for e in entries:
         sums[e['category']] += e['amount']
         counts[e['category']] += 1
 
-    dues = due_entries(db, target_date)
+    dues = due_entries(db, target_date, date_to if period == 'range' else None)
     rows = [
         {
             'key': c,
@@ -198,14 +208,14 @@ def revenue_breakdown(db, target_date=None, period='today'):
     }
 
 
-def revenue_details(db, target_date=None, period='today', category='op'):
+def revenue_details(db, target_date=None, period='today', category='op', date_to=None):
     """Patient-level entries behind one row of the breakdown."""
     if category not in CATEGORY_LABELS:
         raise ValueError('Unknown revenue category.')
     if category == 'due':
-        entries = due_entries(db, target_date)
+        entries = due_entries(db, target_date, date_to if period == 'range' else None)
     else:
-        entries = [e for e in collection_entries(db, target_date, period) if e['category'] == category]
+        entries = [e for e in collection_entries(db, target_date, period, date_to) if e['category'] == category]
 
     return {
         'date': _parse_date(target_date),
@@ -217,9 +227,9 @@ def revenue_details(db, target_date=None, period='today', category='op'):
     }
 
 
-def payment_mode_details(db, target_date=None, period='today', mode=None):
+def payment_mode_details(db, target_date=None, period='today', mode=None, date_to=None):
     """Patient-level entries behind a payment mode (Cash, Card, UPI, or all)."""
-    all_entries = collection_entries(db, target_date, period)
+    all_entries = collection_entries(db, target_date, period, date_to)
     target_mode = (mode or '').strip().lower()
 
     mode_counts = {}

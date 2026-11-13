@@ -197,6 +197,20 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
     void loadRoster();
   }, []);
 
+  useEffect(() => {
+    const handleSync = () => {
+      void fetchLiveAppointments();
+    };
+    window.addEventListener("focus", handleSync);
+    window.addEventListener("storage", handleSync);
+    window.addEventListener("hospai_queue_sync", handleSync);
+    return () => {
+      window.removeEventListener("focus", handleSync);
+      window.removeEventListener("storage", handleSync);
+      window.removeEventListener("hospai_queue_sync", handleSync);
+    };
+  }, [selectedDate]);
+
   const doctorsList = useMemo(() => {
     return realDoctors.map((d) => ({ name: d.doctor_name, department: d.department }));
   }, [realDoctors]);
@@ -618,7 +632,6 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
               <option value="All">All</option>
               <option value="OP">OP</option>
               <option value="Follow-up">Follow-up</option>
-              <option value="Emergency">Emergency</option>
               <option value="Review">Review</option>
             </select>
           </div>
@@ -1103,7 +1116,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
                     <span className="opq-details-vital-lbl">Pulse</span>
                   </div>
                   <div className="opq-details-vital-tile">
-                    <span className="opq-details-vital-val">{patientProfile?.temperature ? `${patientProfile.temperature} °F` : "—"}</span>
+                    <span className="opq-details-vital-val">{patientProfile?.temperature ? `${patientProfile.temperature} °C` : "—"}</span>
                     <span className="opq-details-vital-lbl">Temp</span>
                   </div>
                   <div className="opq-details-vital-tile">

@@ -101,8 +101,11 @@ def patient_vitals_list(patient_id: str, admission_id: int | None = None, db: Se
 @router.post("/patients/{patient_id}/vitals")
 def patient_vitals_create(patient_id: str, request: Request, payload: dict = Body(...), db: Session = Depends(get_db),
                            user: dict = Depends(require_permissions("patients.write"))):
-    vital_id = lq.record_vitals(db, patient_id, payload, user.get("username"),
-                                 encounter_id=payload.get("encounter_id"), admission_id=payload.get("admission_id"))
+    try:
+        vital_id = lq.record_vitals(db, patient_id, payload, user.get("username"),
+                                     encounter_id=payload.get("encounter_id"), admission_id=payload.get("admission_id"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     log_audit_event(db, user, client_ip(request), "create", "patient_vitals", str(vital_id), {"patient_id": patient_id})
     return {"status": "ok", "vital_id": vital_id}
 

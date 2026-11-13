@@ -144,9 +144,8 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
 
   // Sale Mode: Internal (Registered patient with UHID) vs External (Walk-in without UHID)
   const [saleMode, setSaleMode] = useState<"internal" | "external">("internal");
+  const [qtyWarning, setQtyWarning] = useState<string[] | null>(null);
   const [customerName, setCustomerName] = useState<string>("");
-  const [customerAge, setCustomerAge] = useState<string>("");
-  const [customerDob, setCustomerDob] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [customerCountryCode, setCustomerCountryCode] = useState<string>("+91");
   const customerPhoneRule = COUNTRY_CODE_RULES[customerCountryCode] || COUNTRY_CODE_RULES["+91"];
@@ -244,30 +243,9 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     }
   };
 
-  // Helper: auto calculate age when DOB is picked
-  const handleDobChange = (dobVal: string) => {
-    setCustomerDob(dobVal);
-    if (dobVal) {
-      const birth = new Date(dobVal);
-      if (!isNaN(birth.getTime())) {
-        const today = new Date();
-        let calcAge = today.getFullYear() - birth.getFullYear();
-        const m = today.getMonth() - birth.getMonth();
-        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-          calcAge--;
-        }
-        if (calcAge >= 0 && calcAge <= 125) {
-          setCustomerAge(String(calcAge));
-        }
-      }
-    }
-  };
-
   // Helper: clear external customer inputs
   const handleClearCustomer = () => {
     setCustomerName("");
-    setCustomerAge("");
-    setCustomerDob("");
     setCustomerPhone("");
     setCustomerCountryCode("+91");
     setExternalCustomerDue(0);
@@ -534,8 +512,9 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     setCart(cart.filter((_, idx) => idx !== index));
   };
 
+  // 0 means "left empty while typing": the box can be cleared and retyped; billing is blocked until it is filled.
   const handleUpdateCartQty = (index: number, qty: number) => {
-    if (qty <= 0) return;
+    if (qty < 0 || Number.isNaN(qty)) return;
     const item = cart[index];
     if (qty > item.available_qty) {
       setNotice({ type: "warning", message: `Quantity cannot exceed available stock (${item.available_qty})` });
@@ -809,14 +788,6 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         return;
       }
     } else {
-      if (!customerName.trim()) {
-        setNotice({ type: "warning", message: "Customer Name is required for external sale." });
-        return;
-      }
-      if (!customerAge.trim()) {
-        setNotice({ type: "warning", message: "Customer Age is required for external sale." });
-        return;
-      }
       if (!customerPhone.trim()) {
         setNotice({ type: "warning", message: "Primary Mobile Number is required for external sale." });
         return;
@@ -825,6 +796,15 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         setNotice({ type: "warning", message: customerPhoneError });
         return;
       }
+    }
+    const missingQty = cart.filter((c) => !(c.quantity > 0));
+    if (missingQty.length > 0) {
+      setQtyWarning(missingQty.map((c) => c.medicine_name));
+      setNotice({
+        type: "warning",
+        message: `Quantity cannot be 0 for: ${missingQty.map((c) => c.medicine_name).join(", ")}. Please enter a valid quantity (at least 1) or remove the medicine from cart using ✕.`,
+      });
+      return;
     }
     if (cart.length === 0) {
       setNotice({ type: "warning", message: "Cart is empty. Add medicines to dispense." });
@@ -859,8 +839,6 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         is_external: saleMode === "external",
         customer_name: saleMode === "external" ? customerName.trim() : undefined,
         customer_phone: saleMode === "external" ? withCountryCode(customerCountryCode, customerPhone) : undefined,
-        customer_age: saleMode === "external" ? customerAge.trim() : undefined,
-        customer_dob: saleMode === "external" ? customerDob.trim() : undefined,
         remarks: remarks.trim() || undefined,
         billing_type: "CASH_OPD",
         stock_source: dispenseStockSource,
@@ -905,10 +883,10 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         saleMode === "external"
           ? {
               name: customerName.trim(),
-              age: customerAge.trim(),
+              age: "",
               phone: customerPhone.trim(),
               phone_country_code: customerCountryCode,
-              dob: customerDob.trim(),
+              dob: "",
             }
           : null
       );
@@ -1152,9 +1130,13 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
   const handleExportHistoryCsv = () => {
     downloadCsv(
       `op_dispense_history_${historyDate || "all"}.csv`,
-      ["Time", "Type", "Customer / Patient", "Identifier / Mobile", "Medicine", "Quantity", "Unit Price", "Amount", "Invoice No", "Status"],
+      ["Time", "Type", "Customer / Patient", "Identifier / Mobile", "Medicine", "Quantity", "Unit Price", "Amount", "GST / Tax", "Total", "Invoice No", "Status"],
       dispenseHistory.map((s) => {
         const isExt = (s.patient_id && s.patient_id.startsWith("EXT-")) || (!s.patient_id && s.customer_name);
+        const gstVal = s.gst_amount !== undefined && s.gst_amount !== null
+          ? (s.subtotal && s.subtotal > 0 ? (Number(s.amount) / Number(s.subtotal)) * Number(s.gst_amount) : Number(s.gst_amount))
+          : 0;
+        const totalVal = Number(s.amount || 0) + gstVal;
         return [
           s.sold_at ? new Date(s.sold_at).toLocaleTimeString() : "",
           isExt ? "External Sale" : "Internal Patient",
@@ -1164,6 +1146,8 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
           s.quantity,
           s.unit_price,
           s.amount,
+          gstVal.toFixed(2),
+          totalVal.toFixed(2),
           s.invoice_no || (s.invoice_id ? `INV-${s.invoice_id}` : "-"),
           s.payment_status || "paid",
         ];
@@ -1483,37 +1467,12 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "1rem" }}>
                 <div>
                   <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                    Customer Name <span style={{ color: "#e11d48" }}>*</span>
+                    Customer Name
                   </label>
                   <Input
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Enter customer name"
-                    style={{ width: "100%" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                    Age <span style={{ color: "#e11d48" }}>*</span>
-                  </label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={125}
-                    value={customerAge}
-                    onChange={(e) => setCustomerAge(e.target.value)}
-                    placeholder="Age"
-                    style={{ width: "100%" }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                    Date of Birth
-                  </label>
-                  <Input
-                    type="date"
-                    value={customerDob}
-                    onChange={(e) => handleDobChange(e.target.value)}
+                    placeholder="Enter customer name (optional)"
                     style={{ width: "100%" }}
                   />
                 </div>
@@ -1816,11 +1775,28 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                             <td style={{ padding: "0.5rem", textAlign: "center" }}>
                               <input
                                 type="number"
-                                min={1}
+                                min={0}
                                 max={item.available_qty}
-                                value={item.quantity}
-                                onChange={(e) => handleUpdateCartQty(idx, parseInt(e.target.value) || 1)}
-                                style={{ width: "55px", padding: "2px 4px", borderRadius: "4px", border: "1px solid #cbd5e1", textAlign: "center" }}
+                                value={item.quantity > 0 ? item.quantity : ""}
+                                placeholder=""
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  if (raw === "") {
+                                    handleUpdateCartQty(idx, 0);
+                                  } else {
+                                    const parsed = parseInt(raw, 10);
+                                    handleUpdateCartQty(idx, isNaN(parsed) ? 0 : Math.max(0, parsed));
+                                  }
+                                }}
+                                style={{
+                                  width: "58px",
+                                  padding: "3px 4px",
+                                  borderRadius: "4px",
+                                  border: item.quantity === 0 ? "1.5px solid #e11d48" : "1px solid #cbd5e1",
+                                  background: item.quantity === 0 ? "#fff1f2" : "#ffffff",
+                                  textAlign: "center",
+                                  fontWeight: 600,
+                                }}
                               />
                             </td>
                             <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
@@ -1948,7 +1924,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     max={cartTotals.grandTotal}
                     value={paidAmountInput}
                     onChange={(e) => setPaidAmountInput(e.target.value)}
-                    placeholder="0.00"
+                    placeholder=""
                     style={{ fontWeight: 700, fontSize: "1.05rem", color: "#0f172a" }}
                   />
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.6rem", fontSize: "0.85rem" }}>
@@ -2090,7 +2066,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                   cart.length === 0 ||
                   (saleMode === "internal"
                     ? !selectedPatient
-                    : !customerName.trim() || !customerAge.trim() || !customerPhone.trim())
+                    : !customerPhone.trim())
                 }
                 onClick={handleExecuteDispense}
               >
@@ -2444,19 +2420,25 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                 <th style={{ padding: "0.5rem", textAlign: "center" }}>Qty</th>
                 <th style={{ padding: "0.5rem", textAlign: "right" }}>Unit Price</th>
                 <th style={{ padding: "0.5rem", textAlign: "right" }}>Amount</th>
+                <th style={{ padding: "0.5rem", textAlign: "right" }}>GST / Tax</th>
+                <th style={{ padding: "0.5rem", textAlign: "right" }}>Total</th>
                 <th style={{ padding: "0.5rem" }}>Invoice & Status</th>
               </tr>
             </thead>
             <tbody>
               {loadingHistory && (
-                <tr><td colSpan={7} style={{ textAlign: "center", padding: "1.5rem", color: "#94a3b8" }}>Loading…</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: "center", padding: "1.5rem", color: "#94a3b8" }}>Loading…</td></tr>
               )}
               {!loadingHistory && dispenseHistory.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: "center", padding: "1.5rem", color: "#94a3b8" }}>No OP dispenses found for this filter.</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: "center", padding: "1.5rem", color: "#94a3b8" }}>No OP dispenses found for this filter.</td></tr>
               )}
               {!loadingHistory && dispenseHistory.map((sale) => {
                 const isExt = (sale.patient_id && sale.patient_id.startsWith("EXT-")) || (!sale.patient_id && sale.customer_name);
                 const isDue = (sale.due_amount && Number(sale.due_amount) > 0) || sale.payment_status === "due" || sale.payment_status === "partial";
+                const gstVal = sale.gst_amount !== undefined && sale.gst_amount !== null
+                  ? (sale.subtotal && Number(sale.subtotal) > 0 ? (Number(sale.amount) / Number(sale.subtotal)) * Number(sale.gst_amount) : Number(sale.gst_amount))
+                  : 0;
+                const totalVal = Number(sale.amount || 0) + gstVal;
                 return (
                   <tr key={sale.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                     <td style={{ padding: "0.5rem", color: "#64748b", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
@@ -2485,8 +2467,14 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     </td>
                     <td style={{ padding: "0.5rem", fontWeight: 600 }}>{sale.medicine_name}</td>
                     <td style={{ padding: "0.5rem", textAlign: "center" }}>{sale.quantity}</td>
-                    <td style={{ padding: "0.5rem", textAlign: "right" }}>₹{sale.unit_price}</td>
-                    <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700 }}>₹{sale.amount}</td>
+                    <td style={{ padding: "0.5rem", textAlign: "right" }}>₹{Number(sale.unit_price).toFixed(2)}</td>
+                    <td style={{ padding: "0.5rem", textAlign: "right", color: "#475569" }}>₹{Number(sale.amount).toFixed(2)}</td>
+                    <td style={{ padding: "0.5rem", textAlign: "right", color: "#16a34a", fontWeight: 600 }}>
+                      {gstVal > 0 ? `+₹${gstVal.toFixed(2)}` : "₹0.00"}
+                    </td>
+                    <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700, color: "#0f172a" }}>
+                      ₹{totalVal.toFixed(2)}
+                    </td>
                     <td style={{ padding: "0.5rem" }}>
                       <div style={{ fontSize: "0.75rem", color: "#475569", fontWeight: 600 }}>
                         {sale.invoice_no || (sale.invoice_id ? `INV-${sale.invoice_id}` : "-")}
@@ -2494,7 +2482,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                       {isDue ? (
                         <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginTop: "2px" }}>
                           <span style={{ fontSize: "0.7rem", padding: "0.1rem 0.4rem", borderRadius: "4px", background: "#fee2e2", color: "#dc2626", fontWeight: 700 }}>
-                            DUE: ₹{sale.due_amount || sale.amount}
+                            DUE: ₹{sale.due_amount || totalVal.toFixed(2)}
                           </span>
                           <button
                             type="button"
@@ -2520,6 +2508,36 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Zero Quantity Warning Modal */}
+      {qtyWarning && qtyWarning.length > 0 && (
+        <Modal open={true} onClose={() => setQtyWarning(null)}>
+          <div style={{ padding: "1.75rem", textAlign: "center" }}>
+            <div style={{ width: "54px", height: "54px", borderRadius: "50%", background: "#fef2f2", color: "#dc2626", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "1.75rem", marginBottom: "1rem" }}>
+              ⚠️
+            </div>
+            <h2 style={{ margin: "0 0 0.5rem 0", fontSize: "1.25rem", fontWeight: 800, color: "#0f172a" }}>
+              Invalid Quantity (0)
+            </h2>
+            <p style={{ color: "#475569", margin: "0 0 1rem 0", fontSize: "0.92rem", lineHeight: 1.5 }}>
+              The following medicine(s) in your cart have a quantity of <strong>0</strong>:
+            </p>
+            <div style={{ background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "0.75rem 1rem", marginBottom: "1.25rem", textAlign: "left" }}>
+              <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "#dc2626", fontWeight: 600, fontSize: "0.9rem" }}>
+                {qtyWarning.map((name, i) => (
+                  <li key={i}>{name}</li>
+                ))}
+              </ul>
+            </div>
+            <p style={{ color: "#64748b", fontSize: "0.85rem", margin: "0 0 1.5rem 0" }}>
+              Please enter a valid quantity (at least 1) or remove the medicine from your cart using the ✕ button before generating the bill.
+            </p>
+            <Button type="button" variant="primary" onClick={() => setQtyWarning(null)} style={{ minWidth: "120px" }}>
+              Got It
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {/* Invoice & Label Print Confirmation Modal */}

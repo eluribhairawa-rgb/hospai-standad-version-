@@ -600,7 +600,9 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     put(f.diagnosis, setDiagnosis, "Diagnosis");
     put(f.vitals.bp, setVitalsBp, "BP");
     put(f.vitals.pulse, setVitalsPulse, "Pulse");
-    put(f.vitals.temperature, setVitalsTemp, "Temperature");
+    // A scanned sheet may carry a Fahrenheit reading; the field is in degrees Celsius.
+    const scannedTemp = parseFloat(String(f.vitals.temperature || "").replace(/[^0-9.]/g, ""));
+    put(Number.isFinite(scannedTemp) ? String(scannedTemp >= 50 ? Math.round(((scannedTemp - 32) * 5 / 9) * 10) / 10 : scannedTemp) : "", setVitalsTemp, "Temperature");
     put(f.vitals.weight, setVitalsWeight, "Weight");
     put(f.vitals.spo2, setVitalsSpo2, "SpO2");
     put(f.labs.fbs, setLabFbs, "FBS");
@@ -993,7 +995,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         }
         if (latest.temperature !== null && latest.temperature !== undefined && String(latest.temperature).trim() !== "") {
           const tStr = String(latest.temperature).trim();
-          setVitalsTemp(tStr.includes("°") ? tStr : `${tStr} °F`);
+          setVitalsTemp(tStr.includes("°") ? tStr : `${tStr} °C`);
         }
         if (latest.weight !== null && latest.weight !== undefined && String(latest.weight).trim() !== "") {
           const wStr = String(latest.weight).trim();
@@ -1355,10 +1357,17 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     setSubmitting(true);
 
     try {
+      // A patient chosen by UHID (not from the queue) still has a queue entry: complete that one too.
+      let effectiveAppointmentId = appointmentId;
+      if (!effectiveAppointmentId) {
+        const open = await findOpenAppointment(patientUhid.trim());
+        if (open) effectiveAppointmentId = open.id;
+      }
+
       // 1. Save prescription via POST /api/prescriptions
       const prescPayload = {
         patient_id: patientUhid.trim(),
-        appointment_id: appointmentId,
+        appointment_id: effectiveAppointmentId,
         doctor_name: doctorName.trim(),
         department: department.trim(),
         diagnosis: diagnosis.trim(),
@@ -1401,9 +1410,9 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       }
 
       // 2. Explicitly update appointment status to 'completed' in appointments table
-      if (appointmentId) {
+      if (effectiveAppointmentId) {
         try {
-          await apiFetch(`/api/appointments/${appointmentId}`, {
+          await apiFetch(`/api/appointments/${effectiveAppointmentId}`, {
             method: "PUT",
             body: JSON.stringify({ status: "completed" }),
           });
@@ -1419,7 +1428,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       setQueue((prevQueue) => {
         const updated = prevQueue.map((item) => {
           if (
-            (appointmentId && item.appointmentId === appointmentId) ||
+            (effectiveAppointmentId && item.appointmentId === effectiveAppointmentId) ||
             (item.uhid && item.uhid === patientUhid)
           ) {
             return { ...item, status: "Completed" as const };
@@ -1436,6 +1445,14 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         return updated;
       });
 
+      // Dispatch event and update timestamp to notify OpQueuePage in other tabs / current window
+      window.dispatchEvent(new Event("hospai_queue_sync"));
+      try {
+        localStorage.setItem("hospai_queue_updated_at", String(Date.now()));
+      } catch {
+        // silent
+      }
+
       if (activeQueueItem) {
         setActiveQueueItem({ ...activeQueueItem, status: "Completed" });
       }
@@ -1450,10 +1467,14 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
 
       // 5. If print was requested, open print dialog and clear form after print; otherwise clear immediately
       if (andPrint) {
-        setTimeout(() => {
-          window.print();
+        // The consultation is already saved and completed above. Print first, and clear the form only once the
+        // print dialog has closed (printed or cancelled): clearing straight after window.print() could blank the sheet.
+        const finish = () => {
+          window.removeEventListener("afterprint", finish);
           clearPrescriptionForm();
-        }, 300);
+        };
+        window.addEventListener("afterprint", finish);
+        setTimeout(() => window.print(), 400);
       } else {
         clearPrescriptionForm();
       }
@@ -1629,6 +1650,22 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     }
   };
 
+  const OPEN_APPOINTMENT_STATUSES = ["scheduled", "checked_in", "waiting", "pending", "in_consultation", "in consultation", "consulting"];
+
+  /** The patient's current queue entry (not yet completed), so a patient picked by UHID is still linked to it. */
+  const findOpenAppointment = async (uhid: string): Promise<any | null> => {
+    try {
+      const data = await apiFetch<{ appointments?: any[] }>(`/api/appointments?patient_id=${encodeURIComponent(uhid)}`);
+      const today = new Date().toLocaleDateString("en-CA");
+      const open = (data?.appointments || []).filter((a) => OPEN_APPOINTMENT_STATUSES.includes(String(a.status || "").trim().toLowerCase()));
+      return open
+        .sort((x, y) => (String(y.appointment_date || "").slice(0, 10) === today ? 1 : 0) - (String(x.appointment_date || "").slice(0, 10) === today ? 1 : 0)
+          || String(y.appointment_date || "").localeCompare(String(x.appointment_date || "")))[0] || null;
+    } catch {
+      return null;
+    }
+  };
+
   const handlePickSearchedPatient = async (p: any) => {
     const uhid = p.patient_id || p.id || "";
     const fullName = getPatientFullName(p);
@@ -1652,6 +1689,14 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     // list does, search results do not), otherwise from their latest appointment. Both stay changeable.
     let assignedDoctor = p.latest_doctor_name && p.latest_doctor_name !== "-" ? String(p.latest_doctor_name) : "";
     let assignedDepartment = p.latest_department && p.latest_department !== "-" ? String(p.latest_department) : "";
+    // Link the pick to the patient's open queue entry so completing the consultation also completes it in Queue Management.
+    const openAppointment = uhid ? await findOpenAppointment(uhid) : null;
+    if (openAppointment) {
+      setAppointmentId(openAppointment.id);
+      setAppointmentToken(String(openAppointment.token_no || openAppointment.id));
+      assignedDoctor = assignedDoctor || String(openAppointment.doctor_name || "");
+      assignedDepartment = assignedDepartment || String(openAppointment.department || "");
+    }
     if ((!assignedDoctor || !assignedDepartment) && uhid) {
       try {
         const data = await apiFetch<{ appointments?: any[] }>(`/api/appointments?patient_id=${encodeURIComponent(uhid)}`);
@@ -3024,7 +3069,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   style={{ fontSize: "12px", padding: "6px 8px" }}
                   value={vitalsTemp}
                   onChange={(e) => setVitalsTemp(e.target.value)}
-                  placeholder="e.g. 98.6 °F"
+                  placeholder="e.g. 37.0 °C"
                 />
               </div>
               <div className="doctor-rx-field">

@@ -671,7 +671,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
                 step="0.01"
                 min={0}
                 value={payAmount}
-                placeholder="0.00"
+                placeholder=""
                 onChange={(e) => setPayAmount(e.target.value)}
               />
             </div>

@@ -995,8 +995,8 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                       <Label>
                         Temperature
                         <div className="vital-input-wrap">
-                          <Input value={profileUpdates.temperature} onChange={(e) => setProfileUpdates((prev) => ({ ...prev, temperature: filterDecimal(e.target.value) }))} placeholder="98.6" inputMode="decimal" />
-                          <span className="vital-unit-badge">°F</span>
+                          <Input value={profileUpdates.temperature} onChange={(e) => setProfileUpdates((prev) => ({ ...prev, temperature: filterDecimal(e.target.value) }))} placeholder="37.0" inputMode="decimal" />
+                          <span className="vital-unit-badge">°C</span>
                         </div>
                       </Label>
                       <Label>
@@ -1078,7 +1078,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                               });
                             }
                           }}
-                          placeholder="0"
+                          placeholder=""
                           aria-label="Review fee"
                           readOnly={true}
                           className="locked-fee-input"

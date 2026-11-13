@@ -434,7 +434,7 @@ export default function DischargeSummaryPage({ setNotice, selectedPatient, canEd
           .join("")}</tbody></table>`
       : `<p>No discharge medications.</p>`;
     const vitalsRows = records.vitals.length
-      ? `<table class="ds-table"><thead><tr><th>Recorded</th><th>BP</th><th>Pulse</th><th>Temp</th><th>SpO2</th><th>RR</th></tr></thead><tbody>${records.vitals
+      ? `<table class="ds-table"><thead><tr><th>Recorded</th><th>BP</th><th>Pulse</th><th>Temp (°C)</th><th>SpO2</th><th>RR</th></tr></thead><tbody>${records.vitals
           .map((v) => `<tr><td>${esc(fmtDateTime(String(v.recorded_at || "")))}</td><td>${esc(v.bp ?? "—")}</td><td>${esc(v.pulse ?? "—")}</td><td>${esc(v.temperature ?? "—")}</td><td>${esc(v.spo2 ?? "—")}</td><td>${esc(v.respiratory_rate ?? "—")}</td></tr>`)
           .join("")}</tbody></table>`
       : "";

@@ -340,7 +340,7 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
                     </Select>
                   </div>
                   <div><Label>Department</Label><Input value={form.department || ""} onChange={(e) => patchForm({ department: e.target.value })} /></div>
-                  <div><Label>Rate (Rs.)</Label><Input type="number" min={0} value={(form.rate as any) === "" ? "" : (form.rate ?? "")} onChange={(e) => patchForm({ rate: e.target.value === "" ? ("" as any) : Number(e.target.value) })} placeholder="0" /></div>
+                  <div><Label>Rate (Rs.)</Label><Input type="number" min={0} value={(form.rate as any) === "" ? "" : (form.rate ?? "")} onChange={(e) => patchForm({ rate: e.target.value === "" ? ("" as any) : Number(e.target.value) })} placeholder="" /></div>
                   <div><Label>Turnaround time</Label><Input value={form.turnaround_time || ""} onChange={(e) => patchForm({ turnaround_time: e.target.value })} placeholder="e.g. 6 hours" /></div>
                   <div><Label>TAT (hours)</Label><Input type="number" step="any" min={0} value={form.turnaround_hours ?? ""} onChange={(e) => patchForm({ turnaround_hours: e.target.value === "" ? null : Number(e.target.value) })} placeholder="e.g. 6" /></div>
                   {form.service_type === "LAB" && (
@@ -515,7 +515,7 @@ function PackagesEditor({ services, packages, setNotice, onChanged }: PackagesEd
       <div className="diag-form-grid" style={{ marginTop: "1rem" }}>
         <div><Label>Code</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div>
         <div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-        <div><Label>Package rate (Rs.)</Label><Input type="number" min={0} value={rate} onChange={(e) => setRate(e.target.value === "" ? "" : Number(e.target.value))} placeholder="0" /></div>
+        <div><Label>Package rate (Rs.)</Label><Input type="number" min={0} value={rate} onChange={(e) => setRate(e.target.value === "" ? "" : Number(e.target.value))} placeholder="" /></div>
         <div className="diag-form-full">
           <Label>Included services</Label>
           <div className="diag-checkbox-list">

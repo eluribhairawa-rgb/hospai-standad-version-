@@ -1313,7 +1313,7 @@ export default function PatientReachAiPage({ setNotice, selectedPatient: initial
                             <span><strong>SpO2:</strong> {records.vitals[records.vitals.length - 1].spo2}%</span>
                           )}
                           {records.vitals[records.vitals.length - 1].temperature && (
-                            <span><strong>Temp:</strong> {records.vitals[records.vitals.length - 1].temperature} °F</span>
+                            <span><strong>Temp:</strong> {records.vitals[records.vitals.length - 1].temperature} °C</span>
                           )}
                         </div>
                       </div>

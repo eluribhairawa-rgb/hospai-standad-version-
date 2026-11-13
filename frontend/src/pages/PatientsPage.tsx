@@ -1612,7 +1612,7 @@ function PatientDetail({
                 const pieces = [];
                 if (vital.bp) pieces.push(`BP: ${vital.bp}`);
                 if (vital.pulse) pieces.push(`Pulse: ${vital.pulse}`);
-                if (vital.temperature) pieces.push(`Temp: ${vital.temperature}`);
+                if (vital.temperature) pieces.push(`Temp: ${vital.temperature} °C`);
                 if (vital.weight) pieces.push(`Weight: ${vital.weight} kg`);
                 if (vital.height) pieces.push(`Height: ${vital.height} cm`);
                 if (vital.spo2) pieces.push(`SpO2: ${vital.spo2}%`);

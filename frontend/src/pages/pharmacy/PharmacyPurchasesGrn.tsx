@@ -1119,7 +1119,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "center" }}
                           value={item.free_qty ?? ""}
-                          placeholder="0"
+                          placeholder=""
                           onChange={(e) => handleUpdateGrnItem(idx, "free_qty", e.target.value)}
                         />
                       </td>
@@ -1130,7 +1130,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "center" }}
                           value={item.damaged_qty ?? ""}
-                          placeholder="0"
+                          placeholder=""
                           onChange={(e) => handleUpdateGrnItem(idx, "damaged_qty", e.target.value)}
                         />
                       </td>
@@ -1142,7 +1142,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "right" }}
                           value={item.unit_cost ?? ""}
-                          placeholder="0.00"
+                          placeholder=""
                           onChange={(e) => handleUpdateGrnItem(idx, "unit_cost", e.target.value)}
                         />
                       </td>
@@ -1154,7 +1154,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "right" }}
                           value={item.discount_pct ?? ""}
-                          placeholder="0"
+                          placeholder=""
                           onKeyDown={preventNonNumericDiscountKeys}
                           onChange={(e) => handleUpdateGrnItem(idx, "discount_pct", filterDecimal(e.target.value))}
                         />
@@ -1167,7 +1167,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "right" }}
                           value={item.mrp ?? ""}
-                          placeholder="0.00"
+                          placeholder=""
                           onChange={(e) => handleUpdateGrnItem(idx, "mrp", e.target.value)}
                         />
                       </td>
@@ -1179,7 +1179,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "right" }}
                           value={item.selling_price ?? ""}
-                          placeholder="0.00"
+                          placeholder=""
                           onChange={(e) => handleUpdateGrnItem(idx, "selling_price", e.target.value)}
                         />
                       </td>
@@ -1190,7 +1190,7 @@ export default function PharmacyPurchasesGrn({ setNotice, onNavigate }: Props) {
                           className="ui-input"
                           style={{ width: "100%", padding: "4px 6px", textAlign: "right" }}
                           value={item.gst_rate ?? ""}
-                          placeholder="0"
+                          placeholder=""
                           onChange={(e) => handleUpdateGrnItem(idx, "gst_rate", e.target.value)}
                         />
                       </td>
