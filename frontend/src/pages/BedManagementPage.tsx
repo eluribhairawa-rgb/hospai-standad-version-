@@ -1169,7 +1169,10 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
             <Input
               type="number"
               value={allocateForm.amount_per_day}
-              onChange={(e) => setAllocateForm((p) => ({ ...p, amount_per_day: e.target.value }))}
+              readOnly
+              aria-readonly="true"
+              title="Set by the bed's tariff"
+              style={{ background: "#f8fafc" }}
             />
           </div>
 

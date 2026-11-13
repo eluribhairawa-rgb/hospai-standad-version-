@@ -92,6 +92,7 @@ type Journey = {
   bill?: JourneyBill | null;
   advances?: { total: number; applied: number; refunded: number; available: number; count: number } | null;
   events: JourneyEvent[];
+  due_invoices?: { id: number; invoice_no: string | null; module: string | null; total: number; paid: number; due: number }[];
   financial_summary: { categories: { label: string; amount: number }[]; total_charges: number; payments_received: number; outstanding: number; status: string };
   payments: JourneyPayment[];
   documents: JourneyDocument[];
@@ -136,6 +137,7 @@ const EVENT_DEPARTMENTS: Record<string, string> = {
 export default function PatientJourneyPage({ setNotice, onNavigate, selectedPatient }: Props) {
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem("selected_journey_patient") || selectedPatient?.patient_id || "");
   const [searching, setSearching] = useState(false);
+  const [candidates, setCandidates] = useState<Patient[]>([]);
   const [journey, setJourney] = useState<Journey | null>(null);
   const [expandedEvents, setExpandedEvents] = useState<Set<number>>(new Set());
   const [expandAll, setExpandAll] = useState(false);
@@ -160,6 +162,9 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
   };
   const [deptFilter, setDeptFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState<"oldest" | "newest">("oldest");
+  const [dueOpen, setDueOpen] = useState(false);
+  const [payMode, setPayMode] = useState("cash");
+  const [paying, setPaying] = useState(false);
   const [exporting, setExporting] = useState<"" | "pdf" | "print">("");
   const [reportModal, setReportModal] = useState<{ title: string; loading: boolean; content: Record<string, unknown> | null } | null>(null);
 
@@ -191,6 +196,37 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
     }
   };
 
+  // Pays what is outstanding: open invoices first, anything not yet invoiced (e.g. running bed charges) as an
+  // advance deposit on the admission. The amount is fixed to the due figure.
+  const netDueOf = (j: Journey) => Math.max(0, Math.round((j.financial_summary.outstanding - ((j as any).advances?.available || 0)) * 100) / 100);
+
+  const payOutstanding = async () => {
+    if (!journey) return;
+    const dueInvoices = journey.due_invoices || [];
+    const invoicedDue = dueInvoices.reduce((t, i) => t + i.due, 0);
+    const uninvoiced = Math.max(0, Math.round((netDueOf(journey) - invoicedDue) * 100) / 100);
+    const sel = journey.selected;
+    setPaying(true);
+    try {
+      for (const inv of dueInvoices) {
+        await apiFetch(`/api/billing/invoices/${inv.id}/payments`, { method: "POST", body: JSON.stringify({ amount: inv.due, payment_mode: payMode }) });
+      }
+      if (uninvoiced > 0) {
+        await apiFetch(`/api/billing/advances`, { method: "POST", body: JSON.stringify({
+          patient_id: journey.patient.patient_id, admission_id: sel?.encounter_type === "IP" ? sel.encounter_id : undefined,
+          amount: uninvoiced, payment_mode: payMode, notes: "Collected from Patient Journey outstanding",
+        }) });
+      }
+      setNotice({ type: "success", message: `Payment of ${formatCurrency(invoicedDue + uninvoiced)} recorded.` });
+      setDueOpen(false);
+      await loadJourney(journey.patient.patient_id, sel || undefined);
+    } catch (error) {
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to record the payment.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   const handleSearch = async () => {
     const term = searchTerm.trim();
     if (!term) {
@@ -198,19 +234,27 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
       return;
     }
     setSearching(true);
+    setCandidates([]);
     try {
       if (/^PAT-/i.test(term)) {
         await loadJourney(term);
         return;
       }
       const res = await apiFetch<{ patients?: Patient[] }>(`/api/patients?q=${encodeURIComponent(term)}`);
-      const match = (res.patients || [])[0];
-      if (!match) {
+      const found = res.patients || [];
+      if (found.length === 0) {
         setJourney(null);
         setNotice({ type: "warning", message: `No patient found matching "${term}".` });
         return;
       }
-      await loadJourney(match.patient_id);
+      if (found.length > 1) {
+        // Several patients share this name: let the user pick the right one.
+        setJourney(null);
+        setCandidates(found);
+        setNotice({ type: "info", message: `${found.length} patients match "${term}". Select one to open the journey.` });
+        return;
+      }
+      await loadJourney(found[0].patient_id);
     } catch (error) {
       reportError(setNotice, error as { message?: string; status?: number }, "Search failed.");
     } finally {
@@ -548,6 +592,27 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
         </button>
       </div>
 
+      {candidates.length > 0 && (
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "14px", marginBottom: "1.25rem", overflow: "hidden" }}>
+          <div style={{ padding: "10px 16px", fontSize: "12.5px", fontWeight: 700, color: "#0f172a", borderBottom: "1px solid #e2e8f0" }}>
+            {candidates.length} matching patients
+          </div>
+          {candidates.map((c) => (
+            <button
+              key={c.patient_id} type="button"
+              onClick={() => { setCandidates([]); setSearchTerm(c.patient_id); void loadJourney(c.patient_id); }}
+              style={{ display: "grid", gridTemplateColumns: "1.4fr 2fr 0.6fr 0.8fr 1.2fr", gap: "10px", width: "100%", textAlign: "left", padding: "10px 16px", background: "transparent", border: "none", borderBottom: "1px solid #f1f5f9", cursor: "pointer", fontSize: "13px", color: "#334155" }}
+            >
+              <span>{c.patient_id}</span>
+              <strong>{[c.name, c.middle_name, c.last_name].filter((p, i, arr) => p && !arr.slice(0, i).some((q) => q && q.toUpperCase().includes(String(p).toUpperCase()))).join(" ")}</strong>
+              <span>{c.age ?? "-"}</span>
+              <span>{c.gender || "-"}</span>
+              <span>{c.phone || "-"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {!journey && (
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "14px", padding: "40px", textAlign: "center", color: "#64748b" }}>
           Search a real patient by name or UHID to see their full registration-to-discharge journey, itemized charges and payments.
@@ -849,7 +914,11 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12.5px", marginTop: "4px" }}>
                     <span style={{ color: fs.outstanding > 0 ? "#dc2626" : "#64748b" }}>Outstanding</span>
                     <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <strong style={{ color: fs.outstanding > 0 ? "#dc2626" : "#0f172a" }}>{formatCurrency(fs.outstanding)}</strong>
+                      <strong
+                        style={{ color: fs.outstanding > 0 ? "#dc2626" : "#0f172a", cursor: fs.outstanding > 0 ? "pointer" : "default", textDecoration: fs.outstanding > 0 ? "underline" : "none" }}
+                        title={fs.outstanding > 0 ? "View dues and pay" : undefined}
+                        onClick={() => { if (fs.outstanding > 0) setDueOpen(true); }}
+                      >{formatCurrency(fs.outstanding)}</strong>
                       {fs.status === "Settled" && <span style={{ fontSize: "10.5px", fontWeight: 700, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: "9999px" }}>Settled</span>}
                     </span>
                   </div>
@@ -915,6 +984,44 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
             </div>
           </div>
         </>
+      )}
+
+      {dueOpen && journey && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }} onClick={() => !paying && setDueOpen(false)}>
+          <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 22px", width: "100%", maxWidth: "440px" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 4px", fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>Outstanding dues</h3>
+            <p style={{ margin: "0 0 12px", fontSize: "12px", color: "#64748b" }}>{journey.patient.name} · {journey.patient.patient_id}</p>
+            {journey.financial_summary.categories.map((c) => (
+              <div key={c.label} style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", padding: "4px 0", color: "#475569" }}>
+                <span>{c.label}</span><span>{formatCurrency(c.amount)}</span>
+              </div>
+            ))}
+            {(journey.due_invoices || []).map((i) => (
+              <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", padding: "4px 0", color: "#b45309" }}>
+                <span>Unpaid invoice {i.invoice_no || `#${i.id}`}</span><span>{formatCurrency(i.due)}</span>
+              </div>
+            ))}
+            <div style={{ borderTop: "1px solid #e2e8f0", marginTop: "8px", paddingTop: "8px", fontSize: "12.5px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", color: "#16a34a" }}><span>Payments received</span><span>{formatCurrency(journey.financial_summary.payments_received)}</span></div>
+              {((journey as any).advances?.available || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#0284c7", marginTop: "4px" }}><span>Advance available</span><span>-{formatCurrency((journey as any).advances.available)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: "#dc2626", marginTop: "4px" }}><span>Amount due</span><span>{formatCurrency(netDueOf(journey))}</span></div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "14px" }}>
+              <label style={{ fontSize: "12px", color: "#475569" }}>Amount (₹)
+                <input readOnly aria-readonly="true" value={netDueOf(journey).toFixed(2)} style={{ width: "100%", marginTop: "4px", padding: "8px", border: "1px solid #cbd5e1", borderRadius: "8px", background: "#f1f5f9" }} />
+              </label>
+              <label style={{ fontSize: "12px", color: "#475569" }}>Payment mode
+                <select value={payMode} onChange={(e) => setPayMode(e.target.value)} style={{ width: "100%", marginTop: "4px", padding: "8px", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
+                  <option value="cash">Cash</option><option value="card">Card</option><option value="upi">UPI</option><option value="bank">Bank transfer</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+              <Button variant="secondary" onClick={() => setDueOpen(false)} disabled={paying}>Cancel</Button>
+              <Button onClick={payOutstanding} disabled={paying || netDueOf(journey) <= 0}>{paying ? "Recording…" : `Pay ${formatCurrency(netDueOf(journey))}`}</Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {reportModal && (

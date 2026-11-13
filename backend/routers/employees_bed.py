@@ -426,6 +426,12 @@ def allot_bed_api(request: Request, payload: dict = Body(...), db: Session = Dep
             lq.ensure_not_currently_admitted(cursor, patient_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        # The daily rate is the bed's tariff from Bed Management; the amount sent by the client is not trusted.
+        cursor.execute("SELECT daily_rate FROM hospital_beds WHERE LOWER(ward) = LOWER(?) AND LOWER(bed_no) = LOWER(?)", (ward, bed_no))
+        tariff = cursor.fetchone()
+        if tariff and tariff[0] is not None:
+            amount_per_day = float(tariff[0])
+            total_amount = amount_per_day * total_days
         cursor.execute("SELECT ward, bed_no FROM bed_allocations WHERE patient_id = ? AND status = 'active'", (patient_id,))
         previous_beds = cursor.fetchall()
         cursor.execute("UPDATE bed_allocations SET status = 'released', released_at = CURRENT_TIMESTAMP WHERE patient_id = ? AND status = 'active'", (patient_id,))

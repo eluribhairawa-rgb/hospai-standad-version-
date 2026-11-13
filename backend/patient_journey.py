@@ -304,6 +304,23 @@ def list_patient_journey_encounters(db, patient_id):
                 "bed_no": None,
             })
 
+        if not encounters:
+            # A registered patient with no visit yet (e.g. vitals captured at registration) still gets a journey.
+            cursor.execute("SELECT created_at FROM patients WHERE patient_id = ?", (patient_id,))
+            reg = cursor.fetchone()
+            if reg:
+                encounters.append({
+                    "key": "OP:0",
+                    "encounter_type": "OP",
+                    "encounter_id": 0,
+                    "label": "Registration",
+                    "start": _iso(reg["created_at"]),
+                    "end": _iso(reg["created_at"]),
+                    "status": "Registered",
+                    "ward": None,
+                    "bed_no": None,
+                })
+
         return encounters
 
 
@@ -718,6 +735,10 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             appt_date, appt_time = _split_dt(appt.get("created_at") or appt.get("appointment_date") or patient.get("created_at"))
             appt_day = (appt.get("appointment_date") or "")[:10] if isinstance(appt.get("appointment_date"), str) else _iso(appt.get("appointment_date"))[:10] if appt.get("appointment_date") else ""
 
+            if not appt_day and not appointment_id:
+                # No appointment: anchor the visit at registration so vitals and bills since then are shown.
+                appt_day = (_iso(patient.get("created_at")) or "")[:10]
+
             if is_first:
                 reg_date, reg_time = _split_dt(patient.get("created_at"))
                 events.append({"date": reg_date, "time": reg_time, "type": "registration",
@@ -1056,6 +1077,15 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                 payments_received += float(inv["paid_amount"] or 0)
                 outstanding += float(inv["due_amount"] or 0)
 
+        due_invoices = []
+        for iid in invoice_ids:
+            cursor.execute("SELECT id, invoice_no, module, total_amount, paid_amount, due_amount FROM invoices WHERE id = ?", (iid,))
+            inv = cursor.fetchone()
+            if inv and float(inv["due_amount"] or 0) > 0:
+                due_invoices.append({"id": inv["id"], "invoice_no": inv["invoice_no"], "module": inv["module"],
+                                      "total": float(inv["total_amount"] or 0), "paid": float(inv["paid_amount"] or 0),
+                                      "due": round(float(inv["due_amount"] or 0), 2)})
+
         categories_sum = sum(amount for _, amount in categories)
         if categories_sum > total_charges:
             unaccounted = categories_sum - total_charges
@@ -1178,5 +1208,6 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                 "status": "Settled" if outstanding <= 0 and total_charges > 0 else ("Pending" if total_charges > 0 else "No charges"),
             },
             "payments": payments,
+            "due_invoices": due_invoices,
             "documents": documents,
         }
