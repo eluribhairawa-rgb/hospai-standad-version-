@@ -46,6 +46,22 @@ function containsExistingMarker(children: React.ReactNode): boolean {
   return found;
 }
 
+/** A hand-written "*" (plain text or inside a span). cleanChildren removes these so the
+ *  label draws the one standard marker; this keeps them counting as "required". */
+function hasAsteriskMarker(children: React.ReactNode): boolean {
+  let found = false;
+  React.Children.forEach(children, (child) => {
+    if (found) return;
+    if (typeof child === "string") {
+      found = /\*+\s*$/u.test(child);
+    } else if (React.isValidElement(child)) {
+      const inner: any = (child as any).props?.children;
+      if (inner !== undefined && inner !== null) found = hasAsteriskMarker(inner);
+    }
+  });
+  return found;
+}
+
 function stripTrailingAsteriskFromStringNode(text: string) {
   return text.replace(/\s*\*+\s*$/u, "");
 }
@@ -104,7 +120,7 @@ function partitionLabelChildren(children: React.ReactNode): {
 function Label({ className, children, required, ...props }: LabelProps) {
   // Determine requiredness from explicit prop, or from child inputs (e.g., <Input required />)
   const requiredFromChild = hasRequiredChild(children);
-  const isRequired = required === true || requiredFromChild || props["aria-required"] === "true" || props["aria-required"] === true;
+  const isRequired = required === true || requiredFromChild || hasAsteriskMarker(children) || props["aria-required"] === "true" || props["aria-required"] === true;
 
   const cleanedChildren = cleanChildren(children);
   const alreadyHasMarker = containsExistingMarker(children);
