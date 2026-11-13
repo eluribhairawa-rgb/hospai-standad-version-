@@ -51,11 +51,19 @@ type JourneyDocument = { type: string; label: string; available: boolean; ref: n
 
 type JourneyPayment = { date: string; time: string; mode: string; reference: string; invoice_no: string; amount: number };
 
+type JourneyStay = {
+  reason?: string | null; department?: string | null; consulting_doctor?: string | null; admission_type?: string | null;
+  triage?: string | null; expected_stay?: string | null; payer_type?: string | null;
+  bed: { ward?: string | null; room_no?: string | null; bed_no?: string | null; bed_type?: string | null; daily_charge?: number | null; since?: string | null; status?: string | null } | null;
+  bed_history: { label: string; from: string | null; to: string | null }[];
+};
+
 type Journey = {
   patient: { patient_id: string; name: string; age: number | null; gender: string | null; phone?: string | null; phone_country_code?: string | null };
   encounters: JourneyEncounter[];
   selected: JourneyEncounter | null;
   doctor_name: string | null;
+  stay?: JourneyStay | null;
   events: JourneyEvent[];
   financial_summary: { categories: { label: string; amount: number }[]; total_charges: number; payments_received: number; outstanding: number; status: string };
   payments: JourneyPayment[];
@@ -74,6 +82,10 @@ function formatDateHeading(iso: string) {
 function eventDotColor(type: string) {
   if (type === "discharge" || type === "disposition") return "#16a34a";
   if (type === "nursing_note") return "#7c3aed";
+  if (type === "bed_allocated" || type === "bed_released") return "#0ea5e9";
+  if (type === "doctor_round" || type === "observation_note" || type === "surgery") return "#2563eb";
+  if (type === "medication_order") return "#ea580c";
+  if (type === "vitals") return "#db2777";
   if (type === "prescription") return "#2563eb";
   if (type === "pharmacy_issued") return "#ea580c";
   if (type === "lab_bill" || type === "lab_collected" || type === "imaging_completed" || type === "report_released") return "#9333ea";
@@ -82,9 +94,11 @@ function eventDotColor(type: string) {
 
 const EVENT_DEPARTMENTS: Record<string, string> = {
   registration: "Registration", admission: "Admission", consultation: "Consultation",
-  emergency_registration: "Emergency", vitals: "Emergency",
+  emergency_registration: "Emergency", vitals: "Vitals",
   room_charges: "Room & Nursing", payment: "Billing", discharge: "Discharge",
   disposition: "Emergency", nursing_note: "Nursing",
+  bed_allocated: "Bed & Ward", bed_released: "Bed & Ward", doctor_round: "Doctor Rounds", observation_note: "Doctor Rounds",
+  medication_order: "Pharmacy", surgery: "Surgery",
   prescription: "Consultation", pharmacy_issued: "Pharmacy",
   lab_bill: "Diagnostics", lab_collected: "Diagnostics", imaging_completed: "Diagnostics", report_released: "Diagnostics",
   critical_alert: "Diagnostics", critical_ack: "Diagnostics",
@@ -440,6 +454,37 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
               <div style={{ fontSize: "12.5px", color: "#475569" }}>{selected.ward} · Bed {selected.bed_no}</div>
             )}
           </div>
+
+          {journey.stay && (
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "14px", padding: "16px 22px", marginBottom: "16px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 800, color: "#334155", textTransform: "uppercase", marginBottom: "10px" }}>Inpatient stay details</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px 18px" }}>
+                {([
+                  ["Reason for admission", journey.stay.reason],
+                  ["Department", journey.stay.department],
+                  ["Consulting doctor", journey.stay.consulting_doctor],
+                  ["Admission type", journey.stay.admission_type],
+                  ["Triage", journey.stay.triage],
+                  ["Expected stay", journey.stay.expected_stay],
+                  ["Ward / room", journey.stay.bed ? [journey.stay.bed.ward, journey.stay.bed.room_no].filter(Boolean).join(" · ") : null],
+                  ["Bed", journey.stay.bed ? [journey.stay.bed.bed_no, journey.stay.bed.bed_type].filter(Boolean).join(" · ") : null],
+                  ["Bed charge", journey.stay.bed?.daily_charge ? `${formatCurrency(journey.stay.bed.daily_charge)} / day` : null],
+                  ["Payer", journey.stay.payer_type],
+                ] as [string, string | null | undefined][]).map(([label, value]) => (
+                  <div key={label}>
+                    <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>{label}</div>
+                    <div style={{ fontSize: "13px", color: "#0f172a", fontWeight: 600 }}>{value || "Not recorded"}</div>
+                  </div>
+                ))}
+              </div>
+              {journey.stay.bed_history.length > 1 && (
+                <div style={{ marginTop: "12px", fontSize: "12.5px", color: "#475569" }}>
+                  <strong>Bed history:</strong>{" "}
+                  {journey.stay.bed_history.map((b) => `${b.label} (${(b.from || "").slice(0, 16).replace("T", " ")}${b.to ? ` → ${b.to.slice(0, 16).replace("T", " ")}` : " → now"})`).join("  ›  ")}
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "16px", alignItems: "start" }}>
             <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "14px", padding: "18px 22px" }}>

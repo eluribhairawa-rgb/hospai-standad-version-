@@ -118,22 +118,7 @@ def resolve_encounter(db, patient_id, encounter_type=None, encounter_id=None):
     return (encounters[0] if encounters else None), encounters
 
 
-ADMISSION_NOTE_FIELDS = {
-    "admission type": "admission_type", "department": "department", "consulting doctor": "consulting_doctor",
-    "triage acuity": "triage", "reason": "reason", "expected stay": "expected_stay", "allocated bed": "bed",
-}
-
-
-def parse_admission_notes(notes):
-    """The admission form stores its answers as 'Key: value | Key: value' in
-    admissions.notes -- turn that into a dict of the fields the summary can use."""
-    out = {}
-    for part in str(notes or "").split("|"):
-        key, sep, value = part.partition(":")
-        field = ADMISSION_NOTE_FIELDS.get(key.strip().lower())
-        if sep and field and value.strip():
-            out[field] = _clip(value)
-    return out
+parse_admission_notes = patient_journey.parse_admission_notes
 
 
 def _fetch(cursor, sql, params=()):

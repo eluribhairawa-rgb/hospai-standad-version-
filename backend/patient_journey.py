@@ -26,6 +26,107 @@ def _split_dt(value):
     return iso[:10], (iso[11:16] if len(iso) > 10 else "00:00")
 
 
+ADMISSION_NOTE_FIELDS = {
+    "admission type": "admission_type", "department": "department", "consulting doctor": "consulting_doctor",
+    "triage acuity": "triage", "reason": "reason", "expected stay": "expected_stay", "allocated bed": "bed",
+}
+
+
+def parse_admission_notes(notes):
+    """The admission form stores its answers as 'Key: value | Key: value' in
+    admissions.notes -- turn that into a dict of the fields the journey can show."""
+    out = {}
+    for part in str(notes or "").split("|"):
+        key, sep, value = part.partition(":")
+        field = ADMISSION_NOTE_FIELDS.get(key.strip().lower())
+        if sep and field and value.strip():
+            out[field] = " ".join(value.split())
+    return out
+
+
+def _dr(name):
+    """'Dr. Name' without doubling a prefix the stored name already has."""
+    n = str(name or "").strip()
+    return n if not n or n.lower().startswith("dr") and n[2:3] in (".", " ") else f"Dr. {n}"
+
+
+def _bed_label(b):
+    return " · ".join(p for p in [b.get("ward"), b.get("room_no"), f"Bed {b['bed_no']}" if b.get("bed_no") else ""] if p)
+
+
+def _all(cursor):
+    return [dict(r) for r in cursor.fetchall()]
+
+
+def _ip_stay_events(cursor, patient_id, admission_id, admission, beds, window_start, window_end):
+    """Everything that happened during an inpatient stay: each bed the patient
+    occupied, doctor rounds, vitals, observation notes, medication orders and surgeries."""
+    events = []
+    for b in beds:
+        d, t = _split_dt(b.get("allocated_at"))
+        events.append({"date": d, "time": t, "type": "bed_allocated", "title": "Bed allotted" if b is beds[0] else "Bed transfer",
+                        "subtitle": " · ".join(p for p in [
+                            _bed_label(b), b.get("bed_type") or "",
+                            f"₹{float(b['daily_charge']):,.0f}/day" if b.get("daily_charge") else "",
+                            _dr(b.get("assigned_doctor")),
+                        ] if p), "charge": None, "received": None})
+        if b.get("released_at"):
+            d, t = _split_dt(b["released_at"])
+            events.append({"date": d, "time": t, "type": "bed_released", "title": "Bed released", "subtitle": _bed_label(b),
+                            "charge": None, "received": None})
+
+    d0, d1 = (window_start or "")[:10] or "0001-01-01", (window_end or "")[:10] or "9999-12-31"
+
+    cursor.execute("SELECT * FROM doctor_rounds WHERE patient_id = ? AND round_date >= ? AND round_date <= ? ORDER BY round_date, round_time",
+                   (patient_id, d0, d1))
+    for r in _all(cursor):
+        parts = [_dr(r["doctor_name"]),
+                 f"Diagnosis: {r['diagnosis']}" if r["diagnosis"] else "",
+                 f"Assessment: {r['assessment']}" if r["assessment"] else "",
+                 f"Condition: {r['patient_condition']}" if r["patient_condition"] else "",
+                 f"Notes: {r['progress_notes']}" if r["progress_notes"] else ""]
+        events.append({"date": _iso(r["round_date"])[:10], "time": (r["round_time"] or "00:00")[:5], "type": "doctor_round",
+                        "title": "Doctor round", "subtitle": " · ".join(p for p in parts if p), "charge": None, "received": None})
+
+    cursor.execute("SELECT * FROM patient_vitals WHERE patient_id = ? AND admission_id = ? ORDER BY COALESCE(recorded_at, record_time, created_at)",
+                   (patient_id, admission_id))
+    for v in _all(cursor):
+        d, t = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
+        vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
+                f"Temp {v['temperature']}" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
+                f"RR {v['respiratory_rate']}" if v.get("respiratory_rate") else "", f"Sugar {v['blood_sugar']}" if v.get("blood_sugar") else ""]
+        events.append({"date": d, "time": t, "type": "vitals", "title": "Vitals recorded",
+                        "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})
+
+    cursor.execute("SELECT * FROM observation_notes WHERE patient_id = ? AND admission_id = ? ORDER BY created_at", (patient_id, admission_id))
+    for n in _all(cursor):
+        d, t = _split_dt(n["created_at"])
+        events.append({"date": d, "time": t, "type": "observation_note", "title": "Doctor observation note",
+                        "subtitle": " · ".join(p for p in [_dr(n["doctor_name"]), n["note"] or "",
+                                                           f"Plan: {n['treatment_plan']}" if n["treatment_plan"] else ""] if p),
+                        "charge": None, "received": None})
+
+    cursor.execute("SELECT * FROM ward_indents WHERE patient_id = ? AND admission_id = ? ORDER BY created_at", (patient_id, admission_id))
+    for ind in _all(cursor):
+        cursor.execute("SELECT medicine_name, dose, frequency, route FROM ward_indent_items WHERE indent_id = ? AND COALESCE(status, '') <> 'cancelled' ORDER BY id",
+                       (ind["id"],))
+        meds = [" ".join(str(x) for x in (m["medicine_name"], m["dose"], m["frequency"]) if x) for m in _all(cursor)]
+        d, t = _split_dt(ind["created_at"])
+        events.append({"date": d, "time": t, "type": "medication_order", "title": "Ward medication order",
+                        "subtitle": " · ".join(p for p in [ind["indent_no"], (ind["status"] or "").title(),
+                                                           _dr(ind["doctor_name"]),
+                                                           ", ".join(meds)] if p), "charge": None, "received": None})
+
+    cursor.execute("SELECT * FROM ot_surgeries WHERE patient_id = ? AND scheduled_start >= ? AND scheduled_start <= ? ORDER BY scheduled_start",
+                   (patient_id, f"{d0} 00:00:00", f"{d1} 23:59:59"))
+    for sg in _all(cursor):
+        d, t = _split_dt(sg["scheduled_start"])
+        events.append({"date": d, "time": t, "type": "surgery", "title": f"Surgery · {sg['procedure_name']}",
+                        "subtitle": " · ".join(p for p in [_dr(sg["surgeon_name"]), (sg["status"] or "").replace("_", " ").title(), sg["notes"] or ""] if p),
+                        "charge": None, "received": None})
+    return events
+
+
 def _patient_name(row):
     return " ".join(p for p in [row.get("name"), row.get("last_name")] if p).strip() or row.get("patient_id")
 
@@ -187,7 +288,7 @@ def _prescription_event(cursor, column, value):
     ]
     d, t = _split_dt(rx["created_at"])
     subtitle = " · ".join(p for p in [
-        f"Dr. {rx['doctor_name']}" if rx["doctor_name"] else "",
+        _dr(rx["doctor_name"]),
         rx["department"] or "",
         f"Diagnosis: {rx['diagnosis']}" if rx["diagnosis"] else "",
         f"{len(medicines)} medicine(s)",
@@ -334,6 +435,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
         is_first = _first_ever(encounters, selected["key"])
 
         events = []
+        stay = None
         invoice_ids = set()
         doctor_name = None
         admission_id = None
@@ -349,7 +451,20 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             )
             bed = cursor.fetchone()
             bed = dict(bed) if bed else None
-            doctor_name = (bed or {}).get("assigned_doctor")
+            cursor.execute("SELECT * FROM bed_allocations WHERE admission_id = ? ORDER BY allocated_at, id", (admission_id,))
+            all_beds = [dict(b) for b in cursor.fetchall()]
+            adm_info = parse_admission_notes(admission.get("notes"))
+            doctor_name = (bed or {}).get("assigned_doctor") or adm_info.get("consulting_doctor")
+            stay = {
+                "reason": adm_info.get("reason"), "department": adm_info.get("department"),
+                "consulting_doctor": doctor_name, "admission_type": adm_info.get("admission_type"),
+                "triage": adm_info.get("triage"), "expected_stay": adm_info.get("expected_stay"),
+                "payer_type": admission.get("payer_type"),
+                "bed": ({"ward": bed.get("ward"), "room_no": bed.get("room_no"), "bed_no": bed.get("bed_no"),
+                         "bed_type": bed.get("bed_type"), "daily_charge": bed.get("daily_charge"),
+                         "since": _iso(bed.get("allocated_at")), "status": bed.get("status")} if bed else None),
+                "bed_history": [{"label": _bed_label(b), "from": _iso(b.get("allocated_at")), "to": _iso(b.get("released_at"))} for b in all_beds],
+            }
 
             adm_date, adm_time = _split_dt(admission.get("admission_date"))
             if is_first:
@@ -359,13 +474,18 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                                 "charge": None, "received": None})
             events.append({
                 "date": adm_date, "time": adm_time, "type": "admission", "title": "Inpatient admission",
-                "subtitle": f"ADM-{admission_id}" + (f" · {bed['ward']} · Bed {bed['bed_no']}" if bed else ""),
+                "subtitle": " · ".join(p for p in [
+                    f"ADM-{admission_id}", stay["admission_type"] or "", f"Reason: {stay['reason']}" if stay["reason"] else "",
+                    f"Triage: {stay['triage']}" if stay["triage"] else "", f"Expected stay: {stay['expected_stay']}" if stay["expected_stay"] else "",
+                ] if p),
                 "charge": None, "received": None,
             })
             if doctor_name:
                 events.append({"date": adm_date, "time": adm_time, "type": "consultation",
-                                "title": "Doctor consultation", "subtitle": f"Attending: {doctor_name}",
+                                "title": "Doctor consultation", "subtitle": " · ".join(p for p in [f"Attending: {_dr(doctor_name)}", stay["department"] or ""] if p),
                                 "charge": None, "received": None})
+            events.extend(_ip_stay_events(cursor, patient_id, admission_id, admission, all_beds,
+                                          _iso(admission.get("admission_date")), _iso(admission.get("discharge_date")) or _iso(datetime.now())))
 
             items = _diag_scope_rows(cursor, "IP", None, admission_id)
             for it in items:
@@ -840,6 +960,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             "encounters": encounters,
             "selected": selected,
             "doctor_name": doctor_name,
+            "stay": stay if etype == "IP" else None,
             "events": events,
             "financial_summary": {
                 "categories": [{"label": label, "amount": amount} for label, amount in categories],
