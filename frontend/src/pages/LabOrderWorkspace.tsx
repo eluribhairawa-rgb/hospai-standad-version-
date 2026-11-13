@@ -605,7 +605,7 @@ function CheckoutModal({ result, setNotice, onReload, onDone }: {
                 </Select>
               </div>
             )}
-            <div><Label>Amount</Label><Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
+            <div><Label>Amount</Label><Input type="number" min={0} value={amount} readOnly aria-readonly="true" /></div>
           </div>
           {method !== "cash" && (
             <div style={{ marginTop: "0.5rem" }}><Label>Reference no. (optional)</Label><Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Card slip / UPI / bank reference" /></div>

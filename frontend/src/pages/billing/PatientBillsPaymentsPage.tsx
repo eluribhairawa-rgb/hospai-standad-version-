@@ -748,8 +748,10 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
                         className="billing-form-input"
                         style={{ border: "none", padding: "8px 0" }}
                         value={amountReceived}
-                        onChange={(e) => setAmountReceived(e.target.value)}
-                        placeholder="Enter amount"
+                        readOnly
+                        aria-readonly="true"
+                        title="Amount is calculated from the selected bills"
+                        placeholder="Amount"
                       />
                     </div>
                   </div>

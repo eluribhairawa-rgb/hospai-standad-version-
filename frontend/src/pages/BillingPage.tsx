@@ -1219,7 +1219,9 @@ export default function BillingPage({ setNotice, view = "record-payment" }: Prop
                   type="number"
                   min={0}
                   value={paymentForm.amount}
-                  onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))}
+                  readOnly
+                  aria-readonly="true"
+                  title="Amount is set from the selected invoice's due amount"
                   placeholder="Amount"
                   aria-label="Billing payment amount"
                 />

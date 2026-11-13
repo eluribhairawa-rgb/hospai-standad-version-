@@ -536,7 +536,16 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
                     )
 
             conn.commit()
-            return {"success": True, "prescription_id": prescription_id, "ip_order": ip_order}
+            # Vitals entered (or completed) on the prescription screen belong to the patient record too, so they
+            # show under Patients and the Patient Journey. An unchanged reading is skipped by add_patient_vitals.
+            vitals_saved = False
+            vitals_in = payload.get("vitals")
+            if isinstance(vitals_in, dict) and any(vitals_in.get(k) not in (None, "") for k in ("bp", "pulse", "temperature", "weight", "height", "spo2")):
+                try:
+                    vitals_saved = bool(lq.add_patient_vitals(db, patient_id, vitals_in))
+                except Exception:
+                    vitals_saved = False
+            return {"success": True, "prescription_id": prescription_id, "ip_order": ip_order, "vitals_saved": vitals_saved}
         except ValueError as e:
             conn.rollback()
             raise HTTPException(status_code=400, detail=str(e))

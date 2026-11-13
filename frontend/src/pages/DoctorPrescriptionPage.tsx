@@ -1384,30 +1384,20 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         medicines: medicines.filter((m) => m.medicine_name.trim()),
         send_to_pharmacy: sendToPharmacy,
         complete_consultation: true,
+        // Saved server-side to the patient's vitals history (Patients + Patient Journey).
+        vitals: {
+          bp: vitalsBp.trim() || undefined,
+          pulse: vitalsPulse ? parseInt(vitalsPulse.replace(/[^0-9]/g, ""), 10) || undefined : undefined,
+          temperature: vitalsTemp ? parseFloat(vitalsTemp.replace(/[^0-9.]/g, "")) || undefined : undefined,
+          weight: vitalsWeight ? parseFloat(vitalsWeight.replace(/[^0-9.]/g, "")) || undefined : undefined,
+          spo2: vitalsSpo2 ? parseFloat(vitalsSpo2.replace(/[^0-9.]/g, "")) || undefined : undefined,
+        },
       };
 
       const saved = await apiFetch<{ ip_order?: { indent_no: string; items: number } | null }>("/api/prescriptions", {
         method: "POST",
         body: JSON.stringify(prescPayload),
       });
-
-      // Save/update vitals to patient_vitals if vitals were provided/updated
-      if (patientUhid.trim() && (vitalsBp || vitalsPulse || vitalsTemp || vitalsWeight || vitalsSpo2)) {
-        try {
-          await apiFetch(`/api/patients/${encodeURIComponent(patientUhid.trim())}/vitals`, {
-            method: "POST",
-            body: JSON.stringify({
-              bp: vitalsBp.trim() || undefined,
-              pulse: vitalsPulse ? parseInt(vitalsPulse.replace(/[^0-9]/g, ""), 10) || undefined : undefined,
-              temperature: vitalsTemp ? parseFloat(vitalsTemp.replace(/[^0-9.]/g, "")) || undefined : undefined,
-              weight: vitalsWeight ? parseFloat(vitalsWeight.replace(/[^0-9.]/g, "")) || undefined : undefined,
-              spo2: vitalsSpo2 ? parseFloat(vitalsSpo2.replace(/[^0-9.]/g, "")) || undefined : undefined,
-            }),
-          });
-        } catch {
-          // non-fatal
-        }
-      }
 
       // 2. Explicitly update appointment status to 'completed' in appointments table
       if (effectiveAppointmentId) {
@@ -1513,6 +1503,13 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         medicines: medicines.filter((m) => m.medicine_name.trim()),
         send_to_pharmacy: sendToPharmacy,
         complete_consultation: false,
+        vitals: {
+          bp: vitalsBp.trim() || undefined,
+          pulse: vitalsPulse ? parseInt(vitalsPulse.replace(/[^0-9]/g, ""), 10) || undefined : undefined,
+          temperature: vitalsTemp ? parseFloat(vitalsTemp.replace(/[^0-9.]/g, "")) || undefined : undefined,
+          weight: vitalsWeight ? parseFloat(vitalsWeight.replace(/[^0-9.]/g, "")) || undefined : undefined,
+          spo2: vitalsSpo2 ? parseFloat(vitalsSpo2.replace(/[^0-9.]/g, "")) || undefined : undefined,
+        },
       };
 
       await apiFetch("/api/prescriptions", {
