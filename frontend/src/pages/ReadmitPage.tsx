@@ -760,9 +760,32 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
         }),
       });
 
+      // Vitals entered for this re-visit become real vitals records (Patients > Vitals History and the
+      // Patient Journey), not just text in the appointment notes. Values that are still the pre-filled
+      // last reading were not entered now, so they are not re-recorded.
+      let vitalsWarning = "";
+      const baseline = normalizeProfile(activePatient);
+      const vitalFields = ["bpSys", "bpDia", "temperature", "pulse", "spo2", "weight", "height"] as const;
+      const entered = vitalFields.some((f) => String(profileUpdates[f] ?? "").trim() !== "");
+      const changed = vitalFields.some((f) => String(profileUpdates[f] ?? "").trim() !== String(baseline[f] ?? "").trim());
+      if (entered && changed) {
+        try {
+          const bp = profileUpdates.bpSys && profileUpdates.bpDia ? `${profileUpdates.bpSys}/${profileUpdates.bpDia}` : "";
+          await apiFetch(`/api/patients/${activePatient.patient_id}/vitals`, {
+            method: "POST",
+            body: JSON.stringify({
+              bp, temperature: profileUpdates.temperature, pulse: profileUpdates.pulse, spo2: profileUpdates.spo2,
+              weight: profileUpdates.weight, height: profileUpdates.height,
+            }),
+          });
+        } catch {
+          vitalsWarning = " The vitals could not be saved to the patient's vitals history; please record them again.";
+        }
+      }
+
       setNotice({
-        type: "success",
-        message: `Re-visit created. Patient added to OP Queue Management. Token: ${data.token_no}`,
+        type: vitalsWarning ? "warning" : "success",
+        message: `Re-visit created. Patient added to OP Queue Management. Token: ${data.token_no}.${vitalsWarning}`,
       });
       setNotes("");
       setDocFiles({});
