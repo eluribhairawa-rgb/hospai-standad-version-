@@ -59,7 +59,18 @@ type DischargeBillPreview = {
   diag_items: { id: number; service_name: string; amount: number }[];
   diag_total: number;
   grand_total: number;
+  advance_available?: number;
+  advances?: { id: number; advance_no: string; available: number }[];
 };
+
+
+/** Advance on deposit vs this bill: how much is applied, and how much is left over to return. */
+function advanceFigures(preview: { grand_total: number; advance_available?: number }, discountText: string) {
+  const net = Math.max(0, preview.grand_total - (Number(discountText) || 0));
+  const avail = preview.advance_available || 0;
+  const applied = Math.min(avail, net);
+  return { avail, applied, excess: Math.max(0, Math.round((avail - applied) * 100) / 100) };
+}
 
 export default function BedManagementPage({ setNotice, onNavigate }: Props) {
   const [beds, setBeds] = useState<HospitalBed[]>([]);
@@ -120,7 +131,8 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
   const [loadingDischargePreview, setLoadingDischargePreview] = useState(false);
   const [dischargeForm, setDischargeForm] = useState({
     discount: "0",
-    advance_paid: "0",
+    return_excess: true,
+    refund_method: "Cash",
     payment_mode: "cash",
     notes: "Discharged in stable condition",
   });
@@ -371,7 +383,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
     }
     setDischargeBed(bed);
     setDischargePreview(null);
-    setDischargeForm({ discount: "0", advance_paid: "0", payment_mode: "cash", notes: "Discharged in stable condition" });
+    setDischargeForm({ discount: "0", return_excess: true, refund_method: "Cash", payment_mode: "cash", notes: "Discharged in stable condition" });
     setLoadingDischargePreview(true);
     try {
       const preview = await apiFetch<DischargeBillPreview>(`/api/bed/allocations/${bed.allocation_id}/discharge-bill`);
@@ -388,21 +400,23 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
     if (!dischargeBed?.allocation_id) return;
     setSubmittingDischarge(true);
     try {
-      const res = await apiFetch<{ invoice_no: string; total_amount: number; paid_amount: number }>(
+      const res = await apiFetch<{ advance_paid?: number; refund_requests?: { refund_no: string; amount: number }[]; invoice_no: string; total_amount: number; paid_amount: number }>(
         `/api/bed/allocations/${dischargeBed.allocation_id}/discharge`,
         {
           method: "POST",
           body: JSON.stringify({
             discount: Number(dischargeForm.discount) || 0,
-            advance_paid: Number(dischargeForm.advance_paid) || 0,
+            return_excess: dischargeForm.return_excess,
+            refund_method: dischargeForm.refund_method,
             payment_mode: dischargeForm.payment_mode,
             notes: dischargeForm.notes,
           }),
         }
       );
+      const advanceNote = `${res.advance_paid ? ` Advance of ₹${Number(res.advance_paid).toFixed(2)} applied.` : ""}${res.refund_requests?.length ? ` Refund request ${res.refund_requests.map((r) => `${r.refund_no} (₹${Number(r.amount).toFixed(2)})`).join(", ")} sent for approval in Advances & Refunds.` : ""}`;
       setNotice({
         type: "success",
-        message: `${dischargeBed.patient_name || "Patient"} discharged from ${dischargeBed.ward} / ${dischargeBed.bed_no}. Invoice ${res.invoice_no} generated for ₹${res.total_amount.toFixed(2)} (₹${res.paid_amount.toFixed(2)} collected now).`,
+        message: `${dischargeBed.patient_name || "Patient"} discharged from ${dischargeBed.ward} / ${dischargeBed.bed_no}. Invoice ${res.invoice_no} generated for ₹${res.total_amount.toFixed(2)} (₹${res.paid_amount.toFixed(2)} collected now).${advanceNote}`,
       });
       setDischargeBed(null);
       setDischargePreview(null);
@@ -1503,15 +1517,43 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
                     />
                   </div>
                   <div>
-                    <Label>Advance already paid (₹)</Label>
-                    <Input
-                      type="number"
-                      min={0}
-                      value={dischargeForm.advance_paid}
-                      onChange={(e) => setDischargeForm((p) => ({ ...p, advance_paid: e.target.value }))}
-                    />
+                    <Label>Advance paid (₹)</Label>
+                    <Input type="number" readOnly value={advanceFigures(dischargePreview, dischargeForm.discount).avail} style={{ background: "#f1f5f9" }} title="Taken automatically from the patient's advance deposits" />
                   </div>
+
                 </div>
+
+                {(() => {
+                  const adv = advanceFigures(dischargePreview, dischargeForm.discount);
+                  if (adv.avail <= 0) return null;
+                  return (
+                    <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#166534", marginBottom: 12 }}>
+                      Advance paid: <strong>₹{adv.avail.toFixed(2)}</strong> · used for this bill: <strong>₹{adv.applied.toFixed(2)}</strong> · balance: <strong>₹{adv.excess.toFixed(2)}</strong>
+                      {adv.excess > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
+                            <input type="checkbox" checked={dischargeForm.return_excess} onChange={(e) => setDischargeForm((p) => ({ ...p, return_excess: e.target.checked }))} />
+                            Return the remaining ₹{adv.excess.toFixed(2)} to the patient
+                          </label>
+                          {dischargeForm.return_excess ? (
+                            <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+                              <span>Refund method</span>
+                              <Select value={dischargeForm.refund_method} onChange={(e) => setDischargeForm((p) => ({ ...p, refund_method: e.target.value }))} style={{ maxWidth: 200 }}>
+                                <option value="Cash">Cash</option>
+                                <option value="UPI">UPI</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="Card">Card</option>
+                              </Select>
+                            </div>
+                          ) : (
+                            <div style={{ marginTop: 4, fontWeight: 500 }}>It stays as advance balance and can be refunded later from Advances &amp; Refunds.</div>
+                          )}
+                          {dischargeForm.return_excess && <div style={{ marginTop: 4, fontWeight: 500 }}>A refund request is created and goes for approval and payout in Advances &amp; Refunds.</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div style={{ marginBottom: "12px" }}>
                   <Label>Payment mode for balance collected now</Label>
@@ -1536,7 +1578,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
                 </div>
 
                 <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: "8px", padding: "10px 12px", marginBottom: "16px", fontSize: "12.5px", color: "#1e40af" }}>
-                  Amount to collect now: <strong>₹{Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - (Number(dischargeForm.advance_paid) || 0)).toFixed(2)}</strong>.
+                  Amount to collect now: <strong>₹{Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - advanceFigures(dischargePreview, dischargeForm.discount).applied).toFixed(2)}</strong>.
                   Confirming will generate the final invoice, mark this admission discharged, and free the bed.
                 </div>
 

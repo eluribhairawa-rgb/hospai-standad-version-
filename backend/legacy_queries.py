@@ -8938,7 +8938,27 @@ def get_discharge_bill_preview(db, admission_id=None, allocation_id=None):
 
         grand_total = round(bed_total + pharmacy_total + diag_total, 2)
 
+        # Advance deposits the patient still has available (same rows the IP Discharge Billing screen applies).
+        cursor.execute(
+            """
+            SELECT id, advance_no, amount, allocated_amount, refunded_amount, reserved_refund_amount, payment_mode, created_at
+            FROM patient_advances
+            WHERE (admission_id = ? OR patient_id = ?) AND status = 'active'
+            ORDER BY id ASC
+            """,
+            (admission_id, patient_id),
+        )
+        advances = []
+        for a in cursor.fetchall():
+            avail = round(float(a["amount"] or 0) - float(a["allocated_amount"] or 0) - float(a["refunded_amount"] or 0) - float(a["reserved_refund_amount"] or 0), 2)
+            if avail > 0:
+                advances.append({"id": a["id"], "advance_no": a["advance_no"], "payment_mode": a["payment_mode"],
+                                 "amount": float(a["amount"] or 0), "available": avail})
+        advance_available = round(sum(a["available"] for a in advances), 2)
+
         return {
+            "advances": advances,
+            "advance_available": advance_available,
             "patient": dict(patient) if patient else {"patient_id": patient_id},
             "admission": dict(adm_record) if adm_record else {"id": admission_id},
             "bed": dict(bed) if bed else None,
@@ -9015,7 +9035,8 @@ def settle_inpatient_discharge(db, data, username):
     payment_mode = "insurance" if bill_to_insurer else (raw_mode if raw_mode in valid_modes else "cash")
     notes = data.get("notes", "Discharged in stable condition")
     discount = float(data.get("discount") or 0)
-    advance_paid = float(data.get("advance_paid") or 0)
+    return_excess = bool(data.get("return_excess"))
+    refund_method = str(data.get("refund_method") or "Cash").strip()
 
     preview = get_discharge_bill_preview(db, admission_id=admission_id, allocation_id=allocation_id)
     if preview.get("admission") and preview["admission"].get("discharge_date"):
@@ -9030,6 +9051,9 @@ def settle_inpatient_discharge(db, data, username):
     days_stayed = preview["days_stayed"]
     subtotal = round(bed_total + pharmacy_total + diag_total, 2)
     total_amount = max(0.0, round(subtotal - discount, 2))
+    # The advance applied is whatever the patient actually has on deposit (never a typed number), up to the bill.
+    advance_available = float(preview.get("advance_available") or 0)
+    advance_paid = round(min(advance_available, total_amount), 2)
     paid_amount = max(0.0, round(total_amount - advance_paid, 2))
     due_amount = 0.0
     insurer_due = 0.0
@@ -9105,6 +9129,33 @@ def settle_inpatient_discharge(db, data, username):
             )
         )
         invoice_id = cursor.lastrowid
+
+        # Apply the advance: lock the deposits, re-check what is available, mark it allocated to this invoice.
+        advance_left = {}
+        if advance_available > 0:
+            cursor.execute(
+                "SELECT * FROM patient_advances WHERE (admission_id = ? OR patient_id = ?) AND status = 'active' ORDER BY id ASC FOR UPDATE",
+                (adm_id, patient_id),
+            )
+            need = advance_paid
+            locked_total = 0.0
+            for adv in cursor.fetchall():
+                avail = round(float(adv["amount"] or 0) - float(adv["allocated_amount"] or 0) - float(adv["refunded_amount"] or 0) - float(adv["reserved_refund_amount"] or 0), 2)
+                if avail <= 0:
+                    continue
+                locked_total += avail
+                chunk = round(min(avail, need), 2)
+                if chunk > 0:
+                    cursor.execute("UPDATE patient_advances SET allocated_amount = allocated_amount + ? WHERE id = ?", (chunk, adv["id"]))
+                    cursor.execute("INSERT INTO advance_allocations (advance_id, invoice_id, amount, allocated_by) VALUES (?, ?, ?, ?)",
+                                   (adv["id"], invoice_id, chunk, username))
+                    need = round(need - chunk, 2)
+                if round(avail - chunk, 2) > 0:
+                    advance_left[adv["id"]] = round(avail - chunk, 2)
+            if need > 0.009 or locked_total + 0.009 < advance_paid:
+                conn.rollback()
+                raise ValueError("The patient's advance balance changed while settling. Please reopen the bill and try again.")
+
         claim_id = None
         if insurer and insurer_due > 0:
             claim_id = create_ip_insurance_claim(cursor, invoice_id, patient_id, adm_id, insurer, insurer_due)
@@ -9139,7 +9190,20 @@ def settle_inpatient_discharge(db, data, username):
 
         conn.commit()
 
+    # Money left on deposit after the bill: optionally send it for refund (the normal approve-and-pay flow).
+    refund_requests = []
+    if return_excess and advance_left:
+        import billing_service as bs
+        for adv_id, left in advance_left.items():
+            res = bs.request_advance_refund(db, {
+                "advance_id": adv_id, "amount": left, "refund_method": refund_method,
+                "reason": "Excess advance returned at discharge", "notes": f"Discharge invoice {invoice_no}",
+            }, {"username": username})
+            refund_requests.append({"refund_no": res.get("refund_no"), "amount": res.get("amount")})
+
     return {
+        "advance_balance_left": round(sum(advance_left.values()), 2) if advance_left else 0.0,
+        "refund_requests": refund_requests,
         "status": "success",
         "invoice_id": invoice_id,
         "invoice_no": invoice_no,
