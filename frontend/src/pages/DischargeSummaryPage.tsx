@@ -446,25 +446,31 @@ export default function DischargeSummaryPage({ setNotice, selectedPatient, canEd
     const versionLine = saved ? `Version ${viewing ? viewing.version : saved.current_version}${saved.amendment_count ? ` · Amended ${saved.amendment_count}×` : ""}` : "Unsaved draft";
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Discharge Summary - ${esc(patientName)}</title>
       <style>
-        @page { size: A4; margin: 14mm 14mm 22mm; }
-        body { font-family: Arial, sans-serif; color: #1e293b; font-size: 12px; line-height: 1.5; }
-        h1 { font-size: 18px; text-align: center; margin: 6px 0 2px; color: #16324a; letter-spacing: 0.06em; }
+        /* Page size and margins come from the shared print frame (header, footer, 10mm sides). */
+        @page { size: A4 portrait; }
+        * { box-sizing: border-box; }
+        /* Everything is scoped to .ds-doc so these rules cannot restyle the shared letterhead/footer. */
+        .ds-doc { font-family: Arial, sans-serif; color: #1e293b; font-size: 12px; line-height: 1.5; width: 100%; max-width: 100%;
+          overflow-wrap: anywhere; word-break: break-word; }
+        .ds-doc h1 { font-size: 16px; text-align: center; margin: 4px 0 2px; color: #16324a; letter-spacing: 0.06em; }
         .ds-sub { text-align: center; font-size: 11px; color: #475569; margin-bottom: 12px; }
-        .ds-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 24px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px 13px; margin-bottom: 12px; }
-        .ds-summary { background: #f0fdfa; border-left: 4px solid #00828a; padding: 9px 13px; margin-bottom: 10px; }
+        .ds-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 24px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px 13px; margin-bottom: 12px; }
+        .ds-grid > div { min-width: 0; }
+        .ds-summary { background: #f0fdfa; border-left: 4px solid #00828a; padding: 9px 13px; margin-bottom: 10px; white-space: pre-wrap; }
         .ds-section { break-inside: avoid; page-break-inside: avoid; }
-        h2 { font-size: 12.5px; color: #00828a; margin: 11px 0 3px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
-        p { margin: 0 0 5px; white-space: pre-wrap; }
-        .ds-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin-bottom: 6px; }
-        .ds-table th, .ds-table td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; vertical-align: top; }
+        .ds-doc h2 { font-size: 12.5px; color: #00828a; margin: 11px 0 3px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
+        .ds-doc p { margin: 0 0 5px; white-space: pre-wrap; }
+        .ds-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11.5px; margin-bottom: 6px; }
+        .ds-table th, .ds-table td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
         .ds-table th { background: #f1f5f9; }
         .ds-table tr { break-inside: avoid; }
-        .ds-sign { margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; font-size: 11.5px; break-inside: avoid; }
-        .ds-sign div { border-top: 1px solid #94a3b8; padding-top: 4px; }
-        .ds-watermark { position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 46px; font-weight: 800; color: rgba(220, 38, 38, 0.12); transform: rotate(-24deg); pointer-events: none; }
+        .ds-sign { margin-top: 34px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; font-size: 11.5px; break-inside: avoid; }
+        .ds-sign div { border-top: 1px solid #94a3b8; padding-top: 4px; min-width: 0; }
+        .ds-watermark { position: fixed; top: 42%; left: 0; right: 0; padding: 0 12mm; text-align: center; font-size: 34px; font-weight: 800; color: rgba(220, 38, 38, 0.12); transform: rotate(-24deg); pointer-events: none; }
         .ds-muted { color: #64748b; font-size: 11px; }
       </style></head><body>
       ${watermark}
+      <div class="ds-doc">
       <h1>DISCHARGE SUMMARY</h1>
       <div class="ds-sub">${esc(enc?.type === "EMERGENCY" ? "Emergency visit" : enc?.type === "IP" ? "Inpatient admission" : "Outpatient visit")} · ${esc(versionLine)} · ${esc(isFinal ? "FINAL" : STATUS_META[printStatus as SummaryStatus]?.label || "Unsaved")}</div>
       <div class="ds-grid">
@@ -485,6 +491,7 @@ export default function DischargeSummaryPage({ setNotice, selectedPatient, canEd
         <div>${saved?.approved_by ? `Approved by: Dr. ${esc(saved.approved_by)}<br/><span class="ds-muted">${esc(fmtDateTime(saved.approved_at))}</span>` : "Signature of Consultant: ____________________"}</div>
         ${isFinal ? `<div>Finalised by: ${esc(saved?.finalized_by || "—")}<br/><span class="ds-muted">${esc(fmtDateTime(saved?.finalized_at))}</span></div>` : ""}
         <div class="ds-muted">Printed ${esc(new Date().toLocaleString("en-IN"))}${saved?.ai_generated ? " · Drafted with AI assistance and reviewed by the clinical team" : ""}</div>
+      </div>
       </div>
       </body></html>`;
     printViaIframe(html);
