@@ -93,7 +93,7 @@ function getPrintTitleFontSizePt(title: string): number {
 function buildBrandRowHtml(): string {
   const b = getBranding();
   if (!b || (!b.logo?.data_uri && !b.hospital_title)) {
-    return `<div class="hospai-shared-brand-row">
+    return `<div class="hospai-shared-brand-row" style="padding: 2.5mm 0;">
         <img class="hospai-shared-brand-logo" src="${PRINT_BRAND_HEADER_DATA_URI}" alt="HospAI, Pharmacy and Diagnostic" />
       </div>`;
   }
@@ -110,37 +110,41 @@ function buildBrandRowHtml(): string {
   const titleHtml = `<div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1mm;">${titleContent}</div>`;
 
   if (!b.logo?.data_uri) {
-    return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: center; min-height: auto; padding-bottom: 2mm;">
+    return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: center; min-height: auto; padding: 2.5mm 0;">
       ${titleHtml}
     </div>`;
   }
 
   const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
-  const logoImg = `<img src="${b.logo.data_uri}" alt="${escapeBrandText(titleText || "Hospital logo")}" style="display: block; width: ${w.toFixed(2)}mm; height: ${h.toFixed(2)}mm; max-width: 100%; object-fit: contain; position: relative; left: ${b.logo_offset_x_mm}mm; top: ${b.logo_offset_y_mm}mm;" />`;
+  // Prevent any negative Y offset from shifting the logo past the top boundary
+  const safeOffsetY = Math.max(b.logo_offset_y_mm ?? 0, -2.5);
+  const logoImg = `<img src="${b.logo.data_uri}" alt="${escapeBrandText(titleText || "Hospital logo")}" style="display: block; width: ${w.toFixed(2)}mm; height: ${h.toFixed(2)}mm; max-width: 100%; object-fit: contain; position: relative; left: ${b.logo_offset_x_mm}mm; top: ${safeOffsetY}mm;" />`;
 
   if (!titleText) {
     const justify = b.logo_alignment === "center" ? "center" : b.logo_alignment === "right" ? "flex-end" : "flex-start";
-    return `<div class="hospai-shared-brand-row" style="justify-content: ${justify}; align-items: center; min-height: auto;">${logoImg}</div>`;
+    return `<div class="hospai-shared-brand-row" style="justify-content: ${justify}; align-items: center; min-height: auto; padding: 2.5mm 0;">
+      <div style="display: flex; align-items: center; justify-content: ${justify}; overflow: visible;">${logoImg}</div>
+    </div>`;
   }
 
   if (b.logo_alignment === "center") {
-    return `<div class="hospai-shared-brand-row" style="flex-direction: column; align-items: center; justify-content: center; min-height: auto; gap: 2.5mm; padding-bottom: 2mm;">
-      <div>${logoImg}</div>
+    return `<div class="hospai-shared-brand-row" style="flex-direction: column; align-items: center; justify-content: center; min-height: auto; gap: 2.5mm; padding: 2.5mm 0;">
+      <div style="display: flex; align-items: center; justify-content: center; overflow: visible;">${logoImg}</div>
       ${titleHtml}
     </div>`;
   }
 
   if (b.logo_alignment === "right") {
-    return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding-bottom: 2mm;">
+    return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding: 2.5mm 0;">
       <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; visibility: hidden;" aria-hidden="true"></div>
       ${titleHtml}
-      <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; justify-content: flex-end;">${logoImg}</div>
+      <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; align-items: center; justify-content: flex-end; overflow: visible;">${logoImg}</div>
     </div>`;
   }
 
   // Default: left alignment
-  return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding-bottom: 2mm;">
-    <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; justify-content: flex-start;">${logoImg}</div>
+  return `<div class="hospai-shared-brand-row" style="align-items: center; justify-content: space-between; min-height: auto; gap: 3mm; padding: 2.5mm 0;">
+    <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; display: flex; align-items: center; justify-content: flex-start; overflow: visible;">${logoImg}</div>
     ${titleHtml}
     <div style="flex-shrink: 0; width: ${w.toFixed(2)}mm; visibility: hidden;" aria-hidden="true"></div>
   </div>`;
@@ -195,7 +199,13 @@ function applySharedHospaiPrintFrame(html: string): string {
 
   const sharedCss = `
     <style data-hospai-shared-print-style>
-      @page { size: A4 portrait; margin: 9mm 10mm 21mm; }
+      @page {
+        size: A4 portrait;
+        margin-top: 12mm !important;
+        margin-bottom: 21mm !important;
+        margin-left: 10mm !important;
+        margin-right: 10mm !important;
+      }
       * { box-sizing: border-box; }
       html { background: #fff !important; }
       body { margin: 0 !important; color: #000 !important; background: transparent !important; position: relative; z-index: 0; }
@@ -204,16 +214,21 @@ function applySharedHospaiPrintFrame(html: string): string {
       }
       .hospai-shared-print-shell {
         width: 100%;
-        margin: 0 0 7mm;
+        margin: 0 0 6mm;
+        padding-top: 2.5mm;
         color: #000;
         font-family: Arial, Helvetica, sans-serif;
         break-inside: avoid;
+        overflow: visible;
       }
       .hospai-shared-brand-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        min-height: 24mm;
+        min-height: 28mm;
+        padding: 2.5mm 0;
+        overflow: visible;
+        box-sizing: border-box;
       }
       .hospai-shared-brand-logo {
         width: 86mm;
@@ -225,7 +240,7 @@ function applySharedHospaiPrintFrame(html: string): string {
       }
       .hospai-shared-header-divider {
         width: 100%;
-        margin: 1.5mm 0 4mm;
+        margin: 2mm 0 4mm;
         border-top: 0.65mm solid #000;
       }
       .hospai-shared-report-row {

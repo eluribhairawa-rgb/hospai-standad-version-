@@ -90,7 +90,7 @@ def draw_pdf_brand_header(pdf, left_margin: float, top_y: float, title_width: fl
             def x_for(w):
                 base = {"left": left_margin, "center": (left_margin + right_edge - w) / 2, "right": right_edge - w}.get(align, left_margin)
                 return min(max(base + b["logo_offset_x_mm"], 0), 210 - w)
-            y = min(max(top_y + b["logo_offset_y_mm"], 0), top_y + 33 - 4)
+            y = min(max(top_y + b["logo_offset_y_mm"], 3), top_y + 33 - 4)
             drawn = _custom_image(pdf, b["logo_file"], b.get("logo_mime"), b.get("logo_width_px"), b.get("logo_height_px"),
                                   bw, bh, bool(b.get("auto_fit_scaling")), x_for, y)
         except Exception:

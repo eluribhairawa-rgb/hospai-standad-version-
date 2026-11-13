@@ -328,15 +328,16 @@ export default function BrandingPage({ setNotice }: Props) {
           <div style={{ background: "#fff", border: "1px solid #cbd5e1", boxShadow: "0 1px 6px rgba(0,0,0,.12)", padding: 15 * PX_PER_MM / 3, overflow: "hidden" }}>
             <div style={{ width: 180 * PX_PER_MM, maxWidth: "100%", margin: "0 auto" }}>
               <div style={{
-                minHeight: Math.max(26 * PX_PER_MM, (lh + 6) * PX_PER_MM),
+                minHeight: Math.max(28 * PX_PER_MM, (lh + 10) * PX_PER_MM),
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 borderBottom: "2px solid #000",
-                paddingBottom: 6,
-                paddingTop: 4,
+                paddingBottom: 8,
+                paddingTop: 8,
                 boxSizing: "border-box",
                 width: "100%",
+                overflow: "visible",
               }}>
                 {logoEl ? (
                   !trimmedTitle ? (

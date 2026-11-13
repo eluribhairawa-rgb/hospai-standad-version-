@@ -318,11 +318,11 @@ export async function generateClientPdf(
       <div style="position: relative; z-index: 1;">
 
         <!-- Header -->
-        <div style="margin-bottom: ${PDF_HEADER_SPACING};">
+        <div style="margin-bottom: ${PDF_HEADER_SPACING}; padding-top: 8px;">
           ${(() => {
             const b = getBranding();
             if (!b || (!b.logo?.data_uri && !b.hospital_title)) {
-              return `<div style="display: flex; justify-content: flex-start; align-items: center;">
+              return `<div style="display: flex; justify-content: flex-start; align-items: center; padding: 6px 0;">
                 <img src="${PRINT_BRAND_HEADER_DATA_URI}" style="width: ${PDF_LOGO_WIDTH}; height: ${PDF_LOGO_HEIGHT}; object-fit: contain;" alt="HospAI Logo" />
               </div>`;
             }
@@ -339,34 +339,35 @@ export async function generateClientPdf(
             const titleContainer = `<div style="flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">${titleContent}</div>`;
 
             if (!b.logo?.data_uri) {
-              return `<div style="text-align: center; width: 100%;">${titleContent}</div>`;
+              return `<div style="text-align: center; width: 100%; padding: 6px 0;">${titleContent}</div>`;
             }
 
             const [w, h] = fitMm(b.logo.width_px, b.logo.height_px, b.logo_box_mm[0], b.logo_box_mm[1], b.auto_fit_scaling);
             const px = (mm: number) => Math.round(mm * 3.7795 * 1.6);
-            const logoImg = `<img src="${b.logo.data_uri}" style="width: ${px(w)}px; height: ${px(h)}px; object-fit: contain;" alt="${escapeBrandText(titleText || "Logo")}" />`;
+            const safeOffsetY = Math.max(b.logo_offset_y_mm ?? 0, -2.5);
+            const logoImg = `<img src="${b.logo.data_uri}" style="width: ${px(w)}px; height: ${px(h)}px; object-fit: contain; position: relative; left: ${px(b.logo_offset_x_mm ?? 0)}px; top: ${px(safeOffsetY)}px;" alt="${escapeBrandText(titleText || "Logo")}" />`;
 
             if (!titleText) {
               const justify = b.logo_alignment === "center" ? "center" : b.logo_alignment === "right" ? "flex-end" : "flex-start";
-              return `<div style="display: flex; justify-content: ${justify}; align-items: center;">${logoImg}</div>`;
+              return `<div style="display: flex; justify-content: ${justify}; align-items: center; padding: 6px 0;">${logoImg}</div>`;
             }
 
             if (b.logo_alignment === "center") {
-              return `<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+              return `<div style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0;">
                 <div>${logoImg}</div>
                 ${titleContainer}
               </div>`;
             }
 
             if (b.logo_alignment === "right") {
-              return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0;">
                 <div style="width: ${px(w)}px; flex-shrink: 0; visibility: hidden;"></div>
                 ${titleContainer}
                 <div style="width: ${px(w)}px; flex-shrink: 0; display: flex; justify-content: flex-end;">${logoImg}</div>
               </div>`;
             }
 
-            return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            return `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0;">
               <div style="width: ${px(w)}px; flex-shrink: 0; display: flex; justify-content: flex-start;">${logoImg}</div>
               ${titleContainer}
               <div style="width: ${px(w)}px; flex-shrink: 0; visibility: hidden;"></div>
