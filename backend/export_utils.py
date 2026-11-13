@@ -648,6 +648,9 @@ def _generate_standard_report_pdf(payload: dict) -> bytes:
 
     totals = payload.get("totals") or {}
     if totals:
+        # Heading + the row of tiles (22mm) stay together: without this the tiles were drawn at the
+        # page bottom and each one broke onto its own page, so Amount Received / Balance printed incomplete.
+        _ensure_space(15 + 26)
         _section("Summary")
         tile_labels = [
             ("Subtotal", totals.get("subtotal")),
@@ -678,6 +681,7 @@ def _generate_standard_report_pdf(payload: dict) -> bytes:
 
     payment_details = payload.get("payment_details") or {}
     if payment_details:
+        _ensure_space(15 + 32)
         _section("Payment Details")
         _two_column_details([
             ("Receipt Number", payment_details.get("receipt_number") or "-"),
