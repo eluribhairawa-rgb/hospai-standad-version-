@@ -1648,12 +1648,27 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     setPatientDirectoryModalOpen(false);
     setUhidDropdownOpen(false);
 
-    if (p.latest_doctor_name && p.latest_doctor_name !== "-") {
-      setDoctorName(p.latest_doctor_name);
+    // The patient's assigned doctor and department: from the list row when it carries them (the full
+    // list does, search results do not), otherwise from their latest appointment. Both stay changeable.
+    let assignedDoctor = p.latest_doctor_name && p.latest_doctor_name !== "-" ? String(p.latest_doctor_name) : "";
+    let assignedDepartment = p.latest_department && p.latest_department !== "-" ? String(p.latest_department) : "";
+    if ((!assignedDoctor || !assignedDepartment) && uhid) {
+      try {
+        const data = await apiFetch<{ appointments?: any[] }>(`/api/appointments?patient_id=${encodeURIComponent(uhid)}`);
+        const latest = [...(data?.appointments || [])]
+          .filter((a) => a.doctor_name)
+          .sort((x, y) => String(y.appointment_date || "").localeCompare(String(x.appointment_date || "")))[0];
+        if (latest) {
+          assignedDoctor = assignedDoctor || String(latest.doctor_name);
+          assignedDepartment = assignedDepartment || String(latest.department || "");
+        }
+      } catch {
+        // No appointment to read: the doctor/department stay selectable from Doctor Scheduling.
+      }
     }
-    if (p.latest_department && p.latest_department !== "-") {
-      setDepartment(p.latest_department);
-    }
+    if (assignedDoctor) setDoctorName(assignedDoctor);
+    if (assignedDepartment) setDepartment(assignedDepartment);
+    else if (assignedDoctor && scheduleDepartments.get(assignedDoctor)) setDepartment(scheduleDepartments.get(assignedDoctor)!);
 
     // Load previous prescription for this patient (medicines, diagnosis, advice, labs, vitals)
     if (uhid) {
