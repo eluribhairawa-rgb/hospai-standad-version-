@@ -13,6 +13,14 @@ type Props = {
   selectedPatient?: Patient | null;
 };
 
+// Why a charge shows as outstanding, by the module that raised it.
+const DUE_REASONS: Record<string, { module: string; reason: string }> = {
+  "Room & nursing": { module: "Bed Management (IPD)", reason: "running bed charges, not yet billed or paid; settled at discharge or by an advance" },
+  Pharmacy: { module: "Pharmacy", reason: "medicines issued but the bill is not fully paid" },
+  Laboratory: { module: "Lab & Diagnostics", reason: "tests ordered but the invoice is not fully paid" },
+  Imaging: { module: "Lab & Diagnostics (Imaging)", reason: "scans ordered but the invoice is not fully paid" },
+};
+
 type JourneyEncounter = {
   key: string;
   encounter_type: "IP" | "OP" | "EMERGENCY";
@@ -198,7 +206,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
 
   // Pays what is outstanding: open invoices first, anything not yet invoiced (e.g. running bed charges) as an
   // advance deposit on the admission. The amount is fixed to the due figure.
-  const netDueOf = (j: Journey) => Math.max(0, Math.round((j.financial_summary.outstanding - ((j as any).advances?.available || 0)) * 100) / 100);
+  const netDueOf = (j: Journey) => Math.max(0, Math.round(j.financial_summary.outstanding * 100) / 100);
 
   const payOutstanding = async () => {
     if (!journey) return;
@@ -991,19 +999,25 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
           <div style={{ background: "#fff", borderRadius: "14px", padding: "20px 22px", width: "100%", maxWidth: "440px" }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: "0 0 4px", fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>Outstanding dues</h3>
             <p style={{ margin: "0 0 12px", fontSize: "12px", color: "#64748b" }}>{journey.patient.name} · {journey.patient.patient_id}</p>
-            {journey.financial_summary.categories.map((c) => (
-              <div key={c.label} style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", padding: "4px 0", color: "#475569" }}>
-                <span>{c.label}</span><span>{formatCurrency(c.amount)}</span>
-              </div>
-            ))}
+            {journey.financial_summary.categories.map((c) => {
+              const why = DUE_REASONS[c.label];
+              return (
+                <div key={c.label} style={{ padding: "6px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", color: "#334155", fontWeight: 600 }}>
+                    <span>{why?.module || c.label}</span><span>{formatCurrency(c.amount)}</span>
+                  </div>
+                  {why && <div style={{ fontSize: "11.5px", color: "#94a3b8", marginTop: "2px" }}>{c.label} — {why.reason}</div>}
+                </div>
+              );
+            })}
             {(journey.due_invoices || []).map((i) => (
               <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", padding: "4px 0", color: "#b45309" }}>
-                <span>Unpaid invoice {i.invoice_no || `#${i.id}`}</span><span>{formatCurrency(i.due)}</span>
+                <span>{i.module || "Billing"} · unpaid invoice {i.invoice_no || `#${i.id}`}</span><span>{formatCurrency(i.due)}</span>
               </div>
             ))}
             <div style={{ borderTop: "1px solid #e2e8f0", marginTop: "8px", paddingTop: "8px", fontSize: "12.5px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", color: "#16a34a" }}><span>Payments received</span><span>{formatCurrency(journey.financial_summary.payments_received)}</span></div>
-              {((journey as any).advances?.available || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#0284c7", marginTop: "4px" }}><span>Advance available</span><span>-{formatCurrency((journey as any).advances.available)}</span></div>}
+              
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, color: "#dc2626", marginTop: "4px" }}><span>Amount due</span><span>{formatCurrency(netDueOf(journey))}</span></div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "14px" }}>

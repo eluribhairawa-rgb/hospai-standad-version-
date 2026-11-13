@@ -1157,6 +1157,14 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             advance_summary = {"total": round(total_adv, 2), "applied": round(applied, 2), "refunded": round(refunded, 2),
                                "available": round(max(0.0, total_adv - applied - refunded - reserved), 2), "count": len(adv_rows)}
 
+        # Advance deposits still unapplied count against what is owed, so the summary agrees with the Payments
+        # list and Billing > Advances (applied advances are already inside the invoices' paid amounts).
+        if advance_summary and outstanding > 0 and advance_summary["available"] > 0:
+            offset = min(outstanding, advance_summary["available"])
+            payments_received += offset
+            outstanding -= offset
+            advance_summary["offset_against_bill"] = round(offset, 2)
+
         # Nursing Station shift notes -- inpatient ward activity, shown for
         # the admission currently selected in the encounter picker (notes
         # never explicitly linked to an admission still show, since they're
