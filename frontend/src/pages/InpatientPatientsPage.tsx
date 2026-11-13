@@ -92,6 +92,9 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
     notes: "Discharged in stable condition",
   });
   const [submittingDischarge, setSubmittingDischarge] = useState(false);
+  // The attending doctor's clinical notes for the open patient's current admission (Doctor Clinicals module).
+  const [viewNotes, setViewNotes] = useState<{ id: number; doctor_name: string; subjective?: string | null; objective_analysis?: string | null; diagnosis?: string | null; treatment_plan?: string | null; prognosis?: string | null; discharge_readiness: string; created_at?: string | null;
+    presenting_complaints?: string | null; clinical_course?: string | null; key_investigations?: string | null; procedures?: string | null; treatment_given?: string | null; condition_at_discharge?: string | null; advice?: string | null; follow_up?: string | null }[]>([]);
 
   const loadInpatients = async () => {
     setLoading(true);
@@ -139,6 +142,12 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
     setDischargeStep("view");
     setDischargePreview(null);
     setLoadingAdmissions(true);
+    setViewNotes([]);
+    if ((bed as { admission_id?: number }).admission_id) {
+      apiFetch<{ notes?: typeof viewNotes }>(`/api/admissions/${(bed as { admission_id?: number }).admission_id}/doctor-notes`)
+        .then((r) => setViewNotes(r.notes || []))
+        .catch(() => setViewNotes([]));
+    }
     try {
       const data = await apiFetch<{ admissions?: Admission[] }>(`/api/patients/${encodeURIComponent(bed.patient_id)}/admissions`);
       setViewAdmissions(data.admissions || []);
@@ -355,6 +364,24 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
                 <div key={a.id} style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
                   <div style={{ color: "#64748b", fontSize: 11 }}>{a.admission_date || a.created_at}</div>
                   <div>{a.notes || "-"}</div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <h4 style={{ margin: "6px 0" }}>Doctor Clinical Notes ({viewNotes.length})</h4>
+              {viewNotes.length === 0 && <p className="muted">No doctor clinical notes recorded yet.</p>}
+              {viewNotes.map((n) => (
+                <div key={n.id} style={{ fontSize: 13, padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <div style={{ color: "#64748b", fontSize: 11 }}>{n.doctor_name} · {n.created_at ? new Date(n.created_at).toLocaleString() : ""}</div>
+                  {([
+                    ["Subjective", n.subjective], ["Objective analysis", n.objective_analysis], ["Diagnosis", n.diagnosis],
+                    ["Treatment plan", n.treatment_plan], ["Prognosis", n.prognosis],
+                    ["Presenting complaints", n.presenting_complaints], ["Clinical course", n.clinical_course], ["Key investigations", n.key_investigations],
+                    ["Procedures / surgery", n.procedures], ["Treatment given", n.treatment_given], ["Condition at discharge", n.condition_at_discharge],
+                    ["Advice", n.advice], ["Follow-up", n.follow_up],
+                  ] as [string, string | null | undefined][]).filter(([, v]) => v).map(([label, v]) => (
+                    <div key={label}><strong>{label}:</strong> <span style={{ whiteSpace: "pre-wrap" }}>{v}</span></div>
+                  ))}
                 </div>
               ))}
             </div>

@@ -582,6 +582,8 @@ export interface NavItem {
   deniedHint?: string;
   group?: "overview" | "registration" | "operations" | "finance" | "admin" | "op-management" | "billing" | "pharmacy" | "inpatient" | "lab-diagnostics" | "emergency" | "patient-reach-ai";
   hidden?: boolean;
+  /** Shown only to logins linked to a doctor (and admins, who can read). */
+  doctorOnly?: boolean;
 }
 
 export interface Employee {

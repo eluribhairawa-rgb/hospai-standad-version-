@@ -36,6 +36,8 @@ type JourneyEvent = {
   report_id?: number;
   invoice_no?: string | null;
   prescription?: JourneyPrescription;
+  clinical_note?: { id: number; doctor: string; subjective: string; objective_analysis: string; diagnosis: string; treatment_plan: string; prognosis: string; discharge_readiness: string;
+    presenting_complaints?: string; clinical_course?: string; key_investigations?: string; procedures?: string; treatment_given?: string; condition_at_discharge?: string; advice?: string; follow_up?: string };
 };
 
 type JourneyPrescription = {
@@ -93,6 +95,7 @@ function eventDotColor(type: string) {
   if (type === "nursing_note") return "#7c3aed";
   if (type === "bed_allocated" || type === "bed_released") return "#0ea5e9";
   if (type === "advance") return "#16a34a";
+  if (type === "doctor_note" || type === "doctor_transfer") return "#1d4ed8";
   if (type === "doctor_round" || type === "observation_note" || type === "surgery") return "#2563eb";
   if (type === "medication_order") return "#ea580c";
   if (type === "vitals") return "#db2777";
@@ -107,7 +110,7 @@ const EVENT_DEPARTMENTS: Record<string, string> = {
   emergency_registration: "Emergency", vitals: "Vitals",
   room_charges: "Room & Nursing", payment: "Billing", discharge: "Discharge",
   disposition: "Emergency", nursing_note: "Nursing",
-  advance: "Billing", bed_allocated: "Bed & Ward", bed_released: "Bed & Ward", doctor_round: "Doctor Rounds", observation_note: "Doctor Rounds",
+  advance: "Billing", doctor_note: "Doctor Rounds", doctor_transfer: "Doctor Rounds", bed_allocated: "Bed & Ward", bed_released: "Bed & Ward", doctor_round: "Doctor Rounds", observation_note: "Doctor Rounds",
   medication_order: "Pharmacy", surgery: "Surgery",
   prescription: "Consultation", pharmacy_issued: "Pharmacy",
   lab_bill: "Diagnostics", lab_collected: "Diagnostics", imaging_completed: "Diagnostics", report_released: "Diagnostics",
@@ -251,6 +254,19 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
           rx.follow_up_date ? ["Follow-up", rx.follow_up_date] : null,
         ].filter(Boolean) as string[][];
         if (notes.length) detailSections.push({ title: "Prescription notes", headers: ["Item", "Details"], rows: notes });
+      } else if (e.type === "doctor_note" && e.clinical_note) {
+        const n = e.clinical_note;
+        detailSections.push({
+          title: `Doctor Clinical Note · ${e.date} ${e.time} · ${n.doctor}`,
+          headers: ["Item", "Details"],
+          rows: ([
+["Subjective", n.subjective], ["Objective analysis", n.objective_analysis], ["Diagnosis", n.diagnosis],
+                                ["Treatment plan", n.treatment_plan], ["Prognosis", n.prognosis], ["Discharge readiness", n.discharge_readiness],
+                                ["Presenting complaints", n.presenting_complaints], ["Clinical course", n.clinical_course], ["Key investigations", n.key_investigations],
+                                ["Procedures / surgery", n.procedures], ["Treatment given", n.treatment_given], ["Condition at discharge", n.condition_at_discharge],
+                                ["Advice", n.advice], ["Follow-up", n.follow_up],
+          ] as [string, string][]).filter(([, v]) => v),
+        });
       } else if ((e.type === "pharmacy_issued" || e.type === "lab_bill") && e.items?.length) {
         const isLab = e.type === "lab_bill";
         const total = e.items.reduce((sum, it) => sum + it.amount, 0);
@@ -658,7 +674,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                   {dayEvents.map((e, idx) => {
                     const globalIdx = journey.events.indexOf(e);
                     const isExpanded = expandAll || expandedEvents.has(globalIdx);
-                    const hasItems = (e.items && e.items.length > 0) || !!e.prescription;
+                    const hasItems = (e.items && e.items.length > 0) || !!e.prescription || !!e.clinical_note;
                     return (
                       <div key={`${date}-${idx}`} style={{ display: "grid", gridTemplateColumns: "56px 1fr auto", gap: "6px", padding: "9px 6px", borderBottom: "1px solid #f1f5f9" }}>
                         <div style={{ fontSize: "11.5px", color: "#64748b", paddingTop: "2px" }}>{e.time}</div>
@@ -677,6 +693,19 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                             <button type="button" onClick={() => void openReport(e.report_id!, e.title)} style={{ marginLeft: "16px", fontSize: "12px", fontWeight: 700, color: "#0891b2", background: "none", border: "none", cursor: "pointer" }}>
                               View report →
                             </button>
+                          )}
+                          {hasItems && isExpanded && e.clinical_note && (
+                            <div style={{ marginLeft: "16px", marginTop: "6px", background: "#eff6ff", borderRadius: "6px", padding: "8px 10px", fontSize: "12px", color: "#1e3a8a", display: "grid", gap: "3px" }}>
+                              {([
+["Subjective", e.clinical_note.subjective], ["Objective analysis", e.clinical_note.objective_analysis], ["Diagnosis", e.clinical_note.diagnosis],
+                                ["Treatment plan", e.clinical_note.treatment_plan], ["Prognosis", e.clinical_note.prognosis], ["Discharge readiness", e.clinical_note.discharge_readiness],
+                                ["Presenting complaints", e.clinical_note.presenting_complaints], ["Clinical course", e.clinical_note.clinical_course], ["Key investigations", e.clinical_note.key_investigations],
+                                ["Procedures / surgery", e.clinical_note.procedures], ["Treatment given", e.clinical_note.treatment_given], ["Condition at discharge", e.clinical_note.condition_at_discharge],
+                                ["Advice", e.clinical_note.advice], ["Follow-up", e.clinical_note.follow_up],
+                              ] as [string, string][]).filter(([, v]) => v).map(([label, v]) => (
+                                <div key={label}><strong>{label}:</strong> <span style={{ whiteSpace: "pre-wrap" }}>{v}</span></div>
+                              ))}
+                            </div>
                           )}
                           {hasItems && isExpanded && e.prescription && (
                             <div style={{ marginLeft: "16px", marginTop: "6px", background: "#f8fafc", borderRadius: "6px", padding: "8px 10px", fontSize: "12px", color: "#334155" }}>

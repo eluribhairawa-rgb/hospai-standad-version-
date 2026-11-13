@@ -415,6 +415,7 @@ export default function DischargeSummaryPage({ setNotice, selectedPatient, canEd
         { label: "Medication orders", count: (records.medication_orders || []).length },
         { label: "Diagnostic reports", count: records.diagnostic_reports.length },
         { label: "Procedures / OT", count: records.procedures.length + records.surgeries.length },
+        { label: "Doctor clinical notes", count: ((records as unknown as { doctor_clinical_notes?: unknown[] }).doctor_clinical_notes || []).length },
         { label: "Nursing logs", count: records.nursing.length },
         { label: "Pharmacy items", count: records.pharmacy_issued.length },
         { label: "Timeline events", count: records.timeline.length },

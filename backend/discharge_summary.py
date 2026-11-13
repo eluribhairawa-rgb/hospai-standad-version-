@@ -150,6 +150,7 @@ def gather_patient_records(db, patient_id, encounter_type=None, encounter_id=Non
     vitals, prescriptions, rounds, observations, nursing, round_meds, procedures = [], [], [], [], [], [], []
     surgeries, reports, medication_orders, pharmacy_items, emergency = [], [], [], [], None
     admission = None
+    clinical_notes = []
     attending_doctor = (journey or {}).get("doctor_name")
 
     if selected:
@@ -170,6 +171,14 @@ def gather_patient_records(db, patient_id, encounter_type=None, encounter_id=Non
                 adm = cursor.fetchone()
                 admission = parse_admission_notes(adm["notes"]) if adm else None
                 attending_doctor = attending_doctor or (admission or {}).get("consulting_doctor")
+
+            if etype == "IP":
+                clinical_notes = [
+                    _compact(r, ["created_at", "doctor_name", "subjective", "objective_analysis", "diagnosis", "treatment_plan", "prognosis", "discharge_readiness",
+                              "presenting_complaints", "clinical_course", "key_investigations", "procedures", "treatment_given",
+                              "condition_at_discharge", "advice", "follow_up"])
+                    for r in _fetch(cursor, "SELECT * FROM doctor_clinical_notes WHERE admission_id = ? ORDER BY created_at, id", (eid,))
+                ]
 
             # ---- vitals
             vital_ts = "COALESCE(recorded_at, record_time, created_at)"
@@ -312,6 +321,7 @@ def gather_patient_records(db, patient_id, encounter_type=None, encounter_id=Non
         } if selected else None,
         "emergency": emergency,
         "admission": admission or None,
+        "doctor_clinical_notes": clinical_notes,
         "vitals": vitals,
         "prescriptions": prescriptions,
         "doctor_rounds": rounds,
@@ -405,7 +415,7 @@ def _ai_input(records):
         "patient": {k: p[k] for k in ("age", "gender", "blood_group", "allergies", "allergy_status", "medical_history",
                                       "current_medication", "symptoms") if k in p},
         "encounter": {k: v for k, v in (records.get("encounter") or {}).items() if k in ("type", "label", "start", "end", "status", "ward", "attending_doctor")},
-        **{k: records.get(k) for k in ("emergency", "admission", "vitals", "prescriptions", "doctor_rounds", "observation_notes", "inpatient_medications",
+        **{k: records.get(k) for k in ("emergency", "admission", "doctor_clinical_notes", "vitals", "prescriptions", "doctor_rounds", "observation_notes", "inpatient_medications",
                                         "medication_orders", "procedures", "surgeries", "nursing", "diagnostic_reports") if records.get(k)},
     }
 
@@ -435,19 +445,21 @@ def _section_has_data(records):
     er = records.get("emergency") or {}
     p = records.get("patient") or {}
     adm = records.get("admission") or {}
+    notes = records.get("doctor_clinical_notes") or []
+    any_note = lambda key: any(n.get(key) for n in notes)
     any_rx = lambda key: any(r.get(key) for r in rx)
     return {
-        "presenting_complaints": bool(p.get("symptoms") or er.get("chief_complaint") or adm.get("reason")
+        "presenting_complaints": bool(any_note("presenting_complaints") or any_note("subjective") or p.get("symptoms") or er.get("chief_complaint") or adm.get("reason")
                                       or any(r.get("patient_complaints") for r in rounds)),
-        "diagnosis": bool(any_rx("diagnosis") or any(r.get("diagnosis") or r.get("assessment") for r in rounds)),
-        "clinical_course": bool(rounds or records.get("observation_notes") or records.get("nursing") or er or rx or adm),
-        "key_investigations": bool(records.get("diagnostic_reports")),
-        "procedures": bool(records.get("procedures") or records.get("surgeries")),
-        "treatment_given": bool(any(r.get("medicines") for r in rx) or records.get("medication_orders") or records.get("inpatient_medications")
+        "diagnosis": bool(any_rx("diagnosis") or any_note("diagnosis") or any_note("objective_analysis") or any(r.get("diagnosis") or r.get("assessment") for r in rounds)),
+        "clinical_course": bool(notes or rounds or records.get("observation_notes") or records.get("nursing") or er or rx or adm),
+        "key_investigations": bool(any_note("key_investigations") or records.get("diagnostic_reports")),
+        "procedures": bool(any_note("procedures") or records.get("procedures") or records.get("surgeries")),
+        "treatment_given": bool(any_note("treatment_given") or any_note("treatment_plan") or any(r.get("medicines") for r in rx) or records.get("medication_orders") or records.get("inpatient_medications")
                                 or records.get("pharmacy_issued") or records.get("procedures") or records.get("surgeries")),
-        "condition_at_discharge": bool(any(r.get("patient_condition") for r in rounds) or er.get("disposition") or records.get("vitals")),
-        "advice": bool(any_rx("advice")),
-        "follow_up": bool(any_rx("follow_up_date")),
+        "condition_at_discharge": bool(any_note("condition_at_discharge") or any_note("prognosis") or any_note("discharge_readiness") or any(r.get("patient_condition") for r in rounds) or er.get("disposition") or records.get("vitals")),
+        "advice": bool(any_note("advice") or any_rx("advice")),
+        "follow_up": bool(any_note("follow_up") or any_rx("follow_up_date")),
     }
 
 
@@ -515,6 +527,63 @@ def catalogue_drug_words(db):
     return words
 
 
+READINESS_TEXT = {"not_ready": "Not yet ready for discharge", "improving": "Improving", "ready_24h": "Expected to be ready for discharge within 24 hours",
+                  "ready": "Medically fit for discharge"}
+
+
+def fill_from_clinical_notes(report, records):
+    """The attending doctor's own notes are the primary source. Where the AI left a section as
+    "Not recorded", fill it directly from those notes (no AI wording, nothing added)."""
+    notes = records.get("doctor_clinical_notes") or []
+    if not notes:
+        return report
+
+    def day(n):
+        return str(n.get("created_at") or "")[:10]
+
+    def blank(key):
+        return not report.get(key) or str(report.get(key)).strip().lower().startswith("not recorded")
+
+    latest = notes[-1]
+
+    def dated(key):
+        return [f"{day(n)}: {n[key]}" for n in notes if n.get(key)]
+
+    def last(key):
+        return next((n[key] for n in reversed(notes) if n.get(key)), None)
+
+    if blank("diagnosis") and last("diagnosis"):
+        report["diagnosis"] = last("diagnosis")
+    if blank("presenting_complaints"):
+        first = next((n.get("presenting_complaints") or n.get("subjective") for n in notes if n.get("presenting_complaints") or n.get("subjective")), None)
+        if first:
+            report["presenting_complaints"] = first
+    if blank("clinical_course"):
+        lines = dated("clinical_course") or [f"{day(n)}: " + " ".join(x for x in (n.get("subjective"), n.get("objective_analysis")) if x) for n in notes if n.get("subjective") or n.get("objective_analysis")]
+        if lines:
+            report["clinical_course"] = "\n".join(lines)
+    if blank("key_investigations") and dated("key_investigations"):
+        report["key_investigations"] = "\n".join(dated("key_investigations"))
+    if blank("procedures") and dated("procedures"):
+        report["procedures"] = "\n".join(dated("procedures"))
+    if blank("treatment_given"):
+        lines = dated("treatment_given") or dated("treatment_plan")
+        if lines:
+            report["treatment_given"] = "\n".join(lines)
+    if blank("condition_at_discharge"):
+        text_ = last("condition_at_discharge")
+        if not text_:
+            parts = [latest.get("prognosis") or "", READINESS_TEXT.get(latest.get("discharge_readiness"), "")]
+            text_ = ". ".join(p for p in parts if p)
+        if text_:
+            report["condition_at_discharge"] = text_
+    if blank("advice") and last("advice"):
+        report["advice"] = last("advice")
+    if blank("follow_up") and last("follow_up"):
+        report["follow_up"] = last("follow_up")
+    return report
+
+
 def generate_discharge_summary(records, catalogue_drugs=()):
     prompt = SUMMARY_PROMPT + json.dumps(_ai_input(records), default=str, ensure_ascii=False)
     try:
@@ -527,6 +596,7 @@ def generate_discharge_summary(records, catalogue_drugs=()):
     if not isinstance(parsed, dict):
         raise RuntimeError("The AI model did not return a readable summary. Please try again.")
     report, warnings = ground_report(parsed, records, catalogue_drugs)
+    report = fill_from_clinical_notes(report, records)
     meds, med_source = build_discharge_medications(records)
     report["discharge_medications"] = meds
     return {

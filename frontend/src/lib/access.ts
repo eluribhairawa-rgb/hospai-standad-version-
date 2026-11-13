@@ -5,6 +5,13 @@ import type { User } from "../types";
  * Mirrors security.scoped_doctor_name on the backend (which is what actually enforces it):
  * only non-admin employees with job title Doctor and a linked doctor profile are scoped.
  */
+/** Nursing staff (job title mentions nurse / matron / ward sister); mirrors nurse_assignments.is_nurse_title. */
+export function isNurseUser(user: User | null | undefined): boolean {
+  if (!user || user.user_type === "admin" || user.user_type === "super_admin") return false;
+  const job = (user.job_role || "").trim().toLowerCase();
+  return ["nurs", "matron", "ward sister"].some((k) => job.includes(k));
+}
+
 export function getScopedDoctor(user: User | null | undefined): string | null {
   if (!user || user.user_type === "admin" || user.user_type === "super_admin") return null;
   if ((user.job_role || "").trim().toLowerCase() !== "doctor") return null;

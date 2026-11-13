@@ -109,6 +109,35 @@ def _ip_stay_events(cursor, patient_id, admission_id, admission, beds, window_st
         events.append({"date": _iso(r["round_date"])[:10], "time": (r["round_time"] or "00:00")[:5], "type": "doctor_round",
                         "title": "Doctor round", "subtitle": " · ".join(p for p in parts if p), "charge": None, "received": None})
 
+    cursor.execute("SELECT * FROM doctor_patient_transfers WHERE admission_id = ? ORDER BY created_at, id", (admission_id,))
+    for t in _all(cursor):
+        d, t_ = _split_dt(t["created_at"])
+        events.append({"date": d, "time": t_, "type": "doctor_transfer", "title": "Transferred to another doctor",
+                        "subtitle": " · ".join(x for x in [f"{_dr(t['from_doctor'])} ({t['from_department']})" if t.get("from_doctor") else "",
+                                                           f"to {_dr(t['to_doctor'])} ({t['to_department']})", t.get("reason") or ""] if x),
+                        "charge": None, "received": None})
+
+    # Attending doctor's clinical notes (Doctor Clinicals module).
+    READY = {"not_assessed": "", "not_ready": "Not ready for discharge", "improving": "Improving", "ready_24h": "Ready within 24 h", "ready": "Ready for discharge"}
+    cursor.execute("SELECT * FROM doctor_clinical_notes WHERE admission_id = ? ORDER BY created_at, id", (admission_id,))
+    for n in _all(cursor):
+        d, t = _split_dt(n["created_at"])
+        summary = [_dr(n["doctor_name"]) + (f" (entered by nurse {n['created_by']})" if n.get("entered_role") == "nurse" else ""), f"Diagnosis: {n['diagnosis']}" if n["diagnosis"] else "",
+                   READY.get(n["discharge_readiness"], ""),
+                   (n["objective_analysis"] or n["subjective"] or "")[:140]]
+        events.append({"date": d, "time": t, "type": "doctor_note", "title": "Doctor clinical note",
+                        "subtitle": " · ".join(x for x in summary if x), "charge": None, "received": None,
+                        "clinical_note": {
+                            "id": n["id"], "doctor": n["doctor_name"], "subjective": n["subjective"] or "",
+                            "objective_analysis": n["objective_analysis"] or "", "diagnosis": n["diagnosis"] or "",
+                            "treatment_plan": n["treatment_plan"] or "", "prognosis": n["prognosis"] or "",
+                            "presenting_complaints": n.get("presenting_complaints") or "", "clinical_course": n.get("clinical_course") or "",
+                            "key_investigations": n.get("key_investigations") or "", "procedures": n.get("procedures") or "",
+                            "treatment_given": n.get("treatment_given") or "", "condition_at_discharge": n.get("condition_at_discharge") or "",
+                            "advice": n.get("advice") or "", "follow_up": n.get("follow_up") or "",
+                            "discharge_readiness": READY.get(n["discharge_readiness"], "") or "Not assessed",
+                        }})
+
     cursor.execute("SELECT * FROM patient_vitals WHERE patient_id = ? AND admission_id = ? ORDER BY COALESCE(recorded_at, record_time, created_at)",
                    (patient_id, admission_id))
     for v in _all(cursor):
@@ -479,7 +508,11 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             cursor.execute("SELECT * FROM bed_allocations WHERE admission_id = ? ORDER BY allocated_at, id", (admission_id,))
             all_beds = [dict(b) for b in cursor.fetchall()]
             adm_info = parse_admission_notes(admission.get("notes"))
-            doctor_name = (bed or {}).get("assigned_doctor") or adm_info.get("consulting_doctor")
+            cursor.execute("SELECT to_doctor, to_department FROM doctor_patient_transfers WHERE admission_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (admission_id,))
+            moved = cursor.fetchone()
+            if moved:
+                adm_info["department"] = moved["to_department"] or adm_info.get("department")
+            doctor_name = (moved["to_doctor"] if moved else None) or (bed or {}).get("assigned_doctor") or adm_info.get("consulting_doctor")
             stay_start = _parse_dt(admission.get("admission_date"))
             stay_end = _parse_dt(admission.get("discharge_date")) if admission.get("discharge_date") and len(str(admission.get("discharge_date"))) > 10 else None
             now_dt = datetime.now(IST_TIMEZONE).replace(tzinfo=None)
@@ -516,9 +549,12 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                 ] if p),
                 "charge": None, "received": None,
             })
+            # The admission-time doctor/department (a later transfer is its own event).
+            orig_doctor = parse_admission_notes(admission.get("notes")).get("consulting_doctor") if moved else None
+            orig_department = parse_admission_notes(admission.get("notes")).get("department") if moved else stay["department"]
             if doctor_name:
                 events.append({"date": adm_date, "time": adm_time, "type": "consultation",
-                                "title": "Doctor consultation", "subtitle": " · ".join(p for p in [f"Attending: {_dr(doctor_name)}", stay["department"] or ""] if p),
+                                "title": "Doctor consultation", "subtitle": " · ".join(p for p in [f"Attending: {_dr(orig_doctor or doctor_name)}", orig_department or ""] if p),
                                 "charge": None, "received": None})
             events.extend(_ip_stay_events(cursor, patient_id, admission_id, admission, all_beds,
                                           _iso(admission.get("admission_date")), _iso(admission.get("discharge_date")) or _iso(datetime.now())))

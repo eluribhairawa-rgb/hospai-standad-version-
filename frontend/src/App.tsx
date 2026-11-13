@@ -65,13 +65,14 @@ import DoctorsHistoryPage from "./pages/DoctorsHistoryPage";
 import InpatientAdmissionPage from "./pages/InpatientAdmissionPage";
 import BedManagementPage from "./pages/BedManagementPage";
 import InpatientPatientsPage from "./pages/InpatientPatientsPage";
+import DoctorClinicalNotesPage from "./pages/DoctorClinicalNotesPage";
 import NurseEmarPage from "./pages/NurseEmarPage";
 import DoctorPrescriptionPage from "./pages/DoctorPrescriptionPage";
 import PreBookingPage from "./pages/PreBookingPage";
 import HospitalBrand from "./components/HospitalBrand";
 import { API_BASE, EMPTY_PATIENT_FORM, EMPTY_STATS, LEGACY_MODULE_EXPANSIONS, NAV_ITEMS, PAGE_MODULE_MAP } from "./lib/constants";
 import { apiFetch, getHospitalCode, reportError, setHospitalCode } from "./lib/api";
-import { canViewHospitalOverview, getScopedDoctor } from "./lib/access";
+import { canViewHospitalOverview, getScopedDoctor, isNurseUser } from "./lib/access";
 import { resolvePermissions } from "./lib/format";
 import type { DashboardAnalytics, HospitalSummary, Notice, Patient, Stats, User } from "./types";
 import { downloadExportBlob } from "./lib/exportShare";
@@ -124,7 +125,7 @@ const VALID_PAGE_IDS = new Set([
   "consent-desk", "dashboard", "diag", "lab-diagnostics", "diag-catalogue", "diag-imaging", "diag-laboratory",
   "diag-orders-billing", "diag-overview", "discharge-summary", "patient-reach-ai", "reach-survey-management", "reach-survey-templates", "reach-whatsapp-templates", "reach-survey-reports", "diag-quality-equipment", "diag-reports-approval", "diag-reports-history", "doctor-prescription",
   "doctors-history", "emergency", "emergency-worklist", "employees", "hrms", "inpatient", "inpatient-patients", "insurance-desk", "ip-admission", "lab", "laboratory",
-  "nurse-station", "op-desk", "op-queue-management", "ot", "patient-journey", "patients", "pre-booking",
+  "nurse-station", "doctor-clinicals", "op-desk", "op-queue-management", "ot", "patient-journey", "patients", "pre-booking",
   "pharmacy", "pharmacy-overview", "pharmacy-op-dispense", "pharmacy-ip-dispense", "pharmacy-inventory", "pharmacy-inventory-stock",
   "pharmacy-purchases", "pharmacy-purchases-grn", "pharmacy-suppliers", "pharmacy-reports", "pharmacy-insurance-claims", "pharmacy-profit-analysis", "pharmacy-settings",
   "pharmacy-billing-insurance", "pharmacy-dispense", "pharmacy-emar",
@@ -192,6 +193,7 @@ const NAV_ICON_MAP: Record<string, SidebarIconName> = {
   "bed-management": "box",
   "inpatient-patients": "patients",
   "nurse-station": "prescription",
+  "doctor-clinicals": "prescription",
   "pharmacy-overview": "home",
   "pharmacy-op-dispense": "pill",
   "pharmacy-ip-dispense": "bed",
@@ -448,6 +450,7 @@ const PAGE_SUBTITLES: Record<string, string> = {
   "ip-admission": "Admit patient and request bed allocation.",
   "bed-management": "Monitor and allocate hospital beds.",
   "inpatient-patients": "View and manage admitted patients.",
+  "doctor-clinicals": "Daily clinical analysis and progress notes for your admitted patients. Saved notes appear in the patient journey, the inpatient profile and the discharge summary.",
   "nurse-station": "Track vitals, medication administration, shift notes, and nursing tasks.",
   readmit: "Schedule revisits and consult follow-ups.",
   "doctors-history": "Audit doctor patient histories.",
@@ -609,6 +612,8 @@ function App() {
   };
   const canAccessNavItem = (itemId: string, permission?: string, moduleId?: import("./types").ModuleId) => {
     if (itemId === "employees") return hasPermission("admin.users.read");
+    // Doctor Clinicals: attending doctors (linked login) and admins only.
+    if (itemId === "doctor-clinicals" && !scopedDoctor && !isNurseUser(user) && !isAdmin) return false;
     return hasModuleAccess(moduleId) && hasPermission(permission);
   };
   // Mirrors the page-access check applied on navigation, so role dashboards only offer reachable pages.
@@ -1740,6 +1745,9 @@ function App() {
         {page === "ip-admission" && hasPermission("patients.write") && <InpatientAdmissionPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />}
         {page === "bed-management" && hasPermission("patients.write") && <BedManagementPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />}
         {page === "inpatient-patients" && hasPermission("patients.read") && <InpatientPatientsPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />}
+        {page === "doctor-clinicals" && hasPermission("patients.read") && (
+          <DoctorClinicalNotesPage key={pageKeys[page] || 0} setNotice={setNotice} scopedDoctor={scopedDoctor} isNurse={isNurseUser(user)} isAdmin={isAdmin} username={user?.username || ""} />
+        )}
         {page === "nurse-station" && hasPermission("patients.write") && (
           <NurseEmarPage key={pageKeys[page] || 0} setNotice={setNotice} />
         )}

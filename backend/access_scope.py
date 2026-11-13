@@ -40,6 +40,9 @@ _DOCTOR_PATIENTS_SQL = text("""
     UNION SELECT patient_id FROM diag_orders     WHERE LOWER(TRIM(referring_clinician)) = :d
     UNION SELECT patient_id FROM diagnostics     WHERE LOWER(TRIM(doctor_name))         = :d
     UNION SELECT patient_id FROM doctor_rounds   WHERE LOWER(TRIM(doctor_name))         = :d
+    UNION SELECT patient_id FROM doctor_clinical_notes WHERE LOWER(TRIM(doctor_name))   = :d
+    UNION SELECT patient_id FROM admissions      WHERE LOWER(TRIM(substring(notes from 'Consulting doctor: ([^|]*)'))) = :d
+    UNION SELECT patient_id FROM doctor_patient_transfers WHERE LOWER(TRIM(to_doctor)) = :d OR LOWER(TRIM(from_doctor)) = :d
 """)
 
 # Path/query parameter -> SQL returning the patient that record belongs to.

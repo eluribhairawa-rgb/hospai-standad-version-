@@ -51,6 +51,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "ip-admission", label: "Inpatient Admission", group: "inpatient", module: "ip-management", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
   { id: "bed-management", label: "Bed Management", group: "inpatient", module: "bed-management", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
   { id: "inpatient-patients", label: "Inpatient Patients", group: "inpatient", module: "ip-management", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
+  { id: "doctor-clinicals", label: "Doctor Clinicals", group: "inpatient", module: "ip-management", permission: "patients.read", doctorOnly: true, deniedHint: "Doctor Clinicals is reserved for attending doctors." },
   { id: "nurse-station", label: "Nursing Station", group: "inpatient", module: "ip-management", permission: "patients.write", deniedHint: "You do not have permission to access this module." },
   { id: "discharge-summary", label: "Discharge Summary", group: "inpatient", module: "ip-management", permission: "patients.read", deniedHint: "You do not have permission to access this module." },
 
@@ -312,6 +313,7 @@ export const PAGE_MODULE_MAP: Record<string, ModuleId> = {
   readmit: "follow-up",
   "ip-admission": "ip-management",
   "nurse-station": "ip-management",
+  "doctor-clinicals": "ip-management",
   settings: "settings",
   employees: "employees",
 };
