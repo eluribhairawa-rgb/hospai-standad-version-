@@ -2986,6 +2986,17 @@ def update_appointment(db, appointment_id, data):
                     if already_active:
                         raise ValueError("Already a patient is present in consultation.")
 
+        # Real consultation times: stamped once, the first time the status reaches each stage.
+        started_at = existing.get("consultation_started_at")
+        completed_at = existing.get("consultation_completed_at")
+        if "status" in data:
+            new_status = str(data.get("status") or "").strip().lower()
+            now_ist = current_ist_datetime().replace(tzinfo=None)
+            if new_status in ("in_consultation", "in consultation", "consulting") and not started_at:
+                started_at = now_ist
+            if new_status == "completed" and not completed_at:
+                completed_at = now_ist
+
         doctor_name = (data.get("doctor_name", existing["doctor_name"]) or "").strip()
         department = (data.get("department", existing["department"]) or "").strip()
         resolved_department = department
@@ -3040,7 +3051,9 @@ def update_appointment(db, appointment_id, data):
                 follow_up_for = ?,
                 reminder_sent_at = ?,
                 no_show_marked = ?,
-                consultation_fee = ?
+                consultation_fee = ?,
+                consultation_started_at = ?,
+                consultation_completed_at = ?
             WHERE id = ?
             """,
             (
@@ -3057,6 +3070,8 @@ def update_appointment(db, appointment_id, data):
                 data.get("reminder_sent_at", existing["reminder_sent_at"]),
                 1 if data.get("no_show_marked", existing["no_show_marked"]) else 0,
                 _coerce_float(data.get("consultation_fee", existing["consultation_fee"])),
+                started_at,
+                completed_at,
                 appointment_id,
             ),
         )

@@ -697,10 +697,19 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                     invoice_ids.add(consultation_invoice["id"])
 
             if appointment_id and appointment_id != 0:
+                started_d, started_t = _split_dt(appt.get("consultation_started_at"))
+                done_d, done_t = _split_dt(appt.get("consultation_completed_at"))
                 events.append({"date": appt_date, "time": appt_time, "type": "consultation", "title": "Doctor consultation",
                                 "subtitle": f"{appt.get('department') or 'General'} · {doctor_name or 'Duty doctor'}"
-                                + (f" · Token {appt['token_no']}" if appt.get("token_no") else ""),
+                                + (f" · Token {appt['token_no']}" if appt.get("token_no") else "")
+                                + (f" · Booked for {_split_dt(appt.get('appointment_date'))[1]}" if appt.get("appointment_date") else ""),
                                 "charge": consultation_fee or None, "received": None})
+                if started_d:
+                    events.append({"date": started_d, "time": started_t, "type": "consultation", "title": "Consultation started",
+                                    "subtitle": f"{_dr(doctor_name)}" if doctor_name else "", "charge": None, "received": None})
+                if done_d:
+                    events.append({"date": done_d, "time": done_t, "type": "consultation", "title": "Consultation completed",
+                                    "subtitle": f"{_dr(doctor_name)}" if doctor_name else "", "charge": None, "received": None})
 
             # This visit runs from its appointment day until the patient's next OP visit; pharmacy and
             # lab bills outside that window belong to other visits.

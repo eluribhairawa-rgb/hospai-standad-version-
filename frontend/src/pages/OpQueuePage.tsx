@@ -1,3 +1,4 @@
+import { formatTimeIST } from "../lib/format";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Modal } from "../components/ui";
@@ -34,6 +35,8 @@ export type QueueItem = {
   symptoms?: string;
   notes?: string;
   appointmentDate?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
 };
 
 
@@ -118,7 +121,7 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
             : ["completed", "done", "consulted", "finished"].includes(rawStatus)
             ? "Completed"
             : "Waiting";
-        const timeStr = a.appointment_time || (a.appointment_date ? new Date(a.appointment_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-");
+        const timeStr = a.appointment_time || formatTimeIST(a.appointment_date) || "-";
         return {
           id: String(a.id),
           token: String(a.token_no || a.id),
@@ -137,6 +140,8 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
           symptoms: a.symptoms || a.chief_complaint,
           notes: a.notes,
           appointmentDate: a.appointment_date,
+          startedAt: a.consultation_started_at,
+          completedAt: a.consultation_completed_at,
         };
       });
       saveQueue(mapped);
@@ -760,6 +765,12 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
                   {/* Appointment Time */}
                   <td>
                     <span className="opq-time-text">{patient.appointmentTime}</span>
+                    {patient.startedAt && (
+                      <div style={{ fontSize: "11px", color: "#64748b" }}>Started {formatTimeIST(patient.startedAt)}</div>
+                    )}
+                    {patient.completedAt && (
+                      <div style={{ fontSize: "11px", color: "#16a34a", fontWeight: 600 }}>Completed {formatTimeIST(patient.completedAt)}</div>
+                    )}
                   </td>
 
                   {/* Interactive Status Dropdown Pill */}
@@ -1032,6 +1043,14 @@ export default function OpQueuePage({ setNotice, onOpenPatient, scopedDoctor }: 
                   <div className="opq-details-row">
                     <span className="opq-details-row-label">Appointment Time</span>
                     <span className="opq-details-row-val">{detailsPatient.appointmentTime}</span>
+                  </div>
+                  <div className="opq-details-row">
+                    <span className="opq-details-row-label">Consultation Started</span>
+                    <span className="opq-details-row-val">{formatTimeIST(detailsPatient.startedAt) || "—"}</span>
+                  </div>
+                  <div className="opq-details-row">
+                    <span className="opq-details-row-label">Consultation Completed</span>
+                    <span className="opq-details-row-val">{formatTimeIST(detailsPatient.completedAt) || "—"}</span>
                   </div>
                   <div className="opq-details-row">
                     <span className="opq-details-row-label">Visit Type</span>

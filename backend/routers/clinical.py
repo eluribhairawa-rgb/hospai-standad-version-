@@ -519,7 +519,12 @@ def prescriptions_create(payload: dict = Body(...), db: Session = Depends(get_db
                 )
 
             if payload.get("complete_consultation") and appointment_id:
-                cursor.execute("UPDATE appointments SET status = 'completed' WHERE id = ?", (appointment_id,))
+                cursor.execute(
+                    "UPDATE appointments SET status = 'completed', "
+                    "consultation_started_at = COALESCE(consultation_started_at, CURRENT_TIMESTAMP), "
+                    "consultation_completed_at = COALESCE(consultation_completed_at, CURRENT_TIMESTAMP) WHERE id = ?",
+                    (appointment_id,),
+                )
 
             conn.commit()
             return {"success": True, "prescription_id": prescription_id, "ip_order": ip_order}

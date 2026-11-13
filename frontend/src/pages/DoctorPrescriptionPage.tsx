@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { formatTimeIST } from "../lib/format";
 import { cleanCountryCode, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError, getHospitalCode } from "../lib/api";
@@ -741,7 +742,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
 
         const timeStr =
           a.appointment_time ||
-          (a.appointment_date ? new Date(a.appointment_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-");
+          (formatTimeIST(a.appointment_date) || "-");
 
         return {
           id: String(a.id),
@@ -3603,7 +3604,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                 <span className="meta-lbl">Date & Time</span>
                 <span className="meta-sep">:</span>
                 <span className="meta-val">
-                  {selectedDate} • {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {selectedDate} • {formatTimeIST(new Date().toISOString())}
                 </span>
               </div>
               <div className="meta-item">

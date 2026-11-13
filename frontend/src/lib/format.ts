@@ -148,6 +148,14 @@ export function formatDateTime(value?: string | null): string {
   return parsed ? parsed.toLocaleString(undefined, { timeZone: IST_TIMEZONE }) : "-";
 }
 
+/** "11:40 am" in IST for a stored timestamp (offset-less values are IST); "" when missing. */
+export function formatTimeIST(value?: string | null): string {
+  if (!value) return "";
+  const parsed = parseTimestamp(String(value));
+  if (!parsed) return "";
+  return new Intl.DateTimeFormat("en-IN", { timeZone: IST_TIMEZONE, hour: "2-digit", minute: "2-digit", hour12: true }).format(parsed);
+}
+
 export function formatDateTimeIST(value?: string | null): string {
   if (!value) return "-";
   const parsed = parseTimestamp(value);
