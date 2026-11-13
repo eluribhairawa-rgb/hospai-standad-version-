@@ -4,7 +4,8 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Notice } from "../types";
 import { apiFetch, reportError } from "../lib/api";
 import { printViaIframe } from "../lib/printViaIframe";
-import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
+import { formatPhone, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
+import { fullPatientName } from "../lib/patientLookup";
 import { Button, Input, Label, Modal } from "../components/ui";
 import PatientSearchPicker from "../components/PatientSearchPicker";
 import type { HospitalBed } from "./BedManagementPage";
@@ -22,6 +23,11 @@ type SelectedPatient = {
   patientName: string;
   ageGender: string;
   mobile: string;
+};
+
+/** Registration details shown with the selected patient and used to pre-fill the admission form. */
+type RegisteredDetails = {
+  bloodGroup?: string; allergies?: string; address?: string; insurance?: string; symptoms?: string; vitals?: string;
 };
 
 type DoctorOrder = {
@@ -43,6 +49,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   // Desk (AddPatientPage); this page only records the doctor's admission
   // order and allocates a bed, it never creates a new patient.
   const [selectedPatient, setSelectedPatient] = useState<SelectedPatient | null>(null);
+  const [registered, setRegistered] = useState<RegisteredDetails | null>(null);
   const [doctorOrder, setDoctorOrder] = useState<DoctorOrder | null>(null);
   const [loadingOrder, setLoadingOrder] = useState(false);
 
@@ -122,12 +129,13 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
         .then((res) => {
           const p = res?.patient || res;
           if (p && (p.patient_id || p.uhid)) {
-            handleSelectPatient({
+            void handleSelectPatient({
               uhid: p.patient_id || p.uhid,
-              patientName: p.name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || p.patient_id,
-              ageGender: `${p.age || "-"} / ${p.gender || "-"}`,
-              mobile: p.phone || "-",
+              patientName: fullPatientName(p) || p.patient_id,
+              ageGender: `${p.age ? p.age + " yrs" : "-"} / ${p.gender || "-"}`,
+              mobile: p.phone ? formatPhone(p.phone_country_code, p.phone) : "-",
             });
+            setNotice({ type: "success", message: `Registered patient ${fullPatientName(p) || p.patient_id} (${p.patient_id}) selected and their registration details filled in.` });
           }
         })
         .catch(() => {});
@@ -181,9 +189,30 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     setAdmittedRecord(null);
     setDoctorOrder(null);
     setPayer(EMPTY_PAYER);
+    setRegistered(null);
+    // Details captured at registration: shown on the patient card and used to pre-fill the form.
+    apiFetch<{ vitals?: any[] }>(`/api/patients/${encodeURIComponent(pat.uhid)}/vitals`)
+      .then((vr) => {
+        const v = (vr?.vitals || [])[0];
+        if (!v) return;
+        const text = [v.bp ? `BP ${v.bp}` : "", v.pulse ? `Pulse ${v.pulse}` : "", v.temperature ? `Temp ${v.temperature}` : "", v.spo2 ? `SpO2 ${v.spo2}%` : "",
+                      v.weight ? `Weight ${v.weight} kg` : "", v.height ? `Height ${v.height} cm` : ""].filter(Boolean).join(" · ");
+        if (text) setRegistered((prev) => ({ ...(prev || {}), vitals: text }));
+      })
+      .catch(() => {});
     apiFetch<any>(`/api/patients/${encodeURIComponent(pat.uhid)}`)
       .then((res) => {
         const p = res?.patient || res;
+        if (p) {
+          setRegistered((prev) => ({
+            ...(prev || {}),
+            bloodGroup: p.blood_group || undefined, allergies: p.allergies || undefined, address: p.address || undefined,
+            insurance: p.insurance_provider ? `${p.insurance_provider}${p.insurance_policy_no ? ` (Policy ${p.insurance_policy_no})` : ""}` : undefined,
+            symptoms: p.symptoms || undefined,
+          }));
+          // The symptoms taken at registration are the starting point for the reason for admission.
+          if (p.symptoms) setReasonForAdmission((current) => current || String(p.symptoms));
+        }
         if (p?.insurance_provider) {
           setPayer({
             payer_type: "insurance",
@@ -225,6 +254,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   // so staff can move straight into the next patient without an extra click.
   const resetWorkingFields = () => {
     setSelectedPatient(null);
+    setRegistered(null);
     setDoctorOrder(null);
     setDepartment("");
     setConsultingDoctor("");
@@ -496,12 +526,12 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
 
         <PatientSearchPicker
           onSelect={(pat) => {
-            const fullPatName = [pat.name, pat.last_name].filter(Boolean).join(" ");
+            const fullPatName = fullPatientName(pat);
             void handleSelectPatient({
               uhid: pat.patient_id,
               patientName: fullPatName,
               ageGender: `${pat.age ? pat.age + " yrs" : ""} / ${pat.gender || ""}`,
-              mobile: pat.phone || "",
+              mobile: pat.phone ? formatPhone(pat.phone_country_code, pat.phone) : "",
             });
             setNotice({ type: "success", message: `Selected patient: ${fullPatName} (${pat.patient_id})` });
           }}
@@ -518,6 +548,20 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
             <Button variant="ghost" onClick={handleClearForm} style={{ fontSize: "12px" }}>
               Clear Selection
             </Button>
+          </div>
+        )}
+
+        {selectedPatient?.uhid && registered && (registered.bloodGroup || registered.allergies || registered.address || registered.insurance || registered.symptoms || registered.vitals) && (
+          <div style={{ marginTop: "10px", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 18px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "8px 18px", fontSize: "12.5px" }}>
+            {([
+              ["Blood group", registered.bloodGroup], ["Allergies", registered.allergies], ["Symptoms at registration", registered.symptoms],
+              ["Vitals at registration", registered.vitals], ["Insurance", registered.insurance], ["Address", registered.address],
+            ] as [string, string | undefined][]).filter(([, v]) => v).map(([label, v]) => (
+              <div key={label}>
+                <div style={{ fontSize: "10.5px", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>{label}</div>
+                <div style={{ color: "#0f172a", fontWeight: 600 }}>{v}</div>
+              </div>
+            ))}
           </div>
         )}
 
