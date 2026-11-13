@@ -7,7 +7,7 @@ import { printViaIframe } from "../lib/printViaIframe";
 import { calculateAgeFromDob } from "../lib/format";
 import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
 import { Modal } from "../components/ui";
-import { COUNTRY_CODE_RULES, parsePhoneInput, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
+import { COUNTRY_CODE_RULES, parsePhoneInput, splitStoredPhone, toWhatsAppNumber, validateMobileByCountry } from "../lib/phone";
 import PhoneInput from "../components/PhoneInput";
 
 const COUNTRY_OPTIONS = Object.values(COUNTRY_CODE_RULES).map((r) => r.label);
@@ -316,6 +316,11 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const handleAddProvider = async () => {
     if (!newProviderName.trim()) {
       setNotice({ type: "warning", message: "Provider name is required." });
+      return;
+    }
+    const phoneError = newProviderPhone.trim() ? validateMobileByCountry(newProviderPhone, newProviderPhoneCode, false) : null;
+    if (phoneError) {
+      setNotice({ type: "warning", message: phoneError.replace("mobile", "contact number") });
       return;
     }
     setSavingProvider(true);
@@ -2972,10 +2977,9 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                 Contact Phone (optional)
               </label>
               <PhoneInput
-                landline
                 countryCode={newProviderPhoneCode}
                 value={newProviderPhone}
-                placeholder="Support / claims contact number"
+                placeholder="Support / claims contact number (digits for the selected country)"
                 onChange={({ countryCode, value }) => { setNewProviderPhoneCode(countryCode); setNewProviderPhone(value); }}
               />
             </div>

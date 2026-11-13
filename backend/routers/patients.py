@@ -119,7 +119,7 @@ def insurance_providers_create(request: Request, payload: dict = Body(...), db: 
     try:
         from phone import validate_phone
         contact_digits, contact_code, contact_error = validate_phone(
-            payload.get("contact_phone"), payload.get("contact_phone_country_code"), label="Contact phone", landline=True)
+            payload.get("contact_phone"), payload.get("contact_phone_country_code"), label="Contact phone")
         if contact_error:
             raise HTTPException(status_code=400, detail=contact_error)
         provider = lq.create_insurance_provider(
