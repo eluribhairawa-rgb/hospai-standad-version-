@@ -7,6 +7,7 @@ an event, a charge, or a document only appears if a real row backs it.
 """
 from datetime import datetime, timedelta
 
+from database import IST_TIMEZONE
 from legacy_sql import get_connection
 
 
@@ -50,6 +51,26 @@ def _dr(name):
     return n if not n or n.lower().startswith("dr") and n[2:3] in (".", " ") else f"Dr. {n}"
 
 
+def _rate(b):
+    return float(b.get("amount_per_day") or b.get("daily_charge") or 0)
+
+
+def _parse_dt(value):
+    try:
+        return datetime.fromisoformat(str(value)).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _bed_days(b, now):
+    """Days billed on one bed: started-day rounded up, like the discharge bill (at least 1)."""
+    start = _parse_dt(b.get("allocated_at"))
+    if not start:
+        return int(b.get("total_days") or 1)
+    end = _parse_dt(b.get("released_at")) or now
+    return max(1, int(-(-(end - start).total_seconds() // 86400)))
+
+
 def _bed_label(b):
     return " · ".join(p for p in [b.get("ward"), b.get("room_no"), f"Bed {b['bed_no']}" if b.get("bed_no") else ""] if p)
 
@@ -67,7 +88,7 @@ def _ip_stay_events(cursor, patient_id, admission_id, admission, beds, window_st
         events.append({"date": d, "time": t, "type": "bed_allocated", "title": "Bed allotted" if b is beds[0] else "Bed transfer",
                         "subtitle": " · ".join(p for p in [
                             _bed_label(b), b.get("bed_type") or "",
-                            f"₹{float(b['daily_charge']):,.0f}/day" if b.get("daily_charge") else "",
+                            f"₹{_rate(b):,.0f}/day" if _rate(b) else "",
                             _dr(b.get("assigned_doctor")),
                         ] if p), "charge": None, "received": None})
         if b.get("released_at"):
@@ -418,6 +439,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                     "patient_id": patient_id, "name": _patient_name(patient),
                     "age": patient.get("age"), "gender": patient.get("gender"),
                     "phone": patient.get("phone"), "phone_country_code": patient.get("phone_country_code"),
+                    "address": patient.get("address"), "email": patient.get("email"),
                 },
                 "encounters": [], "selected": None, "events": [],
                 "financial_summary": {"categories": [], "total_charges": 0, "payments_received": 0, "outstanding": 0, "status": "N/A"},
@@ -436,6 +458,8 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
 
         events = []
         stay = None
+        bill = None
+        appt = {}
         invoice_ids = set()
         doctor_name = None
         admission_id = None
@@ -455,15 +479,26 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             all_beds = [dict(b) for b in cursor.fetchall()]
             adm_info = parse_admission_notes(admission.get("notes"))
             doctor_name = (bed or {}).get("assigned_doctor") or adm_info.get("consulting_doctor")
+            stay_start = _parse_dt(admission.get("admission_date"))
+            stay_end = _parse_dt(admission.get("discharge_date")) if admission.get("discharge_date") and len(str(admission.get("discharge_date"))) > 10 else None
+            now_dt = datetime.now(IST_TIMEZONE).replace(tzinfo=None)
+            if admission.get("discharge_date") and not stay_end:
+                stay_end = _parse_dt((bed or {}).get("released_at")) or _parse_dt(admission.get("discharge_date"))
+            elapsed = max(0.0, ((stay_end or now_dt) - stay_start).total_seconds()) if stay_start else 0.0
             stay = {
+                "admitted_at": _iso(admission.get("admission_date")),
+                "discharged": bool(admission.get("discharge_date")),
+                "days_completed": int(elapsed // 86400), "hours_extra": int((elapsed % 86400) // 3600),
+                "current_day": int(elapsed // 86400) + 1,
                 "reason": adm_info.get("reason"), "department": adm_info.get("department"),
                 "consulting_doctor": doctor_name, "admission_type": adm_info.get("admission_type"),
                 "triage": adm_info.get("triage"), "expected_stay": adm_info.get("expected_stay"),
                 "payer_type": admission.get("payer_type"),
                 "bed": ({"ward": bed.get("ward"), "room_no": bed.get("room_no"), "bed_no": bed.get("bed_no"),
-                         "bed_type": bed.get("bed_type"), "daily_charge": bed.get("daily_charge"),
+                         "bed_type": bed.get("bed_type"), "daily_charge": _rate(bed),
                          "since": _iso(bed.get("allocated_at")), "status": bed.get("status")} if bed else None),
-                "bed_history": [{"label": _bed_label(b), "from": _iso(b.get("allocated_at")), "to": _iso(b.get("released_at"))} for b in all_beds],
+                "bed_history": [{"label": _bed_label(b), "from": _iso(b.get("allocated_at")), "to": _iso(b.get("released_at")),
+                                 "rate": _rate(b), "days": _bed_days(b, now_dt), "amount": round(_rate(b) * _bed_days(b, now_dt), 2)} for b in all_beds],
             }
 
             adm_date, adm_time = _split_dt(admission.get("admission_date"))
@@ -541,6 +576,30 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
 
             bed_total = float(bed["total_amount"] or 0) if bed and bed.get("status") == "released" else 0.0
             discharge_date = admission.get("discharge_date")
+            bill = None
+            if not discharge_date:
+                # Still admitted: the same live figures the Discharge & Settle Bill screen shows (days so far x daily rate).
+                try:
+                    import legacy_queries as lq
+                    live = lq.get_discharge_bill_preview(db, admission_id=admission_id)
+                    bill = {
+                        "live": True, "as_of": live["discharge_date"], "since": live["admission_date"],
+                        "days_stayed": live["days_stayed"], "hours_stayed": live["hours_stayed"], "rate_per_day": live["rate_per_day"],
+                        "bed_total": live["bed_total"], "pharmacy_count": len(live["pharmacy_items"]), "pharmacy_total": live["pharmacy_total"],
+                        "diag_count": len(live["diag_items"]), "diag_total": live["diag_total"], "grand_total": live["grand_total"],
+                    }
+                    bed_total = float(live["bed_total"] or 0)
+                except Exception:
+                    bill = None
+            elif bed:
+                bill = {
+                    "live": False, "as_of": _iso(bed.get("released_at") or discharge_date), "since": _iso(all_beds[0].get("allocated_at")) if all_beds else None,
+                    "days_stayed": sum(int(b.get("total_days") or 0) for b in all_beds) or int(bed.get("total_days") or 0),
+                    "hours_stayed": None, "rate_per_day": float(bed.get("amount_per_day") or 0), "bed_total": bed_total,
+                    "pharmacy_count": len(pharmacy_rows), "pharmacy_total": round(sum(float(r["amount"] or 0) for r in pharmacy_rows), 2),
+                    "diag_count": len(items), "diag_total": round(sum(float(it["amount"] or 0) for it in items), 2), "grand_total": None,
+                }
+                bill["grand_total"] = round(bill["bed_total"] + bill["pharmacy_total"] + bill["diag_total"], 2)
             if discharge_date and bed:
                 d, t = _split_dt(bed.get("released_at") or discharge_date)
                 if bed_total:
@@ -660,6 +719,22 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                 if not appt_day or not day:
                     return True
                 return day >= appt_day and (visit_end is None or day < visit_end)
+
+            if appt_day:
+                cursor.execute(
+                    "SELECT * FROM patient_vitals WHERE patient_id = ? AND admission_id IS NULL AND encounter_id IS NULL "
+                    "AND DATE(COALESCE(recorded_at, record_time, created_at)) >= DATE(?) ORDER BY COALESCE(recorded_at, record_time, created_at)",
+                    (patient_id, appt_day),
+                )
+                for v in _all(cursor):
+                    if not in_visit(v["recorded_at"] or v["record_time"] or v["created_at"]):
+                        continue
+                    vd, vt = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
+                    vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
+                            f"Temp {v['temperature']}" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
+                            f"Weight {v['weight']}" if v.get("weight") else ""]
+                    events.append({"date": vd, "time": vt, "type": "vitals", "title": "Vitals recorded",
+                                    "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})
 
             if appointment_id and appointment_id != 0:
                 rx_event, _ = _prescription_event(cursor, "appointment_id", appointment_id)
@@ -955,12 +1030,15 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             "patient": {
                 "patient_id": patient_id, "name": _patient_name(patient),
                 "age": patient.get("age"), "gender": patient.get("gender"),
-                    "phone": patient.get("phone"), "phone_country_code": patient.get("phone_country_code"),
+                "phone": patient.get("phone"), "phone_country_code": patient.get("phone_country_code"),
+                "address": patient.get("address"), "email": patient.get("email"),
             },
             "encounters": encounters,
             "selected": selected,
             "doctor_name": doctor_name,
             "stay": stay if etype == "IP" else None,
+            "bill": bill if etype == "IP" else None,
+            "department": (stay or {}).get("department") if etype == "IP" else (appt.get("department") if etype == "OP" else None),
             "events": events,
             "financial_summary": {
                 "categories": [{"label": label, "amount": amount} for label, amount in categories],

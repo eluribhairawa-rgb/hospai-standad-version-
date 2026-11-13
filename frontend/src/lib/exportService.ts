@@ -30,6 +30,7 @@ export type StandardPdfPayload = {
     email?: string;
     address?: string;
     consulting_doctor?: string;
+    department?: string;
   };
   totals?: {
     subtotal?: string | number;

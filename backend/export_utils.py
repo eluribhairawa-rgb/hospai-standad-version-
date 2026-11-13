@@ -625,6 +625,10 @@ def _generate_standard_report_pdf(payload: dict) -> bytes:
         ]
         if patient_info.get("consulting_doctor"):
             rows.append(("Consulting Doctor", patient_info.get("consulting_doctor")))
+        if patient_info.get("department"):
+            rows.append(("Department", patient_info.get("department")))
+        if patient_info.get("email"):
+            rows.append(("Email", patient_info.get("email")))
         if patient_info.get("address"):
             rows.append(("Address", patient_info.get("address")))
         _two_column_details(rows)

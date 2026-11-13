@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../lib/api";
-import { splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
+import { formatPhone, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import { generatePDFBlob, downloadPDF, printPDF, patientFilename } from "../lib/exportService";
 import type { StandardPdfPayload } from "../lib/exportService";
 import type { Notice, Patient } from "../types";
@@ -52,18 +52,26 @@ type JourneyDocument = { type: string; label: string; available: boolean; ref: n
 type JourneyPayment = { date: string; time: string; mode: string; reference: string; invoice_no: string; amount: number };
 
 type JourneyStay = {
+  admitted_at?: string | null; discharged?: boolean; days_completed?: number; hours_extra?: number; current_day?: number;
   reason?: string | null; department?: string | null; consulting_doctor?: string | null; admission_type?: string | null;
   triage?: string | null; expected_stay?: string | null; payer_type?: string | null;
   bed: { ward?: string | null; room_no?: string | null; bed_no?: string | null; bed_type?: string | null; daily_charge?: number | null; since?: string | null; status?: string | null } | null;
-  bed_history: { label: string; from: string | null; to: string | null }[];
+  bed_history: { label: string; from: string | null; to: string | null; rate?: number; days?: number; amount?: number }[];
+};
+
+type JourneyBill = {
+  live: boolean; as_of?: string | null; since?: string | null; days_stayed: number; hours_stayed?: number | null; rate_per_day: number;
+  bed_total: number; pharmacy_count: number; pharmacy_total: number; diag_count: number; diag_total: number; grand_total: number | null;
 };
 
 type Journey = {
-  patient: { patient_id: string; name: string; age: number | null; gender: string | null; phone?: string | null; phone_country_code?: string | null };
+  patient: { patient_id: string; name: string; age: number | null; gender: string | null; phone?: string | null; phone_country_code?: string | null; address?: string | null; email?: string | null };
   encounters: JourneyEncounter[];
   selected: JourneyEncounter | null;
   doctor_name: string | null;
+  department?: string | null;
   stay?: JourneyStay | null;
+  bill?: JourneyBill | null;
   events: JourneyEvent[];
   financial_summary: { categories: { label: string; amount: number }[]; total_charges: number; payments_received: number; outstanding: number; status: string };
   payments: JourneyPayment[];
@@ -255,6 +263,57 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
       }
     });
     const fs = journey.financial_summary;
+    const sel = journey.selected;
+    const dash = (v?: string | number | null) => (v === null || v === undefined || v === "" ? "-" : String(v));
+    const when = (iso?: string | null) => (iso ? iso.slice(0, 16).replace("T", " ") : "-");
+    const stay = journey.stay;
+    const visitRows: string[][] = [
+      ["Visit", sel.label], ["Status", sel.status], ["Start", when(sel.start)], ["End", sel.end && sel.end !== sel.start ? when(sel.end) : "-"],
+      ["Doctor", dash(journey.doctor_name)], ["Department", dash(journey.department)],
+    ];
+    if (stay) {
+      visitRows.push(
+        ["Admitted on", when(stay.admitted_at)],
+        [stay.discharged ? "Length of stay" : "Stay completed so far", stay.days_completed !== undefined ? `${stay.days_completed} day(s) ${stay.hours_extra ?? 0} hr(s)${stay.discharged ? "" : ` (Day ${stay.current_day})`}` : "-"],
+        ["Reason for admission", dash(stay.reason)], ["Admission type", dash(stay.admission_type)], ["Triage", dash(stay.triage)],
+        ["Expected stay", dash(stay.expected_stay)], ["Payer", dash(stay.payer_type)],
+        ["Ward / room", stay.bed ? dash([stay.bed.ward, stay.bed.room_no].filter(Boolean).join(" · ")) : "-"],
+        ["Bed", stay.bed ? dash([stay.bed.bed_no, stay.bed.bed_type].filter(Boolean).join(" · ")) : "-"],
+        ["Bed price", stay.bed?.daily_charge ? `${formatCurrency(stay.bed.daily_charge)} / day` : "-"],
+      );
+    } else if (sel.ward) {
+      visitRows.push(["Ward / bed", `${sel.ward} · Bed ${dash(sel.bed_no)}`]);
+    }
+    const extraSections: { title: string; headers: string[]; rows: string[][] }[] = [];
+    if (stay && stay.bed_history.length) {
+      extraSections.push({
+        title: "Bed History", headers: ["Bed", "From", "To", "Price / day", "Days", "Charge"],
+        rows: stay.bed_history.map((b) => [b.label, when(b.from), b.to ? when(b.to) : "Current", b.rate ? formatCurrency(b.rate) : "-", String(b.days ?? "-"), b.amount ? formatCurrency(b.amount) : "-"]),
+      });
+    }
+    if (journey.payments.length) {
+      extraSections.push({
+        title: "Payments Received", headers: ["Date", "Mode", "Reference", "Invoice", "Amount"],
+        rows: journey.payments.map((p) => [`${p.date} ${p.time}`, p.mode, p.reference, p.invoice_no || "-", formatCurrency(p.amount)]),
+      });
+    }
+    if (fs.categories.length) {
+      extraSections.push({ title: "Charges by Category", headers: ["Category", "Amount"], rows: fs.categories.map((c) => [c.label, formatCurrency(c.amount)]) });
+    }
+    const bill = journey.bill;
+    if (bill) {
+      extraSections.unshift({
+        title: bill.live ? `Running Bill (as of ${when(bill.as_of)})` : "Stay Bill Breakdown",
+        headers: ["Item", "Amount"],
+        rows: [
+          [`Bed charges (${bill.days_stayed} day${bill.days_stayed === 1 ? "" : "s"} x ${formatCurrency(bill.rate_per_day)}/day)`, formatCurrency(bill.bed_total)],
+          [`${bill.live ? "Unbilled pharmacy" : "Pharmacy"} (${bill.pharmacy_count} item${bill.pharmacy_count === 1 ? "" : "s"})`, formatCurrency(bill.pharmacy_total)],
+          [`${bill.live ? "Unbilled lab / imaging" : "Lab / imaging"} (${bill.diag_count} item${bill.diag_count === 1 ? "" : "s"})`, formatCurrency(bill.diag_total)],
+          ["Grand total", formatCurrency(bill.grand_total)],
+        ],
+      });
+    }
+    const patientMobile = splitStoredPhone(journey.patient.phone, journey.patient.phone_country_code);
     return {
       title: "Patient Journey Summary",
       subtitle: `${journey.selected.label} · ${journey.selected.start?.slice(0, 10) || ""}${journey.selected.end && journey.selected.end !== journey.selected.start ? ` – ${journey.selected.end.slice(0, 10)}` : ""}`,
@@ -264,10 +323,16 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
         patient_name: journey.patient.name, patient_id: journey.patient.patient_id,
         age: journey.patient.age ?? undefined, gender: journey.patient.gender ?? undefined,
         consulting_doctor: journey.doctor_name ?? undefined,
+        department: journey.department ?? undefined,
+        mobile: patientMobile.value ? formatPhone(patientMobile.countryCode, patientMobile.value) : undefined,
+        email: journey.patient.email ?? undefined,
+        address: journey.patient.address ?? undefined,
       },
       sections: [
+        { title: "Visit Details", headers: ["Item", "Details"], rows: visitRows },
         { title: "Chronological Activity", headers: ["Time", "Event and reference", "Charge", "Received"], rows },
         ...detailSections,
+        ...extraSections,
       ],
       totals: {
         subtotal: formatCurrency(fs.total_charges), grand_total: formatCurrency(fs.total_charges),
@@ -460,6 +525,11 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
               <div style={{ fontSize: "12px", fontWeight: 800, color: "#334155", textTransform: "uppercase", marginBottom: "10px" }}>Inpatient stay details</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px 18px" }}>
                 {([
+                  ["Admitted on", journey.stay.admitted_at ? journey.stay.admitted_at.slice(0, 16).replace("T", " ") : null],
+                  [journey.stay.discharged ? "Length of stay" : "Stay completed so far",
+                    journey.stay.days_completed !== undefined
+                      ? `${journey.stay.days_completed} day${journey.stay.days_completed === 1 ? "" : "s"} ${journey.stay.hours_extra ?? 0} hr${journey.stay.hours_extra === 1 ? "" : "s"}${journey.stay.discharged ? "" : ` · Day ${journey.stay.current_day}`}`
+                      : null],
                   ["Reason for admission", journey.stay.reason],
                   ["Department", journey.stay.department],
                   ["Consulting doctor", journey.stay.consulting_doctor],
@@ -468,7 +538,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                   ["Expected stay", journey.stay.expected_stay],
                   ["Ward / room", journey.stay.bed ? [journey.stay.bed.ward, journey.stay.bed.room_no].filter(Boolean).join(" · ") : null],
                   ["Bed", journey.stay.bed ? [journey.stay.bed.bed_no, journey.stay.bed.bed_type].filter(Boolean).join(" · ") : null],
-                  ["Bed charge", journey.stay.bed?.daily_charge ? `${formatCurrency(journey.stay.bed.daily_charge)} / day` : null],
+                  ["Bed price", journey.stay.bed?.daily_charge ? `${formatCurrency(journey.stay.bed.daily_charge)} / day` : null],
                   ["Payer", journey.stay.payer_type],
                 ] as [string, string | null | undefined][]).map(([label, value]) => (
                   <div key={label}>
@@ -477,11 +547,58 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                   </div>
                 ))}
               </div>
-              {journey.stay.bed_history.length > 1 && (
-                <div style={{ marginTop: "12px", fontSize: "12.5px", color: "#475569" }}>
-                  <strong>Bed history:</strong>{" "}
-                  {journey.stay.bed_history.map((b) => `${b.label} (${(b.from || "").slice(0, 16).replace("T", " ")}${b.to ? ` → ${b.to.slice(0, 16).replace("T", " ")}` : " → now"})`).join("  ›  ")}
+              {journey.stay.bed_history.length > 0 && (
+                <div style={{ marginTop: "14px", overflowX: "auto" }}>
+                  <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 700, textTransform: "uppercase", marginBottom: "6px" }}>Bed history</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "#64748b" }}>
+                        {["Bed", "From", "To", "Price / day", "Days", "Charge"].map((h) => <th key={h} style={{ padding: "4px 8px", borderBottom: "1px solid #e2e8f0" }}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {journey.stay.bed_history.map((b, i) => (
+                        <tr key={i}>
+                          <td style={{ padding: "5px 8px" }}>{b.label}</td>
+                          <td style={{ padding: "5px 8px" }}>{(b.from || "").slice(0, 16).replace("T", " ")}</td>
+                          <td style={{ padding: "5px 8px" }}>{b.to ? b.to.slice(0, 16).replace("T", " ") : "Current"}</td>
+                          <td style={{ padding: "5px 8px" }}>{b.rate ? formatCurrency(b.rate) : "—"}</td>
+                          <td style={{ padding: "5px 8px" }}>{b.days ?? "—"}</td>
+                          <td style={{ padding: "5px 8px", fontWeight: 700 }}>{b.amount ? formatCurrency(b.amount) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              )}
+            </div>
+          )}
+
+          {journey.bill && (
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "14px", padding: "16px 22px", marginBottom: "16px", maxWidth: "560px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 800, color: "#334155", textTransform: "uppercase", marginBottom: "10px" }}>
+                {journey.bill.live ? "Running bill · current stay" : "Stay bill breakdown"}
+              </div>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px 14px", display: "grid", gap: "6px", fontSize: "13px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#64748b" }}>Bed charges ({journey.bill.days_stayed} day{journey.bill.days_stayed === 1 ? "" : "s"} × {formatCurrency(journey.bill.rate_per_day)}/day)</span>
+                  <strong>{formatCurrency(journey.bill.bed_total)}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#64748b" }}>{journey.bill.live ? "Unbilled pharmacy" : "Pharmacy"} ({journey.bill.pharmacy_count} item{journey.bill.pharmacy_count === 1 ? "" : "s"})</span>
+                  <strong>{formatCurrency(journey.bill.pharmacy_total)}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#64748b" }}>{journey.bill.live ? "Unbilled lab / imaging" : "Lab / imaging"} ({journey.bill.diag_count} item{journey.bill.diag_count === 1 ? "" : "s"})</span>
+                  <strong>{formatCurrency(journey.bill.diag_total)}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px dashed #cbd5e1", paddingTop: "8px" }}>
+                  <strong>Grand total</strong>
+                  <strong style={{ color: "#0f766e" }}>{formatCurrency(journey.bill.grand_total)}</strong>
+                </div>
+              </div>
+              {journey.bill.live && journey.bill.as_of && (
+                <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "6px" }}>As of {journey.bill.as_of.slice(0, 16).replace("T", " ")} · updates every time this page is opened</div>
               )}
             </div>
           )}
