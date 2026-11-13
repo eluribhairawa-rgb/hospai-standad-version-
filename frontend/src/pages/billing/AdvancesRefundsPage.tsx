@@ -6,6 +6,7 @@ import { Button, Modal } from "../../components/ui";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
 import { splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
+import { fullPatientName, lookupPatientByUhid } from "../../lib/patientLookup";
 import "./billingTheme.css";
 
 type Props = {
@@ -51,7 +52,11 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
 
   // Modal actions
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
+  // UHID box: what is typed until a patient is found; then the exact UHID + name, both locked.
   const [advPatientId, setAdvPatientId] = useState("");
+  const [advLookupText, setAdvLookupText] = useState("");
+  const [advPatientName, setAdvPatientName] = useState("");
+  const [advLookupState, setAdvLookupState] = useState<"idle" | "searching" | "notfound">("idle");
   const [advAmount, setAdvAmount] = useState("5000");
   const [advMode, setAdvMode] = useState("UPI");
   const [advRef, setAdvRef] = useState("");
@@ -131,6 +136,53 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
     loadAdvancesData(searchQuery);
   };
 
+  // Opens the deposit form for the patient already searched/selected on this page, so their UHID is not retyped.
+  const applyAdvPatient = (patient: any) => {
+    setAdvPatientId(String(patient.patient_id));
+    setAdvPatientName(fullPatientName(patient));
+    setAdvLookupText(String(patient.patient_id));
+    setAdvLookupState("idle");
+  };
+  const clearAdvPatient = () => {
+    setAdvPatientId("");
+    setAdvPatientName("");
+    setAdvLookupText("");
+    setAdvLookupState("idle");
+  };
+  const findAdvPatient = async (text: string) => {
+    const value = text.trim();
+    if (!value) { setAdvLookupState("idle"); return; }
+    setAdvLookupState("searching");
+    const patient = await lookupPatientByUhid(value);
+    // Ignore a late answer for text the user has since changed.
+    setAdvLookupText((current) => {
+      if (current.trim() !== value) return current;
+      if (patient?.patient_id) applyAdvPatient(patient);
+      else setAdvLookupState("notfound");
+      return current;
+    });
+  };
+  // Typing a UHID or its last digits looks the patient up automatically.
+  useEffect(() => {
+    if (!showAdvanceModal || advPatientId) return;
+    const text = advLookupText.trim();
+    if (text.replace(/\D/g, "").length < 4 && text.length < 4) { setAdvLookupState("idle"); return; }
+    const timer = window.setTimeout(() => { void findAdvPatient(text); }, 450);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advLookupText, advPatientId, showAdvanceModal]);
+
+  const openAdvanceModal = () => {
+    const current = patientInfo?.patient_id || selectedPatient?.patient_id;
+    if (current) {
+      const known = patientInfo?.patient_id ? patientInfo : selectedPatient;
+      applyAdvPatient({ ...known, patient_id: current });
+    } else {
+      clearAdvPatient();
+    }
+    setShowAdvanceModal(true);
+  };
+
   const handleRecordAdvance = async () => {
     if (!advPatientId.trim()) {
       setNotice({ type: "warning", message: "Patient UHID is required." });
@@ -144,11 +196,12 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
 
     setSavingAdv(true);
     try {
+      const uhid = advPatientId.trim();
       const res = await apiFetch("/api/billing/advances", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patient_id: advPatientId.trim(),
+          patient_id: uhid,
           amount: amt,
           payment_mode: advMode.toLowerCase(),
           transaction_ref: advRef || `${advMode}-ADVANCE`,
@@ -157,8 +210,8 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
       });
       setShowAdvanceModal(false);
       setNotice({ type: "success", message: `Advance deposit ${res.advance_no} recorded successfully.` });
-      setSearchQuery(advPatientId.trim());
-      loadAdvancesData(advPatientId.trim());
+      setSearchQuery(uhid);
+      loadAdvancesData(uhid);
     } catch (err: any) {
       reportError(setNotice, err);
       setNotice({ type: "error", message: err.message || "Failed to record advance." });
@@ -320,6 +373,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
       meta: [
         { label: "Advance No", value: adv.advance_no },
         { label: "Patient UHID", value: adv.patient_id },
+        { label: "Patient Name", value: adv.patient_name || patientInfo?.name || "-" },
         { label: "Payment Mode", value: (adv.payment_mode || "CASH").toUpperCase() },
         { label: "Transaction Ref", value: adv.transaction_ref || "-" },
       ],
@@ -353,6 +407,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
       meta: [
         { label: "Refund No", value: rf.refund_no },
         { label: "Patient UHID", value: rf.patient_id },
+        { label: "Patient Name", value: rf.patient_name || patientInfo?.name || "-" },
         { label: "Reason", value: rf.reason || "Discharge excess return" },
         { label: "Authorised By", value: rf.approved_by || "Supervisor" },
         { label: "Disbursed By", value: rf.paid_by || "Cashier" },
@@ -398,7 +453,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
       `----------------------------------------`,
       `Advance No: ${adv.advance_no}`,
       `Patient UHID: ${adv.patient_id}`,
-      patientInfo?.name ? `Patient Name: ${patientInfo.name}` : "",
+      (adv.patient_name || patientInfo?.name) ? `Patient Name: ${adv.patient_name || patientInfo?.name}` : "",
       `Amount Deposited: ₹${Number(adv.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
       `Payment Mode: ${(adv.payment_mode || "CASH").toUpperCase()}`,
       adv.transaction_ref ? `Ref / Txn: ${adv.transaction_ref}` : "",
@@ -440,7 +495,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
       `----------------------------------------`,
       `Refund No: ${rf.refund_no}`,
       `Patient UHID: ${rf.patient_id}`,
-      patientInfo?.name ? `Patient Name: ${patientInfo.name}` : "",
+      (rf.patient_name || patientInfo?.name) ? `Patient Name: ${rf.patient_name || patientInfo?.name}` : "",
       `Amount Refunded: ₹${Number(rf.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
       `Refund Method: ${(rf.refund_method || "CASH").toUpperCase()}`,
       rf.reason ? `Reason: ${rf.reason}` : "",
@@ -495,7 +550,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
           <button
             type="button"
             className="billing-btn-teal"
-            onClick={() => setShowAdvanceModal(true)}
+            onClick={openAdvanceModal}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -716,7 +771,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                       type="button"
                       className="billing-btn-teal"
                       style={{ marginTop: "10px" }}
-                      onClick={() => setShowAdvanceModal(true)}
+                      onClick={openAdvanceModal}
                     >
                       + Record Advance Now
                     </button>
@@ -751,7 +806,8 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                             </td>
                             <td style={{ fontWeight: 600 }}>{a.advance_no}</td>
                             <td>
-                              <span style={{ fontWeight: 600 }}>{a.patient_id}</span>
+                              <span style={{ fontWeight: 700, display: "block" }}>{a.patient_name || "—"}</span>
+                              <span style={{ fontWeight: 500, fontSize: "0.75rem", color: "#64748b" }}>{a.patient_id}</span>
                             </td>
                             <td>
                               <span style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: "4px", fontSize: "0.75rem", fontWeight: 600 }}>
@@ -823,7 +879,10 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                             <td style={{ color: "#64748b" }}>
                               {rf.created_at ? String(rf.created_at).slice(0, 10) : "Today"}
                             </td>
-                            <td style={{ fontWeight: 600 }}>{rf.patient_id}</td>
+                            <td style={{ fontWeight: 600 }}>
+                              <span style={{ display: "block", fontWeight: 700 }}>{rf.patient_name || "—"}</span>
+                              <span style={{ fontWeight: 500, fontSize: "0.75rem", color: "#64748b" }}>{rf.patient_id}</span>
+                            </td>
                             <td style={{ fontWeight: 700, color: "#dc2626" }}>₹{fmt(rf.amount)}</td>
                             <td style={{ color: "#475569", maxWidth: "220px" }}>{rf.reason || "Excess return"}</td>
                             <td>
@@ -1116,12 +1175,40 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
               <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
                 Patient UHID *
               </label>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="text"
+                  className="billing-form-input"
+                  placeholder="Enter UHID or its last 4 digits"
+                  value={advPatientId || advLookupText}
+                  readOnly={!!advPatientId}
+                  onChange={(e) => { setAdvLookupText(e.target.value); setAdvLookupState("idle"); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !advPatientId) { e.preventDefault(); void findAdvPatient(advLookupText); } }}
+                  style={advPatientId ? { background: "#f1f5f9", color: "#334155" } : undefined}
+                  autoFocus={!advPatientId}
+                />
+                {advPatientId && (
+                  <button type="button" className="billing-btn-outline" onClick={clearAdvPatient} style={{ whiteSpace: "nowrap" }}>
+                    Change
+                  </button>
+                )}
+              </div>
+              {advLookupState === "searching" && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>Searching...</div>}
+              {advLookupState === "notfound" && <div style={{ fontSize: "12px", color: "#dc2626", marginTop: "4px" }}>No patient found for "{advLookupText.trim()}".</div>}
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 600, color: "#475569", marginBottom: "4px" }}>
+                Patient Name
+              </label>
               <input
                 type="text"
                 className="billing-form-input"
-                placeholder="e.g. PAT-20260923-0058"
-                value={advPatientId}
-                onChange={(e) => setAdvPatientId(e.target.value)}
+                placeholder="Fetched automatically from the UHID"
+                value={advPatientName}
+                readOnly
+                tabIndex={-1}
+                style={{ background: "#f1f5f9", color: "#334155" }}
               />
             </div>
 
@@ -1191,7 +1278,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
               <button
                 type="button"
                 className="billing-btn-teal"
-                disabled={savingAdv}
+                disabled={savingAdv || !advPatientId}
                 onClick={handleRecordAdvance}
               >
                 {savingAdv ? "Recording..." : "Record & Issue Receipt"}

@@ -317,15 +317,16 @@ def billing_advances_list(patient_id: str | None = None, admission_id: int | Non
             if resolved:
                 patient_id = resolved["patient_id"]
 
-        query = "SELECT * FROM patient_advances WHERE 1=1"
+        query = ("SELECT pa.*, TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.middle_name, '') || ' ' || COALESCE(p.last_name, '')) AS patient_name FROM patient_advances pa "
+                 "LEFT JOIN patients p ON p.patient_id = pa.patient_id WHERE 1=1")
         params = []
         if patient_id:
-            query += " AND patient_id = ?"
+            query += " AND pa.patient_id = ?"
             params.append(patient_id)
         if admission_id:
-            query += " AND admission_id = ?"
+            query += " AND pa.admission_id = ?"
             params.append(admission_id)
-        query += " ORDER BY created_at DESC"
+        query += " ORDER BY pa.created_at DESC"
         cursor.execute(query, tuple(params))
         advances = [dict(r) for r in cursor.fetchall()]
 
@@ -336,12 +337,13 @@ def billing_advances_list(patient_id: str | None = None, admission_id: int | Non
         available = bs.quantize_dec(tot_adv - tot_alloc - tot_ref - tot_res)
 
         # Refund history
-        rf_query = "SELECT * FROM refund_requests WHERE 1=1"
+        rf_query = ("SELECT rr.*, TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.middle_name, '') || ' ' || COALESCE(p.last_name, '')) AS patient_name FROM refund_requests rr "
+                    "LEFT JOIN patients p ON p.patient_id = rr.patient_id WHERE 1=1")
         rf_params = []
         if patient_id:
-            rf_query += " AND patient_id = ?"
+            rf_query += " AND rr.patient_id = ?"
             rf_params.append(patient_id)
-        rf_query += " ORDER BY created_at DESC"
+        rf_query += " ORDER BY rr.created_at DESC"
         cursor.execute(rf_query, tuple(rf_params))
         refunds = [dict(r) for r in cursor.fetchall()]
 
