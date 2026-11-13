@@ -3,7 +3,7 @@ import { cleanCountryCode, splitStoredPhone, toWhatsAppNumber } from "../lib/pho
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError, getHospitalCode } from "../lib/api";
 import { API_BASE } from "../lib/constants";
-import type { Notice } from "../types";
+import type { DoctorSchedule, Notice } from "../types";
 import BrandLogo from "../components/BrandLogo";
 import { fitMm, useBranding } from "../lib/branding";
 import { buildHospaiPrintFooterCss } from "../lib/printViaIframe";
@@ -460,9 +460,13 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   const [patientGender, setPatientGender] = useState("Male");
   const [patientPhone, setPatientPhone] = useState("");
   const [patientPhoneCode, setPatientPhoneCode] = useState("+91");
-  const [doctorName, setDoctorNameState] = useState(scopedDoctor || "Dr. Rajesh Sharma, MD");
+  // Patient details filled from the queue / registered-patient list are locked: they come from the patient's record.
+  const [patientLocked, setPatientLocked] = useState(false);
+  // Doctor and department come from Doctor Scheduling (OP module).
+  const [schedules, setSchedules] = useState<DoctorSchedule[]>([]);
+  const [doctorName, setDoctorNameState] = useState(scopedDoctor || "");
   const setDoctorName = (name: string) => setDoctorNameState(scopedDoctor || name);
-  const [department, setDepartment] = useState("General Medicine");
+  const [department, setDepartment] = useState("");
   const [appointmentId, setAppointmentId] = useState<number | null>(null);
   const [appointmentToken, setAppointmentToken] = useState("");
   const [visitType, setVisitType] = useState("OP Consultation");
@@ -586,9 +590,11 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
       }
     };
     // Patient identity normally comes from the queue; only fill what is still blank.
-    if (!patientName.trim()) put(f.patient_name, setPatientName, "Patient name");
-    if (!patientAge.trim()) put(f.patient_age, setPatientAge, "Age");
-    if (!patientUhid.trim()) put(f.patient_gender, setPatientGender, "Gender");
+    if (!patientLocked) {
+      if (!patientName.trim()) put(f.patient_name, setPatientName, "Patient name");
+      if (!patientAge.trim()) put(f.patient_age, setPatientAge, "Age");
+      if (!patientGender.trim() || !patientUhid.trim()) put(f.patient_gender, setPatientGender, "Gender");
+    }
     put(f.symptoms, setSymptoms, "Symptoms");
     put(f.diagnosis, setDiagnosis, "Diagnosis");
     put(f.vitals.bp, setVitalsBp, "BP");
@@ -664,6 +670,48 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     }
   };
   const printSheetRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ schedules?: DoctorSchedule[] }>("/api/op/doctor-schedules")
+      .then((data) => { if (!cancelled) setSchedules((data?.schedules || []).filter((s) => s.doctor_name && s.status !== "leave")); })
+      .catch(() => { /* non-blocking: fields stay editable from the patient's own doctor */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // doctor -> department as set in Doctor Scheduling
+  const scheduleDepartments = useMemo(() => {
+    const map = new Map<string, string>();
+    schedules.forEach((s) => { if (s.department && !map.has(String(s.doctor_name))) map.set(String(s.doctor_name), String(s.department)); });
+    return map;
+  }, [schedules]);
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>(Array.from(scheduleDepartments.values()));
+    if (department) set.add(department);
+    return Array.from(set).sort();
+  }, [scheduleDepartments, department]);
+  const doctorOptions = useMemo(() => {
+    const set = new Set<string>();
+    scheduleDepartments.forEach((dept, doc) => { if (!department || dept === department) set.add(doc); });
+    if (doctorName) set.add(doctorName);
+    return Array.from(set).sort();
+  }, [scheduleDepartments, department, doctorName]);
+  const chooseDoctor = (name: string) => {
+    setDoctorName(name);
+    const dept = scheduleDepartments.get(name);
+    if (dept) setDepartment(dept);
+  };
+  // Without a patient-specific doctor, a scoped doctor (or the only scheduled one) fills the fields.
+  useEffect(() => {
+    if (doctorName || !schedules.length) return;
+    const first = scopedDoctor || (scheduleDepartments.size === 1 ? Array.from(scheduleDepartments.keys())[0] : "");
+    if (first) chooseDoctor(first);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedules, scopedDoctor]);
+  useEffect(() => {
+    // A scoped doctor's department always follows their schedule.
+    if (scopedDoctor && scheduleDepartments.has(scopedDoctor)) setDepartment(scheduleDepartments.get(scopedDoctor)!);
+  }, [scopedDoctor, scheduleDepartments]);
 
   // Fetch live queue from backend
   const fetchLiveQueue = async () => {
@@ -1119,6 +1167,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     }
 
     setActiveQueueItem(patient);
+    setPatientLocked(true);
     setAppointmentId(patient.appointmentId || null);
     setAppointmentToken(patient.token);
     setPatientUhid(patient.uhid);
@@ -1233,6 +1282,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   // Reset / Clear prescription form for the next patient
   const clearPrescriptionForm = () => {
     setActiveQueueItem(null);
+    setPatientLocked(false);
     setPatientUhid("");
     setPatientName("");
     setPatientAge("");
@@ -1288,6 +1338,11 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   const handleCompleteConsultation = async (andPrint: boolean = false) => {
     if (!patientUhid.trim() && !patientName.trim()) {
       setNotice({ type: "warning", message: "Please select a patient from the Queue or enter patient details." });
+      return;
+    }
+
+    if (!doctorName.trim()) {
+      setNotice({ type: "warning", message: "Select the consulting doctor (from Doctor Scheduling) before completing the consultation." });
       return;
     }
 
@@ -1576,6 +1631,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
   const handlePickSearchedPatient = async (p: any) => {
     const uhid = p.patient_id || p.id || "";
     const fullName = getPatientFullName(p);
+    setPatientLocked(true);
     setPatientUhid(uhid);
     setPatientName(fullName);
     setPatientAge(p.age ? String(p.age) : "");
@@ -2619,6 +2675,17 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   onFocus={() => setUhidDropdownOpen(true)}
                   onChange={(e) => {
                     const val = e.target.value;
+                    if (patientLocked) {
+                      // A different UHID means a different patient: drop the previous patient's details.
+                      setPatientLocked(false);
+                      setPatientName("");
+                      setPatientAge("");
+                      setPatientGender("Male");
+                      setPatientPhone("");
+                      setActiveQueueItem(null);
+                      setAppointmentId(null);
+                      setAppointmentToken("");
+                    }
                     setPatientUhid(val);
                     setUhidDropdownOpen(true);
                     const exact = registeredPatients.find((p) => (p.patient_id || "").toLowerCase() === val.trim().toLowerCase());
@@ -2690,6 +2757,8 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   className="doctor-rx-input"
                   value={patientName}
                   onChange={(e) => setPatientName(e.target.value)}
+                  readOnly={patientLocked}
+                  title={patientLocked ? "Filled from the patient's record" : undefined}
                   placeholder="Patient Full Name"
                 />
               </div>
@@ -2703,6 +2772,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                     style={{ width: "60px" }}
                     value={patientAge}
                     onChange={(e) => setPatientAge(e.target.value)}
+                    readOnly={patientLocked}
                     placeholder="Age"
                   />
                   <select
@@ -2710,6 +2780,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                     style={{ flex: 1 }}
                     value={patientGender}
                     onChange={(e) => setPatientGender(e.target.value)}
+                    disabled={patientLocked}
                   >
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
@@ -2720,23 +2791,32 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
 
               <div className="doctor-rx-field">
                 <label>Consulting Doctor</label>
-                <input
-                  type="text"
-                  className="doctor-rx-input"
+                <select
+                  className="doctor-rx-select"
                   value={doctorName}
-                  onChange={(e) => setDoctorName(e.target.value)}
-                  readOnly={!!scopedDoctor}
-                />
+                  onChange={(e) => chooseDoctor(e.target.value)}
+                  disabled={!!scopedDoctor}
+                >
+                  <option value="">Select doctor (from Doctor Scheduling)</option>
+                  {doctorOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
               </div>
 
               <div className="doctor-rx-field">
                 <label>Department / Specialty</label>
-                <input
-                  type="text"
-                  className="doctor-rx-input"
+                <select
+                  className="doctor-rx-select"
                   value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                />
+                  onChange={(e) => {
+                    setDepartment(e.target.value);
+                    // Keep the doctor only if scheduled in the chosen department.
+                    if (!scopedDoctor && doctorName && scheduleDepartments.get(doctorName) !== e.target.value) setDoctorNameState("");
+                  }}
+                  disabled={!!scopedDoctor}
+                >
+                  <option value="">Select department</option>
+                  {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
               </div>
 
               <div className="doctor-rx-field">
