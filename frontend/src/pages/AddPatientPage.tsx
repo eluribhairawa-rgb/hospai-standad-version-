@@ -7,10 +7,17 @@ import { printViaIframe } from "../lib/printViaIframe";
 import { calculateAgeFromDob } from "../lib/format";
 import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory";
 import { Modal } from "../components/ui";
-import { COUNTRY_CODE_RULES, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
+import { COUNTRY_CODE_RULES, parsePhoneInput, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import PhoneInput from "../components/PhoneInput";
 
 const COUNTRY_OPTIONS = Object.values(COUNTRY_CODE_RULES).map((r) => r.label);
+
+/** Pasted "+971 50 123 4567": drops the country code from the digits and switches the country select to it. */
+function pastedPhone(raw: string, countryOption: string) {
+  const parsed = parsePhoneInput(raw, countryOption.match(/\+\d+/)?.[0] || "+91");
+  const rule = COUNTRY_CODE_RULES[parsed.countryCode] || COUNTRY_CODE_RULES["+91"];
+  return { option: rule.label, value: parsed.value.slice(0, rule.max) };
+}
 
 /** Digits allowed for a mobile under the chosen country option ("UAE (+971)" -> 9). */
 function primaryDigitLimit(countryOption: string): number {
@@ -1887,9 +1894,12 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               <input
                 type="tel"
                 value={primaryPhone}
-                onChange={(e) => setPrimaryPhone(e.target.value.replace(/\D/g, "").slice(0, primaryDigitLimit(primaryCountryCode)))}
+                onChange={(e) => {
+                  const next = pastedPhone(e.target.value, primaryCountryCode);
+                  setPrimaryCountryCode(next.option);
+                  setPrimaryPhone(next.value);
+                }}
                 placeholder={`${primaryDigitLimit(primaryCountryCode)}-digit mobile`}
-                maxLength={primaryDigitLimit(primaryCountryCode)}
                 inputMode="numeric"
                 pattern="[0-9]*"
                 className="pharmacy-rx-search-input"
@@ -1916,9 +1926,12 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               <input
                 type="tel"
                 value={altPhone}
-                onChange={(e) => setAltPhone(e.target.value.replace(/\D/g, "").slice(0, primaryDigitLimit(altCountryCode)))}
+                onChange={(e) => {
+                  const next = pastedPhone(e.target.value, altCountryCode);
+                  setAltCountryCode(next.option);
+                  setAltPhone(next.value);
+                }}
                 placeholder="Alternate mobile"
-                maxLength={primaryDigitLimit(altCountryCode)}
                 inputMode="numeric"
                 pattern="[0-9]*"
                 className="pharmacy-rx-search-input"

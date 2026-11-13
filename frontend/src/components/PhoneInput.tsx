@@ -1,7 +1,7 @@
 // Mobile number with its country code. The number field only accepts digits, and no more
 // than the selected country allows (India 10, UAE 9, Singapore 8 ...; rules in lib/phone.ts).
 import { Input, Select } from "./ui";
-import { COUNTRY_CODES, COUNTRY_CODE_RULES, normalizePhoneNumber, validateMobileByCountry } from "../lib/phone";
+import { COUNTRY_CODES, COUNTRY_CODE_RULES, parsePhoneInput, validateMobileByCountry } from "../lib/phone";
 
 type Props = {
   countryCode: string;
@@ -46,14 +46,18 @@ export default function PhoneInput({ countryCode, value, onChange, required = fa
           id={id}
           inputMode="numeric"
           autoComplete="tel-national"
-          maxLength={rule.max}
+          // No maxLength: it would cut a pasted "+91 98765 43210" before the code can be removed.
           placeholder={placeholder || (landline ? "Phone number" : `${rule.max}-digit mobile`)}
           value={value}
           name={name}
           disabled={disabled}
           required={required}
           aria-invalid={!!error}
-          onChange={(e) => onChange({ countryCode: code, value: normalizePhoneNumber(e.target.value, code).slice(0, rule.max) })}
+          onChange={(e) => {
+            const parsed = parsePhoneInput(e.target.value, code);
+            const max = landline ? 15 : COUNTRY_CODE_RULES[parsed.countryCode].max;
+            onChange({ countryCode: parsed.countryCode, value: parsed.value.slice(0, max) });
+          }}
         />
       </div>
       {name && <input type="hidden" name={`${name}_country_code`} value={code} />}

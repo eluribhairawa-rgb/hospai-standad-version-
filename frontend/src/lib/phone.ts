@@ -37,37 +37,41 @@ export function withCountryCode(_countryCode: string, value: string): string {
 }
 
 /**
- * Normalizes a pasted or typed phone number.
- * 
- * - Strips +[countryCode] unconditionally if present.
- * - Strips [countryCode] digits if the remaining string is a valid local number length.
- * - Handles non-matching country codes safely by returning purely digits.
+ * Splits a pasted or typed phone number into its country code and local digits, so a
+ * country code that came along with the paste is never counted as part of the number.
+ *
+ * - "+<code>..." (or "00<code>...") with a supported code: that code is used and removed,
+ *   even when it differs from the selected one (the country switches).
+ * - Digits starting with the selected code, longer than the country's length allows
+ *   (e.g. 919876543210 for India): the code is removed.
+ * - Anything else is kept as typed, so a valid local number that happens to begin with
+ *   the code's digits (9112345678) is never cut.
  */
+export function parsePhoneInput(value: string, selectedCountryCode: string): { countryCode: string; value: string } {
+  const selected = cleanCountryCode(selectedCountryCode);
+  const cleaned = (value || "").trim();
+  const digits = cleaned.replace(/\D/g, "");
+  if (!digits) return { countryCode: selected, value: "" };
+
+  const international = cleaned.startsWith("+") || (cleaned.startsWith("00") && digits.length > 2);
+  if (international) {
+    const intl = cleaned.startsWith("+") ? digits : digits.slice(2);
+    const match = COUNTRY_CODES.slice().sort((a, b) => b.length - a.length).find((c) => intl.startsWith(c.slice(1)));
+    if (match) return { countryCode: match, value: intl.slice(match.length - 1).slice(0, 15) };
+    return { countryCode: selected, value: intl.slice(0, 15) };
+  }
+
+  const cc = selected.slice(1);
+  const rule = COUNTRY_CODE_RULES[selected];
+  if (digits.startsWith(cc) && digits.length > rule.max && digits.length - cc.length >= rule.min) {
+    return { countryCode: selected, value: digits.slice(cc.length).slice(0, 15) };
+  }
+  return { countryCode: selected, value: digits.slice(0, 15) };
+}
+
+/** Local digits only (country code removed) for the selected country. */
 export function normalizePhoneNumber(value: string, selectedCountryCode: string): string {
-  if (!value) return "";
-
-  const cleaned = value.trim();
-  const hasPlus = cleaned.startsWith('+');
-  const digits = cleaned.replace(/\D/g, '');
-
-  const ccDigits = selectedCountryCode.replace(/\D/g, '');
-  const rule = COUNTRY_CODE_RULES[selectedCountryCode] || COUNTRY_CODE_RULES["+91"];
-
-  if (hasPlus) {
-    if (digits.startsWith(ccDigits)) {
-      return digits.slice(ccDigits.length).slice(0, 15);
-    }
-    return digits.slice(0, 15);
-  }
-
-  if (digits.startsWith(ccDigits)) {
-    const remainder = digits.slice(ccDigits.length);
-    if (remainder.length >= rule.min) {
-      return remainder.slice(0, 15);
-    }
-  }
-
-  return digits.slice(0, 15);
+  return parsePhoneInput(value, selectedCountryCode).value;
 }
 
 /**

@@ -8,7 +8,7 @@ import type { Notice, Patient } from "../../types";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml, buildPrintLabelsHtml } from "../../lib/printTemplates";
 import { downloadCsv } from "../../lib/csvExport";
-import { COUNTRY_CODE_RULES, COUNTRY_CODES, normalizePhoneNumber, validateMobileByCountry, withCountryCode, splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
+import { COUNTRY_CODE_RULES, COUNTRY_CODES, parsePhoneInput, validateMobileByCountry, withCountryCode, splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -1542,9 +1542,12 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     <Input
                       type="tel"
                       inputMode="numeric"
-                      maxLength={customerPhoneRule.max}
                       value={customerPhone}
-                      onChange={(e) => setCustomerPhone(normalizePhoneNumber(e.target.value, customerCountryCode).slice(0, customerPhoneRule.max))}
+                      onChange={(e) => {
+                        const parsed = parsePhoneInput(e.target.value, customerCountryCode);
+                        setCustomerCountryCode(parsed.countryCode);
+                        setCustomerPhone(parsed.value.slice(0, COUNTRY_CODE_RULES[parsed.countryCode].max));
+                      }}
                       placeholder={`${customerPhoneRule.min === customerPhoneRule.max ? customerPhoneRule.max : `${customerPhoneRule.min}-${customerPhoneRule.max}`}-digit mobile number`}
                       aria-invalid={!!customerPhoneError}
                       style={{ width: "100%", minWidth: 0, ...(customerPhoneError ? { borderColor: "#e11d48" } : {}) }}
