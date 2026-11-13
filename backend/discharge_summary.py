@@ -118,6 +118,24 @@ def resolve_encounter(db, patient_id, encounter_type=None, encounter_id=None):
     return (encounters[0] if encounters else None), encounters
 
 
+ADMISSION_NOTE_FIELDS = {
+    "admission type": "admission_type", "department": "department", "consulting doctor": "consulting_doctor",
+    "triage acuity": "triage", "reason": "reason", "expected stay": "expected_stay", "allocated bed": "bed",
+}
+
+
+def parse_admission_notes(notes):
+    """The admission form stores its answers as 'Key: value | Key: value' in
+    admissions.notes -- turn that into a dict of the fields the summary can use."""
+    out = {}
+    for part in str(notes or "").split("|"):
+        key, sep, value = part.partition(":")
+        field = ADMISSION_NOTE_FIELDS.get(key.strip().lower())
+        if sep and field and value.strip():
+            out[field] = _clip(value)
+    return out
+
+
 def _fetch(cursor, sql, params=()):
     cursor.execute(sql, tuple(params))
     return [dict(r) for r in cursor.fetchall()]
@@ -146,6 +164,7 @@ def gather_patient_records(db, patient_id, encounter_type=None, encounter_id=Non
 
     vitals, prescriptions, rounds, observations, nursing, round_meds, procedures = [], [], [], [], [], [], []
     surgeries, reports, medication_orders, pharmacy_items, emergency = [], [], [], [], None
+    admission = None
     attending_doctor = (journey or {}).get("doctor_name")
 
     if selected:
@@ -160,6 +179,12 @@ def gather_patient_records(db, patient_id, encounter_type=None, encounter_id=Non
                                               "disposition", "disposition_notes", "disposition_at"]) or None
                 attending_doctor = attending_doctor or er_row.get("attending_doctor")
             er_appointment = (er_row or {}).get("appointment_id")
+
+            if etype == "IP":
+                cursor.execute("SELECT notes FROM admissions WHERE id = ? AND patient_id = ?", (eid, patient_id))
+                adm = cursor.fetchone()
+                admission = parse_admission_notes(adm["notes"]) if adm else None
+                attending_doctor = attending_doctor or (admission or {}).get("consulting_doctor")
 
             # ---- vitals
             vital_ts = "COALESCE(recorded_at, record_time, created_at)"
@@ -301,6 +326,7 @@ def gather_patient_records(db, patient_id, encounter_type=None, encounter_id=Non
             "attending_doctor": attending_doctor,
         } if selected else None,
         "emergency": emergency,
+        "admission": admission or None,
         "vitals": vitals,
         "prescriptions": prescriptions,
         "doctor_rounds": rounds,
@@ -394,7 +420,7 @@ def _ai_input(records):
         "patient": {k: p[k] for k in ("age", "gender", "blood_group", "allergies", "allergy_status", "medical_history",
                                       "current_medication", "symptoms") if k in p},
         "encounter": {k: v for k, v in (records.get("encounter") or {}).items() if k in ("type", "label", "start", "end", "status", "ward", "attending_doctor")},
-        **{k: records.get(k) for k in ("emergency", "vitals", "prescriptions", "doctor_rounds", "observation_notes", "inpatient_medications",
+        **{k: records.get(k) for k in ("emergency", "admission", "vitals", "prescriptions", "doctor_rounds", "observation_notes", "inpatient_medications",
                                         "medication_orders", "procedures", "surgeries", "nursing", "diagnostic_reports") if records.get(k)},
     }
 
@@ -423,11 +449,13 @@ def _section_has_data(records):
     rounds = records.get("doctor_rounds") or []
     er = records.get("emergency") or {}
     p = records.get("patient") or {}
+    adm = records.get("admission") or {}
     any_rx = lambda key: any(r.get(key) for r in rx)
     return {
-        "presenting_complaints": bool(p.get("symptoms") or er.get("chief_complaint") or any(r.get("patient_complaints") for r in rounds)),
+        "presenting_complaints": bool(p.get("symptoms") or er.get("chief_complaint") or adm.get("reason")
+                                      or any(r.get("patient_complaints") for r in rounds)),
         "diagnosis": bool(any_rx("diagnosis") or any(r.get("diagnosis") or r.get("assessment") for r in rounds)),
-        "clinical_course": bool(rounds or records.get("observation_notes") or records.get("nursing") or er or rx),
+        "clinical_course": bool(rounds or records.get("observation_notes") or records.get("nursing") or er or rx or adm),
         "key_investigations": bool(records.get("diagnostic_reports")),
         "procedures": bool(records.get("procedures") or records.get("surgeries")),
         "treatment_given": bool(any(r.get("medicines") for r in rx) or records.get("medication_orders") or records.get("inpatient_medications")
