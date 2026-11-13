@@ -492,11 +492,11 @@ export default function PreBookingPage({ setNotice, onNavigate }: Props) {
                 📝
               </div>
               <div>
-                <h2 style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>
+                <h2 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#ffffff" }}>
                   Pre-Appointment Booking Form
                 </h2>
-                <p style={{ margin: "2px 0 0", fontSize: "12.5px", color: "#cbd5e1" }}>
-                  Fields with <span style={{ color: "#f87171", fontWeight: 700 }}>*</span> are mandatory for pre-booking
+                <p style={{ margin: "2px 0 0", fontSize: "12.5px", color: "#e2e8f0" }}>
+                  Fields with <span style={{ color: "#fca5a5", fontWeight: 700 }}>*</span> are mandatory for pre-booking
                 </p>
               </div>
             </div>
