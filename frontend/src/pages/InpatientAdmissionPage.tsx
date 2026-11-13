@@ -30,6 +30,13 @@ type DoctorOrder = {
   date: string;
 };
 
+const DEFAULT_ADMISSION_TYPES = [
+  "Planned / Elective",
+  "Emergency",
+  "Day Care Surgery",
+  "Inter-facility Transfer",
+];
+
 export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props) {
   // The patient being admitted -- always an already-registered patient,
   // found by search. Registration itself happens once, at the Registration
@@ -44,7 +51,39 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
   const { departments: scheduledDepartments, doctors: scheduledDoctors, loading: directoryLoading } = useDoctorDirectory();
   const [department, setDepartment] = useState("");
   const [consultingDoctor, setConsultingDoctor] = useState("");
-  const [admissionType, setAdmissionType] = useState("Planned");
+
+  // Manageable admission types with localStorage persistence
+  const [customAdmissionTypes, setCustomAdmissionTypes] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("hospai_custom_admission_types");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const saveCustomTypes = (types: string[]) => {
+    setCustomAdmissionTypes(types);
+    try {
+      localStorage.setItem("hospai_custom_admission_types", JSON.stringify(types));
+    } catch {
+      // ignore
+    }
+  };
+
+  const allAdmissionTypes = useMemo(() => {
+    const combined = [...DEFAULT_ADMISSION_TYPES];
+    for (const c of customAdmissionTypes) {
+      if (!combined.includes(c)) combined.push(c);
+    }
+    return combined;
+  }, [customAdmissionTypes]);
+
+  const [admissionType, setAdmissionType] = useState(DEFAULT_ADMISSION_TYPES[0]);
+  const [isCustomTypeMode, setIsCustomTypeMode] = useState(false);
+  const [isManageTypesOpen, setIsManageTypesOpen] = useState(false);
+  const [newTypeInput, setNewTypeInput] = useState("");
+
   const [triagePriority, setTriagePriority] = useState<"Critical" | "Urgent" | "Stable">("Stable");
   const [reasonForAdmission, setReasonForAdmission] = useState("");
   const [expectedStay, setExpectedStay] = useState("");
@@ -189,7 +228,8 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     setDoctorOrder(null);
     setDepartment("");
     setConsultingDoctor("");
-    setAdmissionType("Planned");
+    setAdmissionType(DEFAULT_ADMISSION_TYPES[0]);
+    setIsCustomTypeMode(false);
     setTriagePriority("Stable");
     setReasonForAdmission("");
     setExpectedStay("");
@@ -281,6 +321,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
         admissionDate: new Date().toLocaleString("en-IN"),
         department,
         doctor: consultingDoctor,
+        admissionType,
         ward: chosenBed ? chosenBed.ward : "Awaiting Bed Allotment",
         bedNo: chosenBed ? chosenBed.bed_no : "Queued",
         roomNo: chosenBed ? chosenBed.room_no : "-",
@@ -341,6 +382,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
           <div style="border-top: 1px dashed #cbd5e1; margin: 10px 0; padding-top: 8px;">
             <div><strong>Department:</strong> ${rec.department}</div>
             <div><strong>Consulting Doctor:</strong> ${rec.doctor}</div>
+            <div><strong>Admission Type:</strong> ${rec.admissionType || "Planned / Elective"}</div>
             <div><strong>Ward:</strong> ${rec.ward}</div>
             <div><strong>Room / Bed No:</strong> ${rec.roomNo || "-"} / <span style="font-size: 15px; font-weight: 800; color: #2563eb;">${rec.bedNo}</span></div>
             <div><strong>Acuity:</strong> ${rec.triagePriority || "Stable"}</div>
@@ -568,18 +610,98 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
           </div>
 
           <div>
-            <Label>Admission Type <span style={{ color: "#ef4444" }}>*</span></Label>
-            <select
-              value={admissionType}
-              onChange={(e) => setAdmissionType(e.target.value)}
-              className="pharmacy-rx-search-input"
-              style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
-            >
-              <option value="Planned">Planned / Elective</option>
-              <option value="Emergency">Emergency</option>
-              <option value="Day Care">Day Care Surgery</option>
-              <option value="Transfer">Inter-facility Transfer</option>
-            </select>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+              <Label style={{ margin: 0 }}>Admission Type <span style={{ color: "#ef4444" }}>*</span></Label>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomTypeMode(!isCustomTypeMode)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#2563eb",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "0 2px",
+                  }}
+                  title={isCustomTypeMode ? "Switch to dropdown" : "Type custom admission type"}
+                >
+                  {isCustomTypeMode ? "📋 Dropdown" : "✏️ Custom"}
+                </button>
+                <span style={{ color: "#cbd5e1" }}>|</span>
+                <button
+                  type="button"
+                  onClick={() => setIsManageTypesOpen(true)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#0891b2",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    padding: "0 2px",
+                  }}
+                  title="Manage available admission types"
+                >
+                  ⚙️ Manage
+                </button>
+              </div>
+            </div>
+
+            {!isCustomTypeMode ? (
+              <select
+                value={admissionType}
+                onChange={(e) => {
+                  if (e.target.value === "__CUSTOM__") {
+                    setIsCustomTypeMode(true);
+                  } else if (e.target.value === "__MANAGE__") {
+                    setIsManageTypesOpen(true);
+                  } else {
+                    setAdmissionType(e.target.value);
+                  }
+                }}
+                className="pharmacy-rx-search-input"
+                style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
+              >
+                {allAdmissionTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+                <option disabled>──────────</option>
+                <option value="__CUSTOM__">✏️ Type custom admission type...</option>
+                <option value="__MANAGE__">⚙️ Manage admission types...</option>
+              </select>
+            ) : (
+              <div style={{ display: "flex", gap: "6px" }}>
+                <Input
+                  type="text"
+                  value={admissionType}
+                  onChange={(e) => setAdmissionType(e.target.value)}
+                  placeholder="e.g. Maternity / Delivery..."
+                  autoFocus
+                  style={{ height: "42px", flex: 1 }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const trimmed = admissionType.trim();
+                    if (trimmed && !allAdmissionTypes.includes(trimmed)) {
+                      saveCustomTypes([...customAdmissionTypes, trimmed]);
+                      setNotice({ type: "success", message: `Saved "${trimmed}" to admission types.` });
+                    }
+                    setIsCustomTypeMode(false);
+                  }}
+                  style={{ height: "42px", whiteSpace: "nowrap", padding: "0 10px", fontSize: "12px" }}
+                  title="Save to options and return to dropdown"
+                >
+                  Done
+                </Button>
+              </div>
+            )}
           </div>
 
           <div>
@@ -861,6 +983,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
                 <div>Ward / Bed: <strong>{admittedRecord.ward} · {admittedRecord.bedNo}</strong></div>
                 <div>Department: <strong>{admittedRecord.department}</strong></div>
                 <div>Doctor: <strong>{admittedRecord.doctor}</strong></div>
+                <div>Admission Type: <strong>{admittedRecord.admissionType || "Planned / Elective"}</strong></div>
                 <div>Payer: <strong>{admittedRecord.payer || "Self-pay"}{admittedRecord.policyNo ? ` (Policy ${admittedRecord.policyNo})` : ""}</strong></div>
               </div>
             </div>
@@ -888,6 +1011,155 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
           </div>
         </Modal>
       )}
+
+      {/* Manage Admission Types Modal */}
+      <Modal
+        open={isManageTypesOpen}
+        onClose={() => setIsManageTypesOpen(false)}
+        title="Manage Inpatient Admission Types"
+      >
+        <div style={{ padding: "0.25rem 0", maxWidth: "480px" }}>
+          <p style={{ fontSize: "13px", color: "#64748b", margin: "0 0 14px" }}>
+            Add, select, or remove custom admission types. These options appear in the Admission Type selector.
+          </p>
+
+          <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+            <Input
+              placeholder="New admission type (e.g. Maternity / Delivery)"
+              value={newTypeInput}
+              onChange={(e) => setNewTypeInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  const val = newTypeInput.trim();
+                  if (val) {
+                    if (allAdmissionTypes.includes(val)) {
+                      setNotice({ type: "warning", message: `"${val}" already exists.` });
+                    } else {
+                      saveCustomTypes([...customAdmissionTypes, val]);
+                      setAdmissionType(val);
+                      setNewTypeInput("");
+                      setNotice({ type: "success", message: `Added "${val}".` });
+                    }
+                  }
+                }
+              }}
+              style={{ flex: 1 }}
+            />
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                const val = newTypeInput.trim();
+                if (val) {
+                  if (allAdmissionTypes.includes(val)) {
+                    setNotice({ type: "warning", message: `"${val}" already exists.` });
+                  } else {
+                    saveCustomTypes([...customAdmissionTypes, val]);
+                    setAdmissionType(val);
+                    setNewTypeInput("");
+                    setNotice({ type: "success", message: `Added "${val}".` });
+                  }
+                }
+              }}
+            >
+              + Add
+            </Button>
+          </div>
+
+          <div style={{ maxHeight: "240px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "4px" }}>
+            {allAdmissionTypes.map((t) => {
+              const isCustom = customAdmissionTypes.includes(t);
+              const isSelected = admissionType === t;
+              return (
+                <div
+                  key={t}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    borderRadius: "6px",
+                    background: isSelected ? "#eff6ff" : "transparent",
+                    borderBottom: "1px solid #f1f5f9",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontWeight: isSelected ? 700 : 500, color: isSelected ? "#1d4ed8" : "#0f172a", fontSize: "13.5px" }}>
+                      {t}
+                    </span>
+                    {!isCustom && <span style={{ fontSize: "10px", background: "#f1f5f9", color: "#64748b", padding: "1px 6px", borderRadius: "4px" }}>Standard</span>}
+                    {isCustom && <span style={{ fontSize: "10px", background: "#e0f2fe", color: "#0369a1", padding: "1px 6px", borderRadius: "4px" }}>Custom</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <Button
+                      type="button"
+                      variant={isSelected ? "primary" : "secondary"}
+                      size="sm"
+                      onClick={() => {
+                        setAdmissionType(t);
+                        setIsCustomTypeMode(false);
+                        setIsManageTypesOpen(false);
+                      }}
+                      style={{ fontSize: "11px", padding: "2px 8px" }}
+                    >
+                      {isSelected ? "Selected" : "Select"}
+                    </Button>
+                    {isCustom && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = customAdmissionTypes.filter((x) => x !== t);
+                          saveCustomTypes(next);
+                          if (admissionType === t) {
+                            setAdmissionType(DEFAULT_ADMISSION_TYPES[0]);
+                          }
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#ef4444",
+                          cursor: "pointer",
+                          fontSize: "14px",
+                          padding: "2px 6px",
+                        }}
+                        title="Delete this custom type"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: "16px" }}>
+            {customAdmissionTypes.length > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  saveCustomTypes([]);
+                  setAdmissionType(DEFAULT_ADMISSION_TYPES[0]);
+                  setNotice({ type: "info", message: "Reset to default types." });
+                }}
+                style={{ color: "#64748b" }}
+              >
+                Reset to default types
+              </Button>
+            ) : <div />}
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsManageTypesOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

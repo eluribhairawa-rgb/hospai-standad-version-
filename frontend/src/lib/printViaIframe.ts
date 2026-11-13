@@ -46,18 +46,16 @@ export function buildHospaiPrintFooterCss(): string {
   const raw = b?.footer_text || brandThanks();
   // CSS string literal: escape backslash/quote and flatten newlines.
   const cssText = raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
+  const footerAsset = b?.footer?.data_uri ? b.footer : b?.logo?.data_uri ? b.logo : null;
   let centre = `@bottom-center { content: image-set(url("${PRINT_BRAND_HEADER_DATA_URI}") 20x); width: 16mm; margin-top: 1.5mm; vertical-align: top; text-align: center; }`;
-  if (b?.footer?.data_uri) {
-    // Custom footer image, scaled into its box with the aspect ratio kept.
-    const [w, h] = fitMm(b.footer.width_px, b.footer.height_px, b.footer_box_mm[0] * 0.6, b.footer_box_mm[1], true);
-    if (b.footer.mime === "image/svg+xml") {
-      centre = `@bottom-center { content: ""; width: ${w.toFixed(1)}mm; height: ${h.toFixed(1)}mm; margin-top: 1.5mm; background: url("${b.footer.data_uri}") center / contain no-repeat; -webkit-print-color-adjust: exact; print-color-adjust: exact; }`;
+  if (footerAsset?.data_uri) {
+    const [w, h] = fitMm(footerAsset.width_px, footerAsset.height_px, 14, 8, true);
+    if (footerAsset.mime === "image/svg+xml") {
+      centre = `@bottom-center { content: ""; width: ${w.toFixed(1)}mm; height: ${h.toFixed(1)}mm; margin-top: 1.5mm; background: url("${footerAsset.data_uri}") center / contain no-repeat; -webkit-print-color-adjust: exact; print-color-adjust: exact; }`;
     } else {
-      const dppx = (b.footer.width_px || 1) / (w * 3.7795);
-      centre = `@bottom-center { content: image-set(url("${b.footer.data_uri}") ${dppx.toFixed(3)}x); width: ${w.toFixed(1)}mm; margin-top: 1.5mm; vertical-align: top; text-align: center; }`;
+      const dppx = (footerAsset.width_px || 1) / (w * 3.7795);
+      centre = `@bottom-center { content: image-set(url("${footerAsset.data_uri}") ${dppx.toFixed(3)}x); width: ${w.toFixed(1)}mm; height: ${h.toFixed(1)}mm; margin-top: 1.5mm; vertical-align: top; text-align: center; }`;
     }
-  } else if (b && b.hospital_title) {
-    centre = `@bottom-center { content: ""; }`;
   }
   return `
   @page {

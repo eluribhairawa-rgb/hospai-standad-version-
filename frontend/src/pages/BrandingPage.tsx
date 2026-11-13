@@ -369,8 +369,25 @@ export default function BrandingPage({ setNotice }: Props) {
                 )}
               </div>
               <div style={{ margin: "14px 0 90px", color: "#94a3b8", fontSize: 11 }}>Document title · patient details · body…</div>
-              <div style={{ borderTop: "1.5px solid #000", paddingTop: 4 }}>
-                {footerSrc && <img src={footerSrc} alt="Footer preview" style={{ width: fw * PX_PER_MM, height: fh * PX_PER_MM, objectFit: "contain", display: "block", margin: "0 auto 4px" }} />}
+              <div style={{ position: "relative", marginTop: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", width: "100%", marginBottom: 6 }}>
+                  <div style={{ flex: 1, borderTop: "1.5px solid #000" }} />
+                  {(footerSrc || logoSrc) && (
+                    <img
+                      src={footerSrc || logoSrc}
+                      alt="Footer badge preview"
+                      style={{
+                        height: 20,
+                        width: 20,
+                        objectFit: "contain",
+                        margin: "0 6px",
+                        borderRadius: "50%",
+                        display: "block",
+                      }}
+                    />
+                  )}
+                  <div style={{ flex: 1, borderTop: "1.5px solid #000" }} />
+                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", font: "italic 7.5pt Arial, sans-serif" }}>
                   <span>{footerText.trim() || `Thank you for choosing ${title.trim().replace(/[\r\n]+/g, ", ") || "HospAI"}.`}</span>
                   <span>Page 1 of 1</span>

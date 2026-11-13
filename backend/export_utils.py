@@ -155,32 +155,19 @@ def draw_pdf_brand_footer(pdf):
     the current page, honouring a custom footer image/text from Branding & Templates.
     Call from FPDF.footer(); needs pdf.alias_nb_pages()."""
     b = _brand()
-    custom_img = None
-    if b and b.get("footer_file"):
-        custom_img = b
     pdf.set_draw_color(0, 0, 0)
     pdf.set_line_width(0.45)
-    if custom_img:
-        pdf.line(15, 280.2, 195.0, 280.2)
+    pdf.line(15, 280.2, 99.0, 280.2)
+    pdf.line(111.0, 280.2, 195.0, 280.2)
+
+    logo_path = (b.get("footer_file") if b else None) or (b.get("logo_file") if b else None) or _footer_logo_path()
+    if logo_path:
         try:
-            import branding
-            bw, bh = branding.FOOTER_BOX_MM
-            _custom_image(pdf, b["footer_file"], b.get("footer_mime"), b.get("footer_width_px"), b.get("footer_height_px"),
-                          bw, bh, True, lambda w: 15 + (180 - w) / 2, 281.0)
+            # w=0 maintains aspect ratio relative to h=8.0, placed centrally between 99 and 111
+            pdf.image(logo_path, x=101.0, y=276.2, w=0, h=8.0)
         except Exception:
             pass
-        text_y = -7.0
-    else:
-        pdf.line(15, 280.2, 99.0, 280.2)
-        pdf.line(111.0, 280.2, 195.0, 280.2)
-        logo_path = None if (b and b.get("hospital_title")) else _footer_logo_path()
-        if logo_path:
-            try:
-                # w=0 maintains aspect ratio relative to h=8.0
-                pdf.image(logo_path, x=100.2, y=276.2, w=0, h=8.0)
-            except Exception:
-                pass
-        text_y = -13.8
+    text_y = -13.8
     custom_text = _latin(b["footer_text"]) if b and b.get("footer_text") else ""
     default_text = f"Thank you for choosing {brand_title().rstrip('. ')}."
     pdf.set_y(text_y)

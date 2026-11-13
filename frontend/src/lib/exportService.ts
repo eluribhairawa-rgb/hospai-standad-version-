@@ -268,10 +268,11 @@ function drawPdfFooter(pdf: jsPDF): void {
     pdf.line(111 * MM, lineY, 195 * MM, lineY);
     const brand = getBranding();
     try {
-      if (brand?.footer?.data_uri && brand.footer.mime === "image/png") {
-        const [fw, fh] = fitMm(brand.footer.width_px, brand.footer.height_px, brand.footer_box_mm[0] * 0.6, 8, true);
-        pdf.addImage(brand.footer.data_uri, "PNG", (105 - fw / 2) * MM, lineY - fh / 2 * MM, fw * MM, fh * MM, "brand-footer-image", "FAST");
-      } else if (!brand?.hospital_title || brand.logo?.data_uri) {
+      const footerAsset = brand?.footer?.data_uri ? brand.footer : brand?.logo?.data_uri ? brand.logo : null;
+      if (footerAsset?.data_uri) {
+        const [fw, fh] = fitMm(footerAsset.width_px, footerAsset.height_px, 10, 8, true);
+        pdf.addImage(footerAsset.data_uri, "PNG", (105 - fw / 2) * MM, lineY - (fh / 2) * MM, fw * MM, fh * MM, "brand-footer-image", "FAST");
+      } else {
         pdf.addImage(PRINT_BRAND_HEADER_DATA_URI, "PNG", 100.2 * MM, lineY - 4 * MM, 9.55 * MM, 8 * MM, "hospai-footer-logo", "FAST");
       }
     } catch {
