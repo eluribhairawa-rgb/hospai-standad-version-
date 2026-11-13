@@ -460,6 +460,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
         stay = None
         bill = None
         appt = {}
+        visit_end = None
         invoice_ids = set()
         doctor_name = None
         admission_id = None
@@ -741,7 +742,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                     vd, vt = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
                     vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
                             f"Temp {v['temperature']}" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
-                            f"Weight {v['weight']}" if v.get("weight") else ""]
+                            f"Weight {v['weight']} kg" if v.get("weight") else "", f"Height {v['height']} cm" if v.get("height") else ""]
                     events.append({"date": vd, "time": vt, "type": "vitals", "title": "Vitals recorded",
                                     "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})
 
@@ -1007,6 +1008,57 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             for p in cursor.fetchall()
         ]
 
+        # Advance deposits (Billing > Advances & Refunds): linked to this admission, or unlinked and taken
+        # during this visit's dates. Their own events + payment rows; the bill totals above are not changed
+        # (an advance is applied to the bill as an allocation, not as extra revenue).
+        advance_summary = None
+        win_start = _parse_dt(selected.get("start"))
+        win_end_raw = selected.get("end")
+        win_end = _parse_dt(win_end_raw)
+        if win_end and len(str(win_end_raw)) <= 10:
+            win_end += timedelta(days=1)
+        if etype == "OP" and win_start:
+            win_start = datetime.combine(win_start.date(), datetime.min.time())
+            win_end = (_parse_dt(visit_end) if visit_end else None) or (win_start + timedelta(days=1))
+        win_end = win_end or datetime.now(IST_TIMEZONE).replace(tzinfo=None) + timedelta(days=1)
+        cursor.execute(
+            "SELECT * FROM patient_advances WHERE patient_id = ? AND ((? IS NOT NULL AND admission_id = ?) "
+            "OR (admission_id IS NULL AND created_at >= ? AND created_at < ?)) ORDER BY created_at",
+            (patient_id, admission_id, admission_id, win_start or datetime.min, win_end),
+        )
+        adv_rows = _all(cursor)
+        if adv_rows:
+            adv_ids = [a["id"] for a in adv_rows]
+            for a in adv_rows:
+                d, t = _split_dt(a["created_at"])
+                amount = float(a["amount"] or 0)
+                events.append({"date": d, "time": t, "type": "advance", "title": "Advance deposit received",
+                                "subtitle": " · ".join(x for x in [a["advance_no"], (a["payment_mode"] or "cash").upper(),
+                                                                   a["transaction_ref"] or "", a["notes"] or ""] if x),
+                                "charge": None, "received": amount})
+                payments.append({"date": d, "time": t, "mode": (a["payment_mode"] or "cash").title(), "reference": a["advance_no"],
+                                  "invoice_no": "Advance deposit", "amount": amount})
+            cursor.execute("SELECT aa.*, pa.advance_no, inv.invoice_no FROM advance_allocations aa JOIN patient_advances pa ON pa.id = aa.advance_id "
+                           "LEFT JOIN invoices inv ON inv.id = aa.invoice_id WHERE aa.advance_id = ANY(?) ORDER BY aa.created_at", (adv_ids,))
+            for al in _all(cursor):
+                d, t = _split_dt(al["created_at"])
+                events.append({"date": d, "time": t, "type": "advance", "title": "Advance applied to bill",
+                                "subtitle": " · ".join(x for x in [al["advance_no"], al.get("invoice_no") or "", f"₹{float(al['amount'] or 0):,.2f}"] if x),
+                                "charge": None, "received": None})
+            cursor.execute("SELECT * FROM refund_requests WHERE advance_id = ANY(?) ORDER BY created_at", (adv_ids,))
+            for rf in _all(cursor):
+                d, t = _split_dt(rf["paid_at"] or rf["created_at"])
+                events.append({"date": d, "time": t, "type": "advance",
+                                "title": "Advance refunded" if rf["status"] == "paid" else f"Advance refund {(rf['status'] or 'requested').replace('_', ' ')}",
+                                "subtitle": " · ".join(x for x in [rf["refund_no"], f"₹{float(rf['amount'] or 0):,.2f}", (rf["refund_method"] or "").upper(), rf["reason"] or ""] if x),
+                                "charge": None, "received": None})
+            total_adv = sum(float(a["amount"] or 0) for a in adv_rows)
+            applied = sum(float(a["allocated_amount"] or 0) for a in adv_rows)
+            refunded = sum(float(a["refunded_amount"] or 0) for a in adv_rows)
+            reserved = sum(float(a["reserved_refund_amount"] or 0) for a in adv_rows)
+            advance_summary = {"total": round(total_adv, 2), "applied": round(applied, 2), "refunded": round(refunded, 2),
+                               "available": round(max(0.0, total_adv - applied - refunded - reserved), 2), "count": len(adv_rows)}
+
         # Nursing Station shift notes -- inpatient ward activity, shown for
         # the admission currently selected in the encounter picker (notes
         # never explicitly linked to an admission still show, since they're
@@ -1047,6 +1099,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
             "doctor_name": doctor_name,
             "stay": stay if etype == "IP" else None,
             "bill": bill if etype == "IP" else None,
+            "advances": advance_summary,
             "department": (stay or {}).get("department") if etype == "IP" else (appt.get("department") if etype == "OP" else None),
             "events": events,
             "financial_summary": {

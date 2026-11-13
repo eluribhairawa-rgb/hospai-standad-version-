@@ -72,6 +72,7 @@ type Journey = {
   department?: string | null;
   stay?: JourneyStay | null;
   bill?: JourneyBill | null;
+  advances?: { total: number; applied: number; refunded: number; available: number; count: number } | null;
   events: JourneyEvent[];
   financial_summary: { categories: { label: string; amount: number }[]; total_charges: number; payments_received: number; outstanding: number; status: string };
   payments: JourneyPayment[];
@@ -91,6 +92,7 @@ function eventDotColor(type: string) {
   if (type === "discharge" || type === "disposition") return "#16a34a";
   if (type === "nursing_note") return "#7c3aed";
   if (type === "bed_allocated" || type === "bed_released") return "#0ea5e9";
+  if (type === "advance") return "#16a34a";
   if (type === "doctor_round" || type === "observation_note" || type === "surgery") return "#2563eb";
   if (type === "medication_order") return "#ea580c";
   if (type === "vitals") return "#db2777";
@@ -105,7 +107,7 @@ const EVENT_DEPARTMENTS: Record<string, string> = {
   emergency_registration: "Emergency", vitals: "Vitals",
   room_charges: "Room & Nursing", payment: "Billing", discharge: "Discharge",
   disposition: "Emergency", nursing_note: "Nursing",
-  bed_allocated: "Bed & Ward", bed_released: "Bed & Ward", doctor_round: "Doctor Rounds", observation_note: "Doctor Rounds",
+  advance: "Billing", bed_allocated: "Bed & Ward", bed_released: "Bed & Ward", doctor_round: "Doctor Rounds", observation_note: "Doctor Rounds",
   medication_order: "Pharmacy", surgery: "Surgery",
   prescription: "Consultation", pharmacy_issued: "Pharmacy",
   lab_bill: "Diagnostics", lab_collected: "Diagnostics", imaging_completed: "Diagnostics", report_released: "Diagnostics",
@@ -311,6 +313,13 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
           [`${bill.live ? "Unbilled lab / imaging" : "Lab / imaging"} (${bill.diag_count} item${bill.diag_count === 1 ? "" : "s"})`, formatCurrency(bill.diag_total)],
           ["Grand total", formatCurrency(bill.grand_total)],
         ],
+      });
+    }
+    if (journey.advances) {
+      const a = journey.advances;
+      extraSections.push({
+        title: "Advance Deposits", headers: ["Item", "Amount"],
+        rows: [["Advance paid", formatCurrency(a.total)], ["Applied to bills", formatCurrency(a.applied)], ["Refunded", formatCurrency(a.refunded)], ["Available advance", formatCurrency(a.available)]],
       });
     }
     const patientMobile = splitStoredPhone(journey.patient.phone, journey.patient.phone_country_code);
@@ -597,6 +606,15 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                   <strong style={{ color: "#0f766e" }}>{formatCurrency(journey.bill.grand_total)}</strong>
                 </div>
               </div>
+              {journey.advances && (
+                <div style={{ marginTop: "10px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "10px 14px", fontSize: "13px", display: "grid", gap: "4px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 800, color: "#166534", textTransform: "uppercase" }}>Advance deposits ({journey.advances.count})</div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Advance paid</span><strong>{formatCurrency(journey.advances.total)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Applied to bills</span><strong>{formatCurrency(journey.advances.applied)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ color: "#64748b" }}>Refunded</span><strong>{formatCurrency(journey.advances.refunded)}</strong></div>
+                  <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px dashed #bbf7d0", paddingTop: "4px" }}><strong>Available advance</strong><strong style={{ color: "#166534" }}>{formatCurrency(journey.advances.available)}</strong></div>
+                </div>
+              )}
               {journey.bill.live && journey.bill.as_of && (
                 <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "6px" }}>As of {journey.bill.as_of.slice(0, 16).replace("T", " ")} · updates every time this page is opened</div>
               )}
