@@ -99,6 +99,20 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
 
   // 3. Bed Details / Quick Action Modal
   const [viewBed, setViewBed] = useState<HospitalBed | null>(null);
+  // Live stay figures (days so far, running charges) for the occupied bed being viewed.
+  const [stayBill, setStayBill] = useState<DischargeBillPreview | null>(null);
+  const [loadingStayBill, setLoadingStayBill] = useState(false);
+  useEffect(() => {
+    setStayBill(null);
+    if (!viewBed || viewBed.status !== "occupied" || !viewBed.allocation_id) return;
+    let cancelled = false;
+    setLoadingStayBill(true);
+    apiFetch<DischargeBillPreview>(`/api/bed/allocations/${viewBed.allocation_id}/discharge-bill`)
+      .then((r) => { if (!cancelled) setStayBill(r); })
+      .catch(() => { /* needs billing access; the rest of the details still show */ })
+      .finally(() => { if (!cancelled) setLoadingStayBill(false); });
+    return () => { cancelled = true; };
+  }, [viewBed?.id, viewBed?.allocation_id, viewBed?.status]);
 
   // 4. Discharge & Bill Modal
   const [dischargeBed, setDischargeBed] = useState<HospitalBed | null>(null);
@@ -1355,6 +1369,32 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
               {viewBed.allocated_at && (
                 <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
                   Admitted On: {new Date(viewBed.allocated_at).toLocaleString()}
+                </div>
+              )}
+              {loadingStayBill && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "8px" }}>Calculating current stay...</div>}
+              {stayBill && (
+                <div style={{ marginTop: "12px", borderTop: "1px dashed #cbd5e1", paddingTop: "10px", fontSize: "13px", display: "grid", gap: "5px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#64748b" }}>Current stay</span>
+                    <strong>{stayBill.days_stayed} day{stayBill.days_stayed === 1 ? "" : "s"} ({stayBill.hours_stayed} hrs)</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#64748b" }}>Bed charges ({stayBill.days_stayed} × ₹{stayBill.rate_per_day.toFixed(2)}/day)</span>
+                    <strong>₹{stayBill.bed_total.toFixed(2)}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#64748b" }}>Unbilled pharmacy ({stayBill.pharmacy_items.length} item{stayBill.pharmacy_items.length === 1 ? "" : "s"})</span>
+                    <strong>₹{stayBill.pharmacy_total.toFixed(2)}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#64748b" }}>Unbilled lab / imaging ({stayBill.diag_items.length} item{stayBill.diag_items.length === 1 ? "" : "s"})</span>
+                    <strong>₹{stayBill.diag_total.toFixed(2)}</strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #e2e8f0", paddingTop: "6px" }}>
+                    <strong>Running total</strong>
+                    <strong style={{ color: "#00828a" }}>₹{stayBill.grand_total.toFixed(2)}</strong>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#94a3b8" }}>As of {stayBill.discharge_date_formatted}</div>
                 </div>
               )}
             </div>
