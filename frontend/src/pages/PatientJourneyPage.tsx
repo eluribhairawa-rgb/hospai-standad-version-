@@ -70,14 +70,17 @@ type JourneyBill = {
 };
 
 type ModuleHistory = { title: string; sections: { title: string; columns: string[]; rows: (string | number)[][]; note?: string | null }[] };
-type HistoryModule = "bills" | "pharmacy" | "diagnostics" | "discharge";
+type HistoryModule = "patient360" | "consultations" | "vitals" | "bills" | "pharmacy" | "diagnostics" | "discharge";
 const HISTORY_FULL_PAGE: Record<HistoryModule, { page: string; storageKey: string; label: string }> = {
+  patient360: { page: "patient-journey", storageKey: "selected_journey_patient", label: "Patient 360" },
+  consultations: { page: "op-queue-management", storageKey: "selected_queue_patient", label: "Consultations" },
+  vitals: { page: "doctor-clinicals", storageKey: "selected_vitals_patient", label: "Vitals & Triage" },
   bills: { page: "billing-patient-bills", storageKey: "selected_billing_patient", label: "Bills & Payment" },
   pharmacy: { page: "pharmacy-op-dispense", storageKey: "selected_pharmacy_patient", label: "Pharmacy" },
   diagnostics: { page: "diag-orders-billing", storageKey: "selected_diag_patient", label: "Diagnostics" },
   discharge: { page: "billing-ip-discharge", storageKey: "selected_discharge_admission", label: "IP Discharge Billing" },
 };
-const HISTORY_MONEY = /^(total|paid|due|amount|unit price|used|refunded|rate)/i;
+const HISTORY_MONEY = /^(total|paid|due|amount|unit price|used|refunded|rate|gst|tax|fee)/i;
 
 type Journey = {
   patient: { patient_id: string; name: string; age: number | null; gender: string | null; phone?: string | null; phone_country_code?: string | null; address?: string | null; email?: string | null };
@@ -459,6 +462,31 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
           {journey && journey.patient && (
             <>
+              <button
+                type="button"
+                className="pharmacy-btn-teal"
+                style={{ height: "38px", padding: "0 16px", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" }}
+                onClick={() => void openHistory("patient360")}
+                title="View full Patient 360 dossier across all hospital modules"
+              >
+                <span>🌐</span> Patient 360 View
+              </button>
+              <button
+                type="button"
+                className="pharmacy-btn-outline"
+                style={{ height: "38px", padding: "0 14px", fontWeight: 600 }}
+                onClick={() => void openHistory("consultations")}
+              >
+                🩺 Consultations
+              </button>
+              <button
+                type="button"
+                className="pharmacy-btn-outline"
+                style={{ height: "38px", padding: "0 14px", fontWeight: 600 }}
+                onClick={() => void openHistory("vitals")}
+              >
+                ❤️ Vitals
+              </button>
               <button
                 type="button"
                 className="pharmacy-btn-outline"
@@ -955,17 +983,23 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
         ))}
         {historyModule && onNavigate && journey?.patient && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                const target = HISTORY_FULL_PAGE[historyModule];
-                localStorage.setItem(target.storageKey, journey.patient.patient_id);
-                setHistoryModule(null);
-                onNavigate(target.page);
-              }}
-            >
-              Open {HISTORY_FULL_PAGE[historyModule].label} →
-            </Button>
+            {historyModule !== "patient360" ? (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  const target = HISTORY_FULL_PAGE[historyModule];
+                  localStorage.setItem(target.storageKey, journey.patient.patient_id);
+                  setHistoryModule(null);
+                  onNavigate(target.page);
+                }}
+              >
+                Open {HISTORY_FULL_PAGE[historyModule].label} →
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={() => setHistoryModule(null)}>
+                Close Dossier
+              </Button>
+            )}
           </div>
         )}
       </Modal>
