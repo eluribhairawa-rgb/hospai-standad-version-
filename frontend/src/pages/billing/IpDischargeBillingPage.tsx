@@ -136,6 +136,11 @@ export default function IpDischargeBillingPage({
       const res = await apiFetch(`/api/billing/ip-discharge/${encodeURIComponent(cleanKey)}`);
       if (res && res.admission) {
         setDischargeData(res);
+        // Remember the patient just opened. A stale "selected_discharge_admission" (set by another page)
+        // made the page jump back to the old patient right after every new search.
+        try {
+          localStorage.setItem("selected_discharge_admission", String(res.admission.id ?? cleanKey));
+        } catch { /* storage unavailable */ }
         const summ = res.charges_summary || {};
         setDiscountAmount(String(summ.approved_discount ?? 0));
         setPaymentAmount(String(summ.balance_to_collect ?? 0));
@@ -159,6 +164,8 @@ export default function IpDischargeBillingPage({
   useEffect(() => {
     const fetchQueue = async () => {
       try {
+        // Already showing this patient (e.g. the page just selected them after a search): nothing to reload.
+        if (selectedPatient?.patient_id && dischargeData?.patient?.patient_id === selectedPatient.patient_id) return;
         const saved =
           localStorage.getItem("selected_discharge_admission") ||
           selectedPatient?.admission_id ||
