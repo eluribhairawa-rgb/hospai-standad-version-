@@ -1014,6 +1014,35 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     }
   }, [patientUhid, vitalsSourceUhid, registeredPatients]);
 
+  // Visit type must follow the patient's real admission status, not just their latest appointment row:
+  // an admitted patient shows "IP Admission (ward / bed)"; a discharged / never-admitted patient whose
+  // latest appointment was registered as IP falls back to OP Consultation.
+  useEffect(() => {
+    const uhid = patientUhid.trim();
+    if (!uhid) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const adm = await apiFetch<{ is_inpatient?: boolean; ward?: string; room_no?: string; bed_no?: string }>(
+          `/api/patients/${encodeURIComponent(uhid)}/active-admission`
+        );
+        if (cancelled) return;
+        if (adm?.is_inpatient) {
+          const loc = [adm.ward, adm.bed_no && adm.bed_no !== "Pending Allotment" ? `Bed ${adm.bed_no}` : ""].filter(Boolean).join(", ");
+          setVisitType(`IP Admission${loc ? ` (${loc})` : ""}`);
+        } else {
+          setVisitType((vt) => (/^\s*(ip|inpatient)\b/i.test(vt) ? "OP Consultation" : vt));
+        }
+      } catch {
+        // Unknown patient / no access: keep whatever the queue or search provided.
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [patientUhid, activeQueueItem?.appointmentId]);
+
   // Load previous prescription for patient (medicines, diagnosis, lab tests, advice, lab params, follow-up)
   const loadPatientPreviousPrescription = async (uhid: string, patientNameDisplay?: string) => {
     if (!uhid || !uhid.trim()) return null;
@@ -3426,26 +3455,57 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
           <div className="doctor-rx-sheet" ref={printSheetRef}>
             {/* Sheet Header */}
             <div className="rx-sheet-header">
-              <div className="rx-sheet-logo-group">
-                {(() => {
-                  if (!docBrand?.logo?.data_uri) return docBrand?.hospital_title ? null : <BrandLogo className="brand-logo-img" />;
-                  const [lw, lh] = fitMm(docBrand.logo.width_px, docBrand.logo.height_px, docBrand.logo_box_mm[0], docBrand.logo_box_mm[1], docBrand.auto_fit_scaling);
-                  return <img src={docBrand.logo.data_uri} alt={docBrand.hospital_title || "Hospital logo"} style={{ width: `${lw}mm`, height: `${lh}mm`, objectFit: "contain", position: "relative", left: `${docBrand.logo_offset_x_mm}mm`, top: `${docBrand.logo_offset_y_mm}mm` }} />;
-                })()}
-                <div className="rx-sheet-title-col">
-                  {(() => {
-                    const titleText = (docBrand?.hospital_title || "").trim();
-                    const tLen = titleText.length;
-                    const rxFontSize = tLen > 45 ? "15px" : tLen > 32 ? "18px" : tLen > 22 ? "21px" : "24px";
-                    return (
-                      <div className="rx-sheet-brand-name" style={{ fontSize: rxFontSize, wordBreak: "break-word", whiteSpace: "pre-line" }}>
-                        {titleText ? titleText : <>Hosp<span className="brand-red">AI</span></>}
-                      </div>
-                    );
-                  })()}
-                  {!docBrand?.hospital_title && <div className="rx-sheet-brand-sub">MULTISPECIALITY HOSPITAL & RESEARCH CENTRE</div>}
-                </div>
-              </div>
+              {(() => {
+                const titleText = (docBrand?.hospital_title || "").trim();
+                const tLen = titleText.length;
+                const rxFontSize = tLen > 45 ? "15px" : tLen > 32 ? "18px" : tLen > 22 ? "21px" : "24px";
+                const hasLogo = !!docBrand?.logo?.data_uri;
+                const align = docBrand?.logo_alignment || "left";
+                const titleCol = (
+                  <div className="rx-sheet-title-col" style={{ flex: 1, minWidth: 0, textAlign: hasLogo && !titleText ? "left" : "center", alignItems: "center" }}>
+                    <div className="rx-sheet-brand-name" style={{ fontSize: rxFontSize, wordBreak: "break-word", whiteSpace: "pre-line" }}>
+                      {titleText ? titleText : <>Hosp<span className="brand-red">AI</span></>}
+                    </div>
+                    {!titleText && <div className="rx-sheet-brand-sub">MULTISPECIALITY HOSPITAL & RESEARCH CENTRE</div>}
+                  </div>
+                );
+                if (!hasLogo) {
+                  if (titleText) return <div className="rx-sheet-logo-group" style={{ width: "100%", justifyContent: "center" }}>{titleCol}</div>;
+                  return (
+                    <div className="rx-sheet-logo-group">
+                      <BrandLogo className="brand-logo-img" />
+                      {titleCol}
+                    </div>
+                  );
+                }
+                const [lw, lh] = fitMm(docBrand!.logo!.width_px, docBrand!.logo!.height_px, docBrand!.logo_box_mm[0], docBrand!.logo_box_mm[1], docBrand!.auto_fit_scaling);
+                // Negative Y offsets pushed the logo past the top edge and clipped it in print.
+                const safeOffsetY = Math.max(docBrand!.logo_offset_y_mm ?? 0, -2.5);
+                const logoImg = (
+                  <img
+                    src={docBrand!.logo!.data_uri}
+                    alt={docBrand!.hospital_title || "Hospital logo"}
+                    style={{ display: "block", width: `${lw}mm`, height: `${lh}mm`, maxWidth: "100%", objectFit: "contain", position: "relative", left: `${docBrand!.logo_offset_x_mm ?? 0}mm`, top: `${safeOffsetY}mm` }}
+                  />
+                );
+                const slot = (justify: string, visible: boolean) => (
+                  <div style={{ flexShrink: 0, width: `${lw}mm`, display: "flex", alignItems: "center", justifyContent: justify, overflow: "visible", visibility: visible ? "visible" : "hidden" }}>
+                    {visible ? logoImg : null}
+                  </div>
+                );
+                const wrap: React.CSSProperties = { width: "100%", display: "flex", alignItems: "center", gap: "3mm", padding: "2.5mm 0", overflow: "visible" };
+                if (!titleText) {
+                  const j = align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start";
+                  return <div style={{ ...wrap, justifyContent: j }}>{logoImg}</div>;
+                }
+                if (align === "center") {
+                  return <div style={{ ...wrap, flexDirection: "column", justifyContent: "center" }}>{logoImg}{titleCol}</div>;
+                }
+                if (align === "right") {
+                  return <div style={{ ...wrap, justifyContent: "space-between" }}>{slot("flex-start", false)}{titleCol}{slot("flex-end", true)}</div>;
+                }
+                return <div style={{ ...wrap, justifyContent: "space-between" }}>{slot("flex-start", true)}{titleCol}{slot("flex-end", false)}</div>;
+              })()}
             </div>
 
             <div className="rx-sheet-divider"></div>
