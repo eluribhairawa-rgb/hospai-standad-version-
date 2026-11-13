@@ -281,8 +281,10 @@ function drawPdfFooter(pdf: jsPDF): void {
     pdf.setFont("helvetica", "italic");
     pdf.setFontSize(7.5);
     pdf.setTextColor(0, 0, 0);
-    const textY = (pageHeightMm - 9.5) * MM;
-    pdf.text(brand?.footer_text || brandThanks(), 15 * MM, textY);
+    // Baseline matches the backend footer text (cell top 283.2mm, 5mm tall).
+    const textY = (pageHeightMm - 10.4) * MM;
+    const footerLines = pdf.splitTextToSize(brand?.footer_text || brandThanks(), 125 * MM) as string[];
+    pdf.text(footerLines[0] || "", 15 * MM, textY);
     pdf.text(`Page ${page} of ${total}`, 195 * MM, textY, { align: "right" });
   }
 }

@@ -163,8 +163,23 @@ def draw_pdf_brand_footer(pdf):
     logo_path = (b.get("footer_file") if b else None) or (b.get("logo_file") if b else None) or _footer_logo_path()
     if logo_path:
         try:
-            # w=0 maintains aspect ratio relative to h=8.0, placed centrally between 99 and 111
-            pdf.image(logo_path, x=101.0, y=276.2, w=0, h=8.0)
+            # Fit into the 10x8mm centre slot (aspect kept) and centre on the page (x=105, y=rule line)
+            # so wide custom footer images can't spill over the rules or the text.
+            import branding
+            if b and (b.get("footer_file") or b.get("logo_file")) and (b.get("footer_file") or b.get("logo_file")) == logo_path:
+                src_w = (b.get("footer_width_px") if b.get("footer_file") else b.get("logo_width_px")) or 0
+                src_h = (b.get("footer_height_px") if b.get("footer_file") else b.get("logo_height_px")) or 0
+            else:
+                src_w = src_h = 0
+            if not (src_w and src_h):
+                try:
+                    from PIL import Image
+                    with Image.open(logo_path) as im:
+                        src_w, src_h = im.size
+                except Exception:
+                    src_w, src_h = 10, 8  # e.g. SVG: fill the centre slot
+            fw, fh = branding.fit_mm(src_w, src_h, 10.0, 8.0, True)
+            pdf.image(logo_path, x=105.0 - fw / 2, y=280.2 - fh / 2, w=fw, h=fh)
         except Exception:
             pass
     text_y = -13.8
@@ -302,7 +317,7 @@ def _generate_pdf(patient_name, doc_type, ocr_text, date_str=None) -> bytes:
         )
         y = 45
         for label, value in meta:
-            pdf.set_xy(130, y)
+            pdf.set_xy(125, y)  # 27+5+38 = 70mm wide -> ends exactly on the 195mm right edge
             pdf.set_font("Helvetica", "", 7.8)
             pdf.cell(27, 5, _pdf_clean(label))
             pdf.cell(5, 5, ":", align="C")
