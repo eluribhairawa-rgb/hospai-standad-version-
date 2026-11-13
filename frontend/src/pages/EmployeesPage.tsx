@@ -8,6 +8,7 @@ import { ALL_ASSIGNABLE_MODULES, DEFAULT_MODULE_ACCESS, EMPTY_SIGNUP_FORM, MODUL
 import { apiFetch, reportError } from "../lib/api";
 import { formatDate } from "../lib/format";
 import { JOB_TITLE_GROUPS, JOB_TITLES } from "../lib/jobRoles";
+import { useDoctorDirectory } from "../lib/doctorDirectory";
 import type { Employee, ModuleId, Notice, SignupForm } from "../types";
 
 type Props = {
@@ -172,6 +173,39 @@ function JobTitleOptions({ current }: { current?: string }) {
   );
 }
 
+// Clinical departments come from Doctor Scheduling; these cover staff outside the clinical departments.
+const SUPPORT_DEPARTMENTS = ["Administration", "Billing & Accounts", "Front Desk / Reception", "Housekeeping", "HR", "IT", "Laboratory", "Nursing", "Pharmacy", "Radiology"];
+const OTHER_DEPARTMENT = "__other__";
+
+/** Department picker listing the hospital's departments (Doctor Scheduling) plus support departments; "Other" allows free text. */
+function DepartmentField({ value, onChange, options }: { value: string; onChange: (val: string) => void; options: string[] }) {
+  const known = options.some((o) => o.toLowerCase() === value.trim().toLowerCase());
+  const [other, setOther] = useState(false);
+  const showOther = other || (!!value.trim() && !known);
+  return (
+    <Label>
+      Department
+      <Select
+        value={showOther ? OTHER_DEPARTMENT : (options.find((o) => o.toLowerCase() === value.trim().toLowerCase()) || "")}
+        onChange={(e) => {
+          if (e.target.value === OTHER_DEPARTMENT) { setOther(true); onChange(known ? "" : value); }
+          else { setOther(false); onChange(e.target.value); }
+        }}
+      >
+        <option value="">Select department</option>
+        <optgroup label="Clinical departments (Doctor Scheduling)">
+          {options.filter((o) => !SUPPORT_DEPARTMENTS.includes(o)).map((o) => <option key={o} value={o}>{o}</option>)}
+        </optgroup>
+        <optgroup label="Support departments">
+          {SUPPORT_DEPARTMENTS.map((o) => <option key={o} value={o}>{o}</option>)}
+        </optgroup>
+        <option value={OTHER_DEPARTMENT}>Other (type a department)</option>
+      </Select>
+      {showOther && <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder="Type the department name" style={{ marginTop: 6 }} />}
+    </Label>
+  );
+}
+
 const isDoctorRole = (jobRole?: string) => (jobRole || "").trim().toLowerCase() === "doctor";
 
 function DoctorNameField({ id, value, doctors, onChange }: { id: string; value: string; doctors: DoctorOption[]; onChange: (val: string) => void }) {
@@ -207,6 +241,8 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState(false);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const { departments: scheduledDepartments } = useDoctorDirectory();
+  const departmentOptions = Array.from(new Set([...scheduledDepartments, ...SUPPORT_DEPARTMENTS])).sort((a, b) => a.localeCompare(b));
 
   const loadEmployees = async (search?: string) => {
     const path = search ? `/api/employees/search?q=${encodeURIComponent(search)}` : "/api/employees";
@@ -229,7 +265,11 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
 
   // Picking a doctor fills Full Name if it is still empty.
   const pickDoctorForAdd = (name: string) =>
-    setForm((p) => ({ ...p, doctor_name: name, full_name: p.full_name || (doctors.some((d) => d.doctor_name === name) ? name : p.full_name) }));
+    setForm((p) => ({
+      ...p, doctor_name: name,
+      full_name: p.full_name || (doctors.some((d) => d.doctor_name === name) ? name : p.full_name),
+      department: p.department || doctors.find((d) => d.doctor_name === name)?.department || "",
+    }));
 
   const handleAdd = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -280,7 +320,12 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
     setDeletingEmployee(true);
     try {
       await handleDelete(deleteTarget);
+      setNotice({ type: "success", message: `${deleteTarget.full_name || deleteTarget.username} (${deleteTarget.employee_id}) was deleted.` });
       setDeleteTarget(null);
+    } catch (error) {
+      // e.g. a doctor with payout statements cannot be deleted: show the reason instead of failing silently.
+      setDeleteTarget(null);
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to delete the employee.");
     } finally {
       setDeletingEmployee(false);
     }
@@ -296,6 +341,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       full_name: employee.full_name || "",
       email: employee.email || "",
       phone: formatPhone(employee.phone_country_code, employee.phone) || employee.phone || "",
+      department: employee.department || "",
       address: employee.address || "",
       emergency_contact: formatPhone(employee.emergency_contact_country_code, employee.emergency_contact) || employee.emergency_contact || "",
       status: employee.status || "active",
@@ -426,6 +472,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                             <JobTitleOptions current={editForm.job_role} />
                           </Select>
                         </Label>
+                        <DepartmentField value={editForm.department || ""} options={departmentOptions} onChange={(val) => setEditForm((p) => ({ ...p, department: val }))} />
                         {isDoctorRole(editForm.job_role) && (
                           <DoctorNameField
                             id={`edit-doctor-${emp.employee_id}`}
@@ -514,10 +561,7 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                   <JobTitleOptions current={form.job_role} />
                 </Select>
               </Label>
-              <Label>
-                Department
-                <Input value={form.department || ""} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} placeholder="e.g. Cardiology, Nursing, Front Desk" />
-              </Label>
+              <DepartmentField value={form.department || ""} options={departmentOptions} onChange={(val) => setForm((p) => ({ ...p, department: val }))} />
               {isDoctorRole(form.job_role) && (
                 <DoctorNameField id="add-doctor" value={form.doctor_name} doctors={doctors} onChange={pickDoctorForAdd} />
               )}

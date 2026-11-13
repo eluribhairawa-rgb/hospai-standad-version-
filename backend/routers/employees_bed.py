@@ -65,7 +65,11 @@ def employees_update(employee_id: str, payload: dict = Body(...), db: Session = 
 
 @router.delete("/employees/{employee_id}")
 def employees_delete(employee_id: str, db: Session = Depends(get_db), user: dict = Depends(require_permissions("admin.users.deactivate"))):
-    if not lq.delete_employee(db, employee_id):
+    try:
+        deleted = lq.delete_employee(db, employee_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Employee not found")
     return {"status": "ok"}
 

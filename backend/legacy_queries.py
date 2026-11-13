@@ -2244,6 +2244,14 @@ def delete_employee(db, employee_id, hospital_id=None):
         row = cursor.fetchone()
         if row:
             user_id = row[0]
+            # Doctor payout statements are financial records tied to the doctor: they must not be lost.
+            cursor.execute("SELECT COUNT(*) FROM doctor_statements WHERE doctor_id=?", (user_id,))
+            statements = cursor.fetchone()[0]
+            if statements:
+                raise ValueError(
+                    f"This doctor has {statements} payout statement{'s' if statements != 1 else ''} in Billing (Doctor Payouts), "
+                    "so the employee cannot be deleted. Deactivate the employee instead; their login is blocked and the records stay."
+                )
             cursor.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             cursor.execute(
                 "DELETE FROM users WHERE id=?",
