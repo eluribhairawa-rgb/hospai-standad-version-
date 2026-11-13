@@ -30,6 +30,7 @@ export function DonutChart({
   formatValue = formatCompact,
   centerLabel,
   centerValue,
+  onSelect,
 }: {
   data: ChartSlice[];
   size?: number;
@@ -37,6 +38,8 @@ export function DonutChart({
   formatValue?: (value: number) => string;
   centerLabel?: string;
   centerValue?: string;
+  /** Called with the index (in `data`) of a clicked slice or legend row. */
+  onSelect?: (index: number) => void;
 }) {
   const [grown, setGrown] = useState(false);
   useEffect(() => {
@@ -46,6 +49,7 @@ export function DonutChart({
   }, [data]);
 
   const slices = data.filter((d) => d.value > 0);
+  const indexOf = (slice: ChartSlice) => data.indexOf(slice);
   const total = slices.reduce((sum, d) => sum + d.value, 0);
   const radius = (size - thickness) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -77,7 +81,8 @@ export function DonutChart({
                   strokeDasharray={`${dash} ${circumference - dash}`}
                   strokeDashoffset={-offset}
                   className="hosp-chart-arc"
-                  style={{ transition: `stroke-dasharray 500ms ${EASE}` }}
+                  style={{ transition: `stroke-dasharray 500ms ${EASE}`, cursor: onSelect ? "pointer" : undefined }}
+                  onClick={onSelect ? () => onSelect(indexOf(slice)) : undefined}
                 >
                   <title>{`${slice.label}: ${formatValue(slice.value)}`}</title>
                 </circle>
@@ -109,7 +114,13 @@ export function DonutChart({
         {data.map((d) => {
           const pct = total > 0 ? Math.round((d.value / total) * 100) : 0;
           return (
-            <div key={d.label} className="hosp-chart-legend-row" style={{ display: "flex", alignItems: "center", gap: "9px", fontSize: "12.5px" }}>
+            <div
+              key={d.label}
+              className="hosp-chart-legend-row"
+              style={{ display: "flex", alignItems: "center", gap: "9px", fontSize: "12.5px", cursor: onSelect ? "pointer" : undefined }}
+              onClick={onSelect ? () => onSelect(data.indexOf(d)) : undefined}
+              title={onSelect ? "Click to see the records" : undefined}
+            >
               <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: d.color, flexShrink: 0 }} />
               <span style={{ color: "#475569", flex: 1 }}>{d.label}</span>
               <span style={{ fontWeight: 700, color: "#0f172a" }}>{formatValue(d.value)}</span>
@@ -133,11 +144,14 @@ export function PieChart({
   size = 120,
   formatValue = (v: number) => String(Math.round(v)),
   centerLabel,
+  onSelect,
 }: {
   data: ChartSlice[];
   size?: number;
   formatValue?: (value: number) => string;
   centerLabel?: string;
+  /** Called when any wedge is clicked (the whole pie is one target). */
+  onSelect?: () => void;
 }) {
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -186,7 +200,7 @@ export function PieChart({
       ) : (
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           {wedges.map((w) => (
-            <path key={w.key} d={w.d} fill={w.color} stroke="#ffffff" strokeWidth={1.5} className="hosp-chart-wedge">
+            <path key={w.key} d={w.d} fill={w.color} stroke="#ffffff" strokeWidth={1.5} className="hosp-chart-wedge" style={{ cursor: onSelect ? "pointer" : undefined }} onClick={onSelect}>
               <title>{`${w.label}: ${formatValue(w.value)}`}</title>
             </path>
           ))}
@@ -215,11 +229,14 @@ export function BarChart({
   height = 150,
   barColor = "#00828a",
   formatValue = (v: number) => String(Math.round(v)),
+  onSelect,
 }: {
   data: BarPoint[];
   height?: number;
   barColor?: string;
   formatValue?: (value: number) => string;
+  /** Called with the index of a clicked bar. */
+  onSelect?: (index: number) => void;
 }) {
   const [grown, setGrown] = useState(false);
   useEffect(() => {
@@ -242,7 +259,12 @@ export function BarChart({
         {data.map((d, i) => {
           const pct = Math.min(100, Math.max(d.value > 0 ? 3 : 0, (d.value / max) * 100));
           return (
-            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", minWidth: 0 }}>
+            <div
+              key={i}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", minWidth: 0, cursor: onSelect ? "pointer" : undefined }}
+              onClick={onSelect ? () => onSelect(i) : undefined}
+              title={onSelect ? "Click to see the records" : undefined}
+            >
               <div style={{ fontSize: "10.5px", fontWeight: 700, color: "#334155", marginBottom: "5px" }}>{d.value > 0 ? formatValue(d.value) : ""}</div>
               <div
                 className="hosp-chart-bar"
@@ -275,6 +297,7 @@ export function HorizontalBar({
   color = "#00828a",
   valueLabel,
   style,
+  onClick,
 }: {
   label: string;
   value: number;
@@ -282,6 +305,7 @@ export function HorizontalBar({
   color?: string;
   valueLabel?: string;
   style?: CSSProperties;
+  onClick?: () => void;
 }) {
   const [grown, setGrown] = useState(false);
   useEffect(() => {
@@ -292,7 +316,7 @@ export function HorizontalBar({
 
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
-    <div style={style}>
+    <div style={{ ...style, cursor: onClick ? "pointer" : undefined }} onClick={onClick} title={onClick ? "Click to see the records" : undefined}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", marginBottom: "6px" }}>
         <strong style={{ color: "#1e293b" }}>{label}</strong>
         <span style={{ color: "#64748b" }}>{valueLabel ?? `${value}/${max} (${pct}%)`}</span>

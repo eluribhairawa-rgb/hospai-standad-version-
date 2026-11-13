@@ -111,6 +111,7 @@ from routers.lab_orders import router as lab_orders_router
 from routers.pre_bookings import router as pre_bookings_router
 from routers.branding import router as branding_router
 from routers.doctor_notes import router as doctor_notes_router
+from routers.analysis_drilldown import router as analysis_drilldown_router
 
 from access_scope import patient_access_guard
 
@@ -121,7 +122,7 @@ for r in (
     clinical_router, patients_router, employees_bed_router,
     billing_router, pharmacy_router, emar_router, lab_ot_accounts_hr_router, reports_exports_router,
     diagnostics_router, patient_reach_router, nursing_router, lab_orders_router,
-    pre_bookings_router, branding_router, doctor_notes_router,
+    pre_bookings_router, branding_router, doctor_notes_router, analysis_drilldown_router,
 ):
     app.include_router(r, dependencies=[Depends(patient_access_guard)])
 

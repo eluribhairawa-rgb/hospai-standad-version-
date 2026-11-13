@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { CSSProperties, Dispatch, SetStateAction } from "react";
-import { Button, Card, CardContent, CardHeader, CardTitle } from "../components/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Modal } from "../components/ui";
+import { apiFetch, reportError } from "../lib/api";
 import { DonutChart, PieChart, BarChart, HorizontalBar } from "../components/charts";
 import DateCalendarPicker, { toIsoDate, parseIsoDate } from "../components/DateCalendarPicker";
 import { printViaIframe } from "../lib/printViaIframe";
@@ -17,13 +18,12 @@ type Props = {
   setDashboardDate?: (date: string) => void;
 };
 
-type AnalysisTab = "operational" | "financial" | "clinical" | "departmental";
+type AnalysisTab = "operational" | "financial" | "clinical";
 
 const ANALYSIS_TABS: Array<{ id: AnalysisTab; label: string; icon: string }> = [
   { id: "operational", label: "Operational Analysis", icon: "⚙️" },
   { id: "financial", label: "Financial & Revenue", icon: "💰" },
   { id: "clinical", label: "Clinical & Demographics", icon: "🩺" },
-  { id: "departmental", label: "Departmental Performance", icon: "🏥" },
 ];
 
 const PALETTE = ["#00828a", "#2563eb", "#10b981", "#f59e0b", "#dc2626", "#7c3aed", "#0ea5e9", "#64748b"];
@@ -34,11 +34,31 @@ function titleCase(label: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
 }
 
-function distributionToSlices(items: DistributionItem[] | undefined): { label: string; value: number; color: string }[] {
+type KeyedSlice = { key: string; label: string; value: number; color: string };
+
+/** Slices for a distribution; `key` is the raw backend label (used to open the records behind a slice).
+ *  `exclude` drops labels that carry no information (e.g. "unknown" referral source). */
+function distributionToSlices(items: DistributionItem[] | undefined, exclude: string[] = []): KeyedSlice[] {
   return (items || [])
-    .filter((d) => d.count > 0)
-    .map((d, i) => ({ label: titleCase(d.label), value: d.count, color: PALETTE[i % PALETTE.length] }));
+    .filter((d) => d.count > 0 && !exclude.includes(String(d.label || "").trim().toLowerCase()))
+    .map((d, i) => ({ key: d.label, label: titleCase(d.label), value: d.count, color: PALETTE[i % PALETTE.length] }));
 }
+
+type DrillState = {
+  title: string;
+  subtitle?: string;
+  columns: string[];
+  rows: (string | number)[][];
+  total?: string;
+  note?: string;
+  loading?: boolean;
+  /** Set when this view was opened from another one (e.g. a revenue row from the revenue breakdown). */
+  back?: () => void;
+  /** Row click handler (used by the revenue breakdown to open a row's records). */
+  onRow?: (rowIndex: number) => void;
+};
+
+const MONEY_COLUMN = /^(amount|total|paid|due|rate)/i;
 
 /** Formats a rupee amount the way this page's KPIs and reports expect (₹ prefix, Indian digit grouping). */
 function formatINR(amount: number): string {
@@ -137,12 +157,20 @@ type KpiTileProps = {
   value: React.ReactNode;
   footnote: React.ReactNode;
   footnoteColor?: string;
+  onClick?: () => void;
 };
 
 /** One tile in the top KPI highlight strip (revenue, bed occupancy, pharmacy, lab). */
-function KpiTile({ label, badgeText, badgeBg, badgeColor, value, footnote, footnoteColor = "#94a3b8" }: KpiTileProps) {
+function KpiTile({ label, badgeText, badgeBg, badgeColor, value, footnote, footnoteColor = "#94a3b8", onClick }: KpiTileProps) {
   return (
-    <div style={kpiCardStyle}>
+    <div
+      style={{ ...kpiCardStyle, cursor: onClick ? "pointer" : undefined }}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter") onClick(); } : undefined}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      title={onClick ? "Click to see the records" : undefined}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={kpiLabelStyle}>{label}</span>
         <span style={kpiBadgeStyle(badgeBg, badgeColor)}>{badgeText}</span>
@@ -191,10 +219,10 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
   const revenueSegments = useMemo(
     () => {
       const segments = [
-        { label: "Outpatient (OPD) Consultations", value: opRevenue, color: "#00828a" },
-        { label: "Inpatient (IPD) Admissions", value: ipRevenue, color: "#f59e0b" },
-        { label: "Pharmacy Sales & Ward Indents", value: pharmacyRevenue, color: "#10b981" },
-        { label: "Laboratory & Diagnostics", value: labRevenue, color: "#3b82f6" },
+        { key: "op", label: "Outpatient (OPD) Consultations", value: opRevenue, color: "#00828a" },
+        { key: "ip", label: "Inpatient (IPD) Admissions", value: ipRevenue, color: "#f59e0b" },
+        { key: "pharmacy", label: "Pharmacy Sales & Ward Indents", value: pharmacyRevenue, color: "#10b981" },
+        { key: "lab", label: "Laboratory & Diagnostics", value: labRevenue, color: "#3b82f6" },
       ];
       return segments.filter((s) => s.value > 0);
     },
@@ -207,9 +235,11 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
   );
 
   const wardBreakdown = hospitalSummary?.bed_ward_breakdown || [];
-  const genderSlices = useMemo(() => distributionToSlices(analytics?.gender_distribution), [analytics]);
+  // Only recorded male / female are charted: "Unknown" (no gender entered) and "Other" are not useful splits.
+  const genderSlices = useMemo(() => distributionToSlices(analytics?.gender_distribution, ["unknown", "other", ""]).filter((s) => ["male", "female"].includes(s.key.trim().toLowerCase())), [analytics]);
   const admissionSlices = useMemo(() => distributionToSlices(analytics?.admission_status_distribution), [analytics]);
-  const referralSlices = useMemo(() => distributionToSlices(hospitalSummary?.referrals), [hospitalSummary]);
+  // "unknown" means no referral source was entered; charting it would only hide the real sources.
+  const referralSlices = useMemo(() => distributionToSlices(hospitalSummary?.referrals, ["unknown", ""]), [hospitalSummary]);
 
   const patientsTrendBars = useMemo(
     () => (analytics?.patients_trend || []).map((p) => ({
@@ -231,23 +261,83 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
   }, [hospitalSummary, selectedMonthLabel]);
 
   const operationsToday = hospitalSummary?.operations_today;
+  // Only the counts that mean "work still to finish": consultations, invoices and payments.
+  // (Registrations, pharmacy sales and revenue reporting are always 100%; bed occupancy is already shown above.)
   const operationsRows = useMemo(() => {
     if (!operationsToday) return [];
-    const labels: Record<string, string> = {
-      patient_registration: "Patient Registration",
-      queue_management: "Queue Management",
-      doctor_consultation: "Doctor Consultation",
-      bed_management: "Bed Management",
-      pharmacy: "Pharmacy",
-      billing: "Billing",
-      payment_collection: "Payment Collection",
-      revenue_reporting: "Revenue Reporting",
-      doctor_payout: "Doctor Payout",
-    };
-    return Object.entries(operationsToday)
-      .filter(([, v]) => v && v.count > 0)
-      .map(([key, v]) => ({ key, label: labels[key] || key, ...v! }));
+    const wanted: [string, string][] = [
+      ["queue_management", "Consultations"], ["billing", "Billing (invoices)"],
+      ["payment_collection", "Payment Collection"],
+    ];
+    return wanted
+      .map(([key, label]) => ({ key, label, ...(operationsToday as Record<string, { count: number; completed: number; pending: number } | undefined>)[key]! }))
+      .filter((r) => r.count > 0);
   }, [operationsToday]);
+
+  // ---------------------------------------------------------------- drill-down --
+  const [drill, setDrill] = useState<DrillState | null>(null);
+
+  const fail = (error: unknown) => {
+    setDrill(null);
+    reportError(setNotice, error as { message?: string; status?: number }, "Unable to load the records.");
+  };
+
+  type RevenueEntry = { at: string | null; patient_id?: string | null; patient_name: string; reference?: string | null; mode?: string | null; amount: number; source?: string | null };
+
+  const revenueEntriesView = (title: string, subtitle: string, data: { total: number; entries: RevenueEntry[] }, back?: () => void): DrillState => ({
+    title, subtitle, back,
+    columns: ["Date / time", "Patient", "UHID", "Reference", "Mode", "Amount"],
+    rows: data.entries.map((e) => [e.at || "", e.patient_name, e.patient_id || "", e.reference || "", e.mode ? String(e.mode).toUpperCase() : "", e.amount]),
+    total: formatINR(data.total),
+  });
+
+  const showRevenueDetails = async (category: string, period: "today" | "month", back?: () => void) => {
+    setDrill({ title: "Loading…", columns: [], rows: [], loading: true });
+    try {
+      const data = await apiFetch<{ label: string; total: number; entries: RevenueEntry[] }>(
+        `/api/dashboard/revenue-details?category=${encodeURIComponent(category)}&date=${encodeURIComponent(selectedDate)}&period=${period}`);
+      setDrill(revenueEntriesView(data.label, period === "month" ? selectedFullMonthLabel : selectedDate, data, back));
+    } catch (error) { fail(error); }
+  };
+
+  const showRevenueBreakdown = async () => {
+    setDrill({ title: "Loading…", columns: [], rows: [], loading: true });
+    try {
+      const data = await apiFetch<{ total: number; rows: { key: string; label: string; amount: number; count: number }[] }>(
+        `/api/dashboard/revenue-breakdown?date=${encodeURIComponent(selectedDate)}&period=month`);
+      const view: DrillState = {
+        title: `Revenue collected — ${selectedFullMonthLabel}`,
+        subtitle: "Click a row to see the payments behind it",
+        columns: ["Source", "Entries", "Amount"],
+        rows: data.rows.map((r) => [r.label, r.count, r.amount]),
+        total: formatINR(data.total),
+        note: "Pending / Due is shown for reference and is not part of the total.",
+        onRow: (i) => { void showRevenueDetails(data.rows[i].key, "month", () => setDrill(view)); },
+      };
+      setDrill(view);
+    } catch (error) { fail(error); }
+  };
+
+  const showPaymentMode = async (mode: string, label: string) => {
+    setDrill({ title: "Loading…", columns: [], rows: [], loading: true });
+    try {
+      const data = await apiFetch<{ label: string; total: number; entries: RevenueEntry[] }>(
+        `/api/dashboard/payment-mode-details?mode=${encodeURIComponent(mode)}&date=${encodeURIComponent(selectedDate)}&period=today`);
+      setDrill(revenueEntriesView(`${label} collections`, selectedDate, data));
+    } catch (error) { fail(error); }
+  };
+
+  const showRecords = async (kind: string, key: string) => {
+    setDrill({ title: "Loading…", columns: [], rows: [], loading: true });
+    try {
+      const data = await apiFetch<{ title: string; columns: string[]; rows: (string | number)[][]; note?: string | null; count: number }>(
+        `/api/analysis/drilldown?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(key)}&date=${encodeURIComponent(selectedDate)}`);
+      setDrill({
+        title: data.title, columns: data.columns, rows: data.rows,
+        note: data.count >= 500 ? "Showing the first 500 records." : data.note || undefined,
+      });
+    } catch (error) { fail(error); }
+  };
 
   const printAnalysisReport = () => {
     const html = buildAnalysisReportHtml({
@@ -308,6 +398,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
           badgeColor="#0f766e"
           value={formatINR(totalRevenue)}
           footnote="Includes OPD, IPD, Pharmacy & Diagnostics"
+          onClick={() => void showRevenueBreakdown()}
         />
         <KpiTile
           label="Bed Occupancy"
@@ -317,6 +408,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
           value={<>{bedOccupied} / {bedCapacity} <span style={{ fontSize: "14px", fontWeight: 500, color: "#64748b" }}>Beds</span></>}
           footnote={`${Math.max(bedCapacity - bedOccupied, 0)} Available across wards`}
           footnoteColor="#16a34a"
+          onClick={() => void showRecords("beds", "")}
         />
         <KpiTile
           label={`Pharmacy Sales (${monthBadgeText})`}
@@ -325,6 +417,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
           badgeColor="#b45309"
           value={formatINR(pharmacyRevenue)}
           footnote={isCurrentMonth ? `${pharmacyTransactionsToday} transactions today` : `Pharmacy dispensing for ${selectedMonthLabel}`}
+          onClick={() => void showRevenueDetails("pharmacy", "month")}
         />
         <KpiTile
           label={`Lab & Diagnostics (${monthBadgeText})`}
@@ -333,6 +426,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
           badgeColor="#7e22ce"
           value={formatINR(labRevenue)}
           footnote="Diagnostics module revenue"
+          onClick={() => void showRevenueDetails("lab", "month")}
         />
       </div>
 
@@ -371,7 +465,11 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <CardHeader><CardTitle>Patient Registrations — Window ({analytics?.window_days ?? 14} Days ending {new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(selectedDateObj)})</CardTitle></CardHeader>
             <CardContent>
               {patientsTrendBars.some((b) => b.value > 0) ? (
-                <BarChart data={patientsTrendBars} barColor="#00828a" />
+                <BarChart
+                  data={patientsTrendBars}
+                  barColor="#00828a"
+                  onSelect={(i) => { const day = analytics?.patients_trend?.[i]?.date; if (day) void showRecords("registrations", day); }}
+                />
               ) : (
                 <EmptyNote>No patient registrations recorded in this window yet.</EmptyNote>
               )}
@@ -394,6 +492,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
                             { label: "Free", value: w.available, color: "#e2e8f0" },
                           ]}
                           size={116}
+                          onSelect={() => void showRecords("ward", w.ward)}
                         />
                         <div style={{ textAlign: "center" }}>
                           <strong style={{ display: "block", fontSize: "13px", color: "#0f172a" }}>{w.ward}</strong>
@@ -413,7 +512,35 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <Card className="panel" style={{ gridColumn: "1 / -1" }}>
               <CardHeader><CardTitle>OP vs IP Volume</CardTitle></CardHeader>
               <CardContent>
-                <BarChart data={ipOpBars} barColor="#2563eb" />
+                <BarChart
+                  data={ipOpBars}
+                  barColor="#2563eb"
+                  onSelect={(i) => void showRecords("ipop", ["daily_op", "daily_ip", "monthly_op", "monthly_ip"][i])}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {operationsRows.length > 0 && (
+            <Card className="panel" style={{ gridColumn: "1 / -1" }}>
+              <CardHeader><CardTitle>Operations Still Open ({isCurrentMonth ? "Today" : selectedDate})</CardTitle></CardHeader>
+              <CardContent>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px 28px" }}>
+                  {operationsRows.map((r) => (
+                    <HorizontalBar
+                      key={r.key}
+                      label={r.label}
+                      value={r.completed}
+                      max={r.count}
+                      color={r.completed === r.count ? "#16a34a" : "#f59e0b"}
+                      valueLabel={`${r.completed}/${r.count} completed`}
+                      onClick={() => {
+                        if (r.key === "payment_collection") void showPaymentMode("all", "All payment");
+                        else void showRecords("ops", r.key === "queue_management" ? "queue" : "billing");
+                      }}
+                    />
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}
@@ -427,7 +554,12 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <CardHeader><CardTitle>Department Revenue Distribution ({monthBadgeText})</CardTitle></CardHeader>
             <CardContent>
               {totalRevenue > 0 ? (
-                <DonutChart data={revenueSegments} centerLabel="Total" centerValue={formatINR(totalRevenue)} />
+                <DonutChart
+                  data={revenueSegments}
+                  centerLabel="Total"
+                  centerValue={formatINR(totalRevenue)}
+                  onSelect={(i) => void showRevenueDetails(revenueSegments[i].key, "month")}
+                />
               ) : (
                 <EmptyNote>No revenue recorded for {selectedFullMonthLabel} yet.</EmptyNote>
               )}
@@ -438,7 +570,10 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <CardHeader><CardTitle>Payment Mode Collections ({isCurrentMonth ? "Today" : selectedDate})</CardTitle></CardHeader>
             <CardContent>
               {paymentModeSlices.length > 0 ? (
-                <DonutChart data={paymentModeSlices} />
+                <DonutChart
+                  data={paymentModeSlices}
+                  onSelect={(i) => void showPaymentMode(paymentModeSlices[i].key.trim().toLowerCase(), paymentModeSlices[i].label)}
+                />
               ) : (
                 <EmptyNote>No payments collected on this date yet.</EmptyNote>
               )}
@@ -466,7 +601,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <CardHeader><CardTitle>Patient Gender Distribution</CardTitle></CardHeader>
             <CardContent>
               {genderSlices.length > 0 ? (
-                <DonutChart data={genderSlices} formatValue={(v) => String(v)} size={140} />
+                <DonutChart data={genderSlices} formatValue={(v) => String(v)} size={140} onSelect={(i) => void showRecords("gender", genderSlices[i].key)} />
               ) : (
                 <EmptyNote>No patient records yet.</EmptyNote>
               )}
@@ -477,7 +612,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <CardHeader><CardTitle>Admission Status</CardTitle></CardHeader>
             <CardContent>
               {admissionSlices.length > 0 ? (
-                <DonutChart data={admissionSlices} formatValue={(v) => String(v)} size={140} />
+                <DonutChart data={admissionSlices} formatValue={(v) => String(v)} size={140} onSelect={(i) => void showRecords("admissions", admissionSlices[i].key)} />
               ) : (
                 <EmptyNote>No admissions recorded yet.</EmptyNote>
               )}
@@ -488,7 +623,7 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
             <CardHeader><CardTitle>Referral Sources</CardTitle></CardHeader>
             <CardContent>
               {referralSlices.length > 0 ? (
-                <DonutChart data={referralSlices} formatValue={(v) => String(v)} size={140} />
+                <DonutChart data={referralSlices} formatValue={(v) => String(v)} size={140} onSelect={(i) => void showRecords("referral", referralSlices[i].key)} />
               ) : (
                 <EmptyNote>No referral data recorded for {selectedFullMonthLabel} yet.</EmptyNote>
               )}
@@ -497,43 +632,55 @@ export default function AnalysisPage({ setNotice, onNavigate, hospitalSummary, a
         </div>
       )}
 
-      {/* Tab 4: Departmental */}
-      {activeTab === "departmental" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-          <Card className="panel">
-            <CardHeader><CardTitle>Revenue Share by Department ({monthBadgeText})</CardTitle></CardHeader>
-            <CardContent>
-              {totalRevenue > 0 ? (
-                <DonutChart data={revenueSegments} />
-              ) : (
-                <EmptyNote>No revenue recorded for {selectedFullMonthLabel} yet.</EmptyNote>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="panel">
-            <CardHeader><CardTitle>Operations Completion ({isCurrentMonth ? "Today" : selectedDate})</CardTitle></CardHeader>
-            <CardContent>
-              {operationsRows.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                  {operationsRows.map((r) => (
-                    <HorizontalBar
-                      key={r.key}
-                      label={r.label}
-                      value={r.completed}
-                      max={r.count}
-                      color={r.completed === r.count ? "#16a34a" : "#f59e0b"}
-                      valueLabel={`${r.completed}/${r.count} completed`}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyNote>No operational activity recorded on this date yet.</EmptyNote>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <Modal
+        open={!!drill}
+        onClose={() => setDrill(null)}
+        title={drill?.title}
+        description={drill?.subtitle}
+        className="analysis-drill-modal"
+      >
+        {drill && (
+          <div>
+            {drill.back && (
+              <Button variant="ghost" onClick={drill.back} style={{ marginBottom: 8 }}>← Back</Button>
+            )}
+            {drill.loading && <p style={{ color: "#64748b", fontSize: 13 }}>Loading records…</p>}
+            {!drill.loading && drill.rows.length === 0 && <EmptyNote>No records found for this selection.</EmptyNote>}
+            {!drill.loading && drill.rows.length > 0 && (
+              <div style={{ overflow: "auto", maxHeight: "62vh", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                  <thead>
+                    <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+                      {drill.columns.map((c) => (
+                        <th key={c} style={{ padding: "8px 10px", position: "sticky", top: 0, background: "#f1f5f9", textAlign: MONEY_COLUMN.test(c) ? "right" : "left", whiteSpace: "nowrap" }}>{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drill.rows.map((row, ri) => (
+                      <tr
+                        key={ri}
+                        onClick={drill.onRow ? () => drill.onRow!(ri) : undefined}
+                        style={{ borderTop: "1px solid #f1f5f9", cursor: drill.onRow ? "pointer" : undefined }}
+                      >
+                        {row.map((cell, ci) => (
+                          <td key={ci} style={{ padding: "7px 10px", textAlign: MONEY_COLUMN.test(drill.columns[ci] || "") ? "right" : "left", fontWeight: MONEY_COLUMN.test(drill.columns[ci] || "") ? 700 : 400 }}>
+                            {MONEY_COLUMN.test(drill.columns[ci] || "") && typeof cell === "number" ? formatINR(cell) : (cell === "" ? "—" : cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 12.5, color: "#475569" }}>
+              <span>{!drill.loading ? `${drill.rows.length} record${drill.rows.length === 1 ? "" : "s"}` : ""}{drill.note ? ` · ${drill.note}` : ""}</span>
+              {drill.total && <strong style={{ color: "#0f172a" }}>Total: {drill.total}</strong>}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

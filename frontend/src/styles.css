@@ -14779,3 +14779,4 @@ label,
   .opq-table td .opq-uhid, .opq-table td a { word-break: normal; overflow-wrap: anywhere; }
 }
 .hosp-kpi-chip { white-space: normal; max-width: 100%; min-width: 0; flex-wrap: wrap; }
+.analysis-drill-modal { max-width: min(1040px, 96vw); width: 96vw; }
