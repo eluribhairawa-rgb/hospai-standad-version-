@@ -444,7 +444,7 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
           <span className={`diag-badge ${SERVICE_TYPE_BADGE[serviceType]}`}>{SERVICE_TYPE_LABELS[serviceType]}</span>
         </div>
         <table className="diag-data-table lab-ob-summary-table">
-          <thead><tr><th>#</th><th>Test / Service</th><th>Department</th><th style={{ textAlign: "right" }}>Rate (Rs.)</th><th>Action</th></tr></thead>
+          <thead><tr><th>#</th><th>Test / Service</th><th>Dept.</th><th style={{ textAlign: "right" }} title="Rate (Rs.)">Rate</th><th style={{ textAlign: "center" }}>Action</th></tr></thead>
           <tbody>
             {lines.map((l, i) => (
               <tr key={l.service_id}>

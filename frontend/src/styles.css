@@ -14588,7 +14588,7 @@ label,
 
 .lab-ob-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 1.1rem; align-items: start; min-width: 0; overflow: hidden; }
 .lab-ob-main { display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
-.lab-ob-summary { position: sticky; top: 1rem; min-width: 280px; max-width: 100%; max-height: calc(100vh - 2rem); overflow-y: auto; overflow-x: hidden; }
+.lab-ob-summary { position: sticky; top: 1rem; min-width: 280px; max-width: 100%; }
 .lab-ob-card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.8rem; }
 .lab-ob-card-head h3 { margin: 0; font-size: 1.08rem; }
 
@@ -14614,6 +14614,15 @@ label,
 .lab-ob-added { font-size: 0.8rem; font-weight: 600; color: hsl(164 55% 30%); }
 
 .lab-ob-summary-table td, .lab-ob-summary-table th { font-size: 0.85rem; }
+/* The summary card is narrow: fixed layout + compact cells keep the Action (remove) column visible. */
+.lab-ob-summary-table { table-layout: fixed; width: 100%; }
+.lab-ob-summary-table th, .lab-ob-summary-table td { padding: 8px 4px; overflow-wrap: anywhere; word-break: break-word; }
+.lab-ob-summary-table th { white-space: normal; font-size: 0.72rem; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; }
+.lab-ob-summary-table th:nth-child(1), .lab-ob-summary-table td:nth-child(1) { width: 24px; }
+.lab-ob-summary-table th:nth-child(3), .lab-ob-summary-table td:nth-child(3) { width: 22%; }
+.lab-ob-summary-table th:nth-child(4), .lab-ob-summary-table td:nth-child(4) { width: 48px; }
+.lab-ob-summary-table th:nth-child(5), .lab-ob-summary-table td:nth-child(5) { width: 50px; text-align: center; }
+.lab-ob-summary-table .lab-ob-inline-select { width: 100%; min-width: 0; }
 .lab-ob-inline-select { margin-top: 4px; font-size: 0.8rem; }
 .lab-ob-trash { border: 1px solid hsl(var(--destructive) / 0.35); background: hsl(var(--destructive) / 0.08); color: hsl(var(--destructive)); border-radius: 6px; padding: 5px 7px; cursor: pointer; line-height: 0; }
 .lab-ob-trash:hover { background: hsl(var(--destructive) / 0.16); }
