@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { Button, Checkbox, Input, Label, Tabs, TabsTrigger } from "../components/ui";
+import { Button, Checkbox, Input, Label, Select, Tabs, TabsTrigger } from "../components/ui";
 import { apiFetch, reportError } from "../lib/api";
 import type { Notice } from "../types";
 import { openReportForItem } from "../lib/diagReports";
+
+type EquipmentOption = { id: number; name: string; type?: string; location?: string; operational_status: string };
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -96,11 +98,19 @@ export default function LabDiagnosticsImagingPage({ setNotice, onNavigate }: Pro
   const [selected, setSelected] = useState<ImagingWorklistRow | null>(null);
   const [detail, setDetail] = useState<ImagingItemDetail | null>(null);
   const [saving, setSaving] = useState(false);
+  const [equipmentList, setEquipmentList] = useState<EquipmentOption[]>([]);
 
   const [scheduleForm, setScheduleForm] = useState<ScheduleForm>(EMPTY_SCHEDULE_FORM);
   const [consentRecorded, setConsentRecorded] = useState(false);
   const [performingStaff, setPerformingStaff] = useState("");
   const [imageAvailable, setImageAvailable] = useState(true);
+
+  // Load equipment from Quality & Equipment for the room/equipment dropdown
+  useEffect(() => {
+    apiFetch<{ equipment: EquipmentOption[] }>("/api/diag/equipment")
+      .then((d) => setEquipmentList(d.equipment || []))
+      .catch(() => { /* non-critical – falls back to free-text */ });
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -294,7 +304,7 @@ export default function LabDiagnosticsImagingPage({ setNotice, onNavigate }: Pro
                 </div>
               </div>
 
-              {detail.exam.status === "scheduled" && (
+              {(detail.exam.status === "scheduled" || detail.exam.status === "to_schedule") && (
                 <div>
                   <div className="diag-section-title">Scheduling</div>
                   <div className="diag-form-grid">
@@ -304,7 +314,27 @@ export default function LabDiagnosticsImagingPage({ setNotice, onNavigate }: Pro
                     </div>
                     <div>
                       <Label>Room / equipment</Label>
-                      <Input value={scheduleForm.room} onChange={(e) => updateScheduleForm({ room: e.target.value })} />
+                      {equipmentList.length > 0 ? (
+                        <Select
+                          value={scheduleForm.room}
+                          onChange={(e) => updateScheduleForm({ room: e.target.value })}
+                        >
+                          <option value="">— Select equipment / room —</option>
+                          {equipmentList.map((eq) => (
+                            <option
+                              key={eq.id}
+                              value={eq.name}
+                              disabled={eq.operational_status !== "ready"}
+                            >
+                              {eq.name}
+                              {eq.location ? ` (${eq.location})` : ""}
+                              {eq.operational_status !== "ready" ? ` [${eq.operational_status.replace("_", " ")}]` : ""}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input value={scheduleForm.room} onChange={(e) => updateScheduleForm({ room: e.target.value })} placeholder="Room or equipment name" />
+                      )}
                     </div>
                     <div>
                       <Label>Date & time</Label>
