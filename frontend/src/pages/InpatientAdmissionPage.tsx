@@ -122,13 +122,19 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
 
   useEffect(() => {
     void loadBeds();
+    // App remounts a page right after navigating to it (key bump), so the first
+    // instance can be discarded mid-fetch. Only consume the handoff once an
+    // instance that is still mounted has applied it; otherwise leave it for the
+    // next mount.
+    let cancelled = false;
     const saved = localStorage.getItem("selected_admission_patient");
     if (saved) {
-      localStorage.removeItem("selected_admission_patient");
       apiFetch<any>(`/api/patients/${encodeURIComponent(saved)}`)
         .then((res) => {
+          if (cancelled) return;
           const p = res?.patient || res;
           if (p && (p.patient_id || p.uhid)) {
+            localStorage.removeItem("selected_admission_patient");
             void handleSelectPatient({
               uhid: p.patient_id || p.uhid,
               patientName: fullPatientName(p) || p.patient_id,
@@ -140,6 +146,9 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
         })
         .catch(() => {});
     }
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // The department/doctor from the patient's appointment stay selectable even if
