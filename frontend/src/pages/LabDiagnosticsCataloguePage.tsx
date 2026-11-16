@@ -338,8 +338,8 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
 
               {editTab === "details" && (
                 <div className="diag-form-grid">
-                  <div><Label>Service code</Label><Input value={form.code || ""} onChange={(e) => patchForm({ code: e.target.value })} disabled={!isNew} /></div>
-                  <div><Label>Service name</Label><Input value={form.name || ""} onChange={(e) => patchForm({ name: e.target.value })} /></div>
+                  <div><Label>Service code</Label><Input value={form.code || ""} onChange={(e) => patchForm({ code: e.target.value })} disabled={!isNew} placeholder="e.g. CBC-T" /></div>
+                  <div><Label>Service name</Label><Input value={form.name || ""} onChange={(e) => patchForm({ name: e.target.value })} placeholder="e.g. Complete Blood Count" /></div>
                   <div><Label>Type</Label>
                     <Select value={form.service_type || ""} onChange={(e) => patchForm({ service_type: e.target.value as DiagService["service_type"] })}>
                       <option value="">Select type</option>
@@ -348,20 +348,20 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
                       <option value="OTHER">Other</option>
                     </Select>
                   </div>
-                  <div><Label>Department</Label><Input value={form.department || ""} onChange={(e) => patchForm({ department: e.target.value })} /></div>
-                  <div><Label>Rate (Rs.)</Label><Input type="number" min={0} value={(form.rate as any) === "" ? "" : (form.rate ?? "")} onChange={(e) => patchForm({ rate: e.target.value === "" ? ("" as any) : Number(e.target.value) })} placeholder="" /></div>
+                  <div><Label>Department</Label><Input value={form.department || ""} onChange={(e) => patchForm({ department: e.target.value })} placeholder="e.g. Haematology" /></div>
+                  <div><Label>Rate (Rs.)</Label><Input type="number" min={0} value={(form.rate as any) === "" ? "" : (form.rate ?? "")} onChange={(e) => patchForm({ rate: e.target.value === "" ? ("" as any) : Number(e.target.value) })} placeholder="e.g. 350" /></div>
                   <div><Label>Turnaround time</Label><Input value={form.turnaround_time || ""} onChange={(e) => patchForm({ turnaround_time: e.target.value })} placeholder="e.g. 6 hours" /></div>
                   <div><Label>TAT (hours)</Label><Input type="number" step="any" min={0} value={form.turnaround_hours ?? ""} onChange={(e) => patchForm({ turnaround_hours: e.target.value === "" ? null : Number(e.target.value) })} placeholder="e.g. 6" /></div>
                   {form.service_type === "LAB" && (
                     <>
-                      <div><Label>Specimen type</Label><Input value={form.specimen_type || ""} onChange={(e) => patchForm({ specimen_type: e.target.value })} /></div>
-                      <div><Label>Container</Label><Input value={form.container_type || ""} onChange={(e) => patchForm({ container_type: e.target.value })} /></div>
+                      <div><Label>Specimen type</Label><Input value={form.specimen_type || ""} onChange={(e) => patchForm({ specimen_type: e.target.value })} placeholder="e.g. Blood, Urine" /></div>
+                      <div><Label>Container</Label><Input value={form.container_type || ""} onChange={(e) => patchForm({ container_type: e.target.value })} placeholder="e.g. EDTA tube" /></div>
                     </>
                   )}
                   {form.service_type === "IMAGING" && (
                     <>
                       <div><Label>Modality</Label><Input value={form.modality || ""} onChange={(e) => patchForm({ modality: e.target.value })} placeholder="X-ray / Ultrasound / CT" /></div>
-                      <div><Label>Body region</Label><Input value={form.body_region || ""} onChange={(e) => patchForm({ body_region: e.target.value })} /></div>
+                      <div><Label>Body region</Label><Input value={form.body_region || ""} onChange={(e) => patchForm({ body_region: e.target.value })} placeholder="e.g. Chest" /></div>
                       <div><Label>Laterality</Label>
                         <Select value={form.laterality || ""} onChange={(e) => patchForm({ laterality: e.target.value })}>
                           <option value="">Not applicable</option>
