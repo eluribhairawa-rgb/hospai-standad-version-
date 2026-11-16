@@ -545,7 +545,7 @@ function CheckoutModal({ result, setNotice, onReload, onDone }: {
   onDone: () => void;
 }) {
   const [method, setMethod] = useState<"cash" | "card" | "online">("cash");
-  const [onlineMode, setOnlineMode] = useState("upi");
+  const [onlineMode, setOnlineMode] = useState("");
   const [amount, setAmount] = useState(0);
   const [ref, setRef] = useState("");
   const [saving, setSaving] = useState(false);
@@ -558,6 +558,10 @@ function CheckoutModal({ result, setNotice, onReload, onDone }: {
     if (!invoice) return;
     if (!(amount > 0) || amount > invoice.due_amount + 0.005) {
       setNotice({ type: "warning", message: `Enter an amount between 1 and ${money(invoice.due_amount)}.` });
+      return;
+    }
+    if (method === "online" && !onlineMode) {
+      setNotice({ type: "warning", message: "Please select the online payment method." });
       return;
     }
     const mode = method === "online" ? onlineMode : method;
@@ -601,7 +605,7 @@ function CheckoutModal({ result, setNotice, onReload, onDone }: {
             {method === "online" && (
               <div><Label>Online method</Label>
                 <Select value={onlineMode} onChange={(e) => setOnlineMode(e.target.value)}>
-                  <option value="upi">UPI</option><option value="bank">Bank transfer</option>
+                  <option value="">Select online method</option><option value="upi">UPI</option><option value="bank">Bank transfer</option>
                 </Select>
               </div>
             )}

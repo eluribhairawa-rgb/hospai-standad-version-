@@ -69,15 +69,16 @@ export function PaymentModal({ invoice, open, onClose, onPaid, setNotice }: {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
 }) {
   const [amount, setAmount] = useState(0);
-  const [mode, setMode] = useState("cash");
+  const [mode, setMode] = useState("");
   const [ref, setRef] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open && invoice) { setAmount(invoice.due_amount); setMode("cash"); setRef(""); }
+    if (open && invoice) { setAmount(invoice.due_amount); setMode(""); setRef(""); }
   }, [open, invoice]);
   const pay = async () => {
     if (!invoice) return;
     if (!(amount > 0)) { setNotice({ type: "warning", message: "Enter the amount received." }); return; }
+    if (!mode) { setNotice({ type: "warning", message: "Please select a payment mode." }); return; }
     if (amount > invoice.due_amount + 0.005) { setNotice({ type: "warning", message: `Amount exceeds the balance due (${money(invoice.due_amount)}).` }); return; }
     setSaving(true);
     try {
@@ -98,10 +99,11 @@ export function PaymentModal({ invoice, open, onClose, onPaid, setNotice }: {
         <div><Label>Amount (due {money(invoice?.due_amount)})</Label><Input type="number" min={0} value={amount} onChange={(e) => setAmount(Number(e.target.value))} /></div>
         <div><Label>Payment mode</Label>
           <Select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="">Select payment mode</option>
             {PAYMENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
         </div>
-        {mode !== "cash" && (
+        {mode && mode !== "cash" && (
           <div className="diag-form-full"><Label>Transaction / reference no.</Label><Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Card slip, UPI or bank reference (optional)" /></div>
         )}
         <div className="diag-form-full"><Button variant="primary" disabled={saving} onClick={() => void pay()}>{saving ? "Saving..." : "Confirm payment"}</Button></div>

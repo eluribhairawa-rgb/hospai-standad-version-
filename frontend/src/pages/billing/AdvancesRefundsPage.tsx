@@ -46,7 +46,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
   const [selectedAdvanceId, setSelectedAdvanceId] = useState<string>("");
   const [refundAmount, setRefundAmount] = useState<string>("");
   const [refundReason, setRefundReason] = useState<string>("Excess advance");
-  const [refundMethod, setRefundMethod] = useState<string>("Cash");
+  const [refundMethod, setRefundMethod] = useState<string>("");
   const [refundNotes, setRefundNotes] = useState<string>("Patient requested discharge excess return");
   const [submittingRefund, setSubmittingRefund] = useState(false);
 
@@ -58,7 +58,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
   const [advPatientName, setAdvPatientName] = useState("");
   const [advLookupState, setAdvLookupState] = useState<"idle" | "searching" | "notfound">("idle");
   const [advAmount, setAdvAmount] = useState("5000");
-  const [advMode, setAdvMode] = useState("UPI");
+  const [advMode, setAdvMode] = useState("");
   const [advRef, setAdvRef] = useState("");
   const [advNotes, setAdvNotes] = useState("Security advance against IP admission");
   const [savingAdv, setSavingAdv] = useState(false);
@@ -193,6 +193,10 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
       setNotice({ type: "warning", message: "Enter a valid positive advance amount." });
       return;
     }
+    if (!advMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
+      return;
+    }
 
     setSavingAdv(true);
     try {
@@ -249,6 +253,11 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
         type: "error",
         message: `Amount exceeds available balance of ₹${fmt(selectedAdvAvailable)} on selected advance.`,
       });
+      return;
+    }
+
+    if (!refundMethod) {
+      setNotice({ type: "warning", message: "Please select a disbursement method." });
       return;
     }
 
@@ -1129,6 +1138,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                   value={refundMethod}
                   onChange={(e) => setRefundMethod(e.target.value)}
                 >
+                  <option value="">Select disbursement method</option>
                   <option value="Cash">Cash (from Cashier Drawer)</option>
                   <option value="UPI">UPI Transfer</option>
                   <option value="Bank transfer">Bank transfer / NEFT</option>
@@ -1235,6 +1245,7 @@ export default function AdvancesRefundsPage({ setNotice, onNavigate, selectedPat
                 value={advMode}
                 onChange={(e) => setAdvMode(e.target.value)}
               >
+                <option value="">Select payment mode</option>
                 <option value="UPI">UPI</option>
                 <option value="Cash">Cash</option>
                 <option value="Card">Card</option>

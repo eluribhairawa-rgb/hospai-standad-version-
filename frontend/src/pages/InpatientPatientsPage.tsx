@@ -87,8 +87,8 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
   const [dischargeForm, setDischargeForm] = useState({
     discount: "",
     return_excess: true,
-    refund_method: "Cash",
-    payment_mode: "cash",
+    refund_method: "",
+    payment_mode: "",
     notes: "Discharged in stable condition",
   });
   const [submittingDischarge, setSubmittingDischarge] = useState(false);
@@ -166,9 +166,9 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
     setDischargeForm({
       discount: "",
       return_excess: true,
-      refund_method: "Cash",
+      refund_method: "",
       // An insured stay is billed to the insurer; nothing is collected from the patient by default.
-      payment_mode: bed.payer_type === "insurance" ? "insurance" : "cash",
+      payment_mode: bed.payer_type === "insurance" ? "insurance" : "",
       notes: "Discharged in stable condition",
     });
     setLoadingDischargePreview(true);
@@ -184,6 +184,18 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
   };
 
   const confirmDischargeBill = async (bed: OccupiedBed) => {
+    if (dischargePreview) {
+      const adv = advanceFigures(dischargePreview, dischargeForm.discount);
+      const toCollect = Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - adv.applied);
+      if (toCollect > 0 && !dischargeForm.payment_mode) {
+        setNotice({ type: "warning", message: "Please select a payment mode for the balance collected now." });
+        return;
+      }
+      if (dischargeForm.return_excess && adv.excess > 0 && !dischargeForm.refund_method) {
+        setNotice({ type: "warning", message: "Please select a refund method." });
+        return;
+      }
+    }
     setSubmittingDischarge(true);
     try {
       const res = await apiFetch<{ advance_paid?: number; refund_requests?: { refund_no: string; amount: number }[]; invoice_no: string; total_amount: number; paid_amount: number; billed_to_insurer?: boolean; insurer_name?: string | null; insurer_due?: number }>(
@@ -449,6 +461,7 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
                             <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
                               <span>Refund method</span>
                               <Select value={dischargeForm.refund_method} onChange={(e) => setDischargeForm((p) => ({ ...p, refund_method: e.target.value }))} style={{ maxWidth: 200 }}>
+                                <option value="">Select method</option>
                                 <option value="Cash">Cash</option>
                                 <option value="UPI">UPI</option>
                                 <option value="Bank Transfer">Bank Transfer</option>
@@ -468,6 +481,7 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
                 <div>
                   <Label>{dischargeForm.payment_mode === "insurance" ? "Payment mode" : "Payment mode for balance collected now"}</Label>
                   <Select value={dischargeForm.payment_mode} onChange={(e) => setDischargeForm((p) => ({ ...p, payment_mode: e.target.value }))}>
+                    <option value="">Select payment mode</option>
                     <option value="insurance" disabled={viewPatient?.payer_type !== "insurance"}>
                       {viewPatient?.payer_type === "insurance"
                         ? `Insurance: bill ${viewPatient.insurance_provider || "the insurer"}`

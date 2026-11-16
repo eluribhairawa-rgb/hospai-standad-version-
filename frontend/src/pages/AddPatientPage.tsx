@@ -210,8 +210,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("");
   const [consultationFee, setConsultationFee] = useState<string | number>("");
-  const [appointmentType, setAppointmentType] = useState<"Consultation" | "Review" | "Follow-up">("Consultation");
-  const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Card" | "Waived">("Cash");
+  const [appointmentType, setAppointmentType] = useState<"" | "Consultation" | "Review" | "Follow-up">("");
+  const [paymentMode, setPaymentMode] = useState<"" | "Cash" | "UPI" | "Card" | "Waived">("");
   const [appointmentSlot, setAppointmentSlot] = useState("Immediate Live Queue (Walk-in)");
 
 
@@ -362,7 +362,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const handleDoctorChange = (docName: string) => {
     setSelectedDoctor(docName);
     if (!docName) {
-      setConsultationFee(0);
+      setConsultationFee("");
       return;
     }
     const doc = doctorList.find((d) => d.doctor_name === docName);
@@ -372,7 +372,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   };
 
   // When appointment type changes, adjust fee if review
-  const handleAppointmentTypeChange = (type: "Consultation" | "Review" | "Follow-up") => {
+  const handleAppointmentTypeChange = (type: "" | "Consultation" | "Review" | "Follow-up") => {
     setAppointmentType(type);
     const doc = doctorList.find((d) => d.doctor_name === selectedDoctor);
     if (doc) {
@@ -797,6 +797,15 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       return;
     }
 
+    if (!appointmentType) {
+      setNotice({ type: "warning", message: "Please select the consultation type." });
+      return;
+    }
+    if (!paymentMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
+      return;
+    }
+
     setBookingAppointment(true);
 
     try {
@@ -888,8 +897,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     setSelectedDepartment("");
     setSelectedDoctor("");
     setConsultationFee(0);
-    setAppointmentType("Consultation");
-    setPaymentMode("Cash");
+    setAppointmentType("");
+    setPaymentMode("");
     setBookedAppointment(null);
     setLastRegisteredPatient(null);
     setDuplicateInfo(null);
@@ -2462,6 +2471,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                     className="pharmacy-rx-search-input"
                     style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
                   >
+                    <option value="">Select consultation type</option>
                     <option value="Consultation">New Consultation (Full Fee)</option>
                     <option value="Review">Follow-up / Review Visit</option>
                     <option value="Follow-up">Report Evaluation</option>
@@ -2478,6 +2488,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                     className="pharmacy-rx-search-input"
                     style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
                   >
+                    <option value="">Select payment mode</option>
                     <option value="Cash">Cash Counter</option>
                     <option value="UPI">UPI / QR Code</option>
                     <option value="Card">Debit / Credit Card</option>

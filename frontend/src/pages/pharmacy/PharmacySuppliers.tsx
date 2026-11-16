@@ -95,7 +95,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
   // Record Payment Modal
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [payAmount, setPayAmount] = useState<string>("");
-  const [payMode, setPayMode] = useState("bank_transfer");
+  const [payMode, setPayMode] = useState("");
   const [payRef, setPayRef] = useState("");
   const [payRemarks, setPayRemarks] = useState("");
   const [payDate, setPayDate] = useState(() => new Date().toLocaleDateString("en-CA"));
@@ -242,6 +242,10 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
     if (!supplierId) return;
     if (amountNum <= 0) {
       setNotice({ type: "warning", message: "Payment amount must be greater than 0" });
+      return;
+    }
+    if (!payMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
       return;
     }
     if (savingPayment) return;
@@ -699,6 +703,7 @@ export default function PharmacySuppliers({ setNotice, onNavigate }: Props) {
                 value={payMode}
                 onChange={(e) => setPayMode(e.target.value)}
               >
+                <option value="">Select payment mode</option>
                 <option value="bank_transfer">Bank Transfer / NEFT / RTGS</option>
                 <option value="cheque">Bank Cheque</option>
                 <option value="upi">UPI</option>

@@ -34,7 +34,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
   // Selected statement for right panel
   const [selectedStatement, setSelectedStatement] = useState<any>(null);
   const [payoutAmount, setPayoutAmount] = useState<string>("");
-  const [payoutMode, setPayoutMode] = useState<string>("Bank transfer");
+  const [payoutMode, setPayoutMode] = useState<string>("");
   const [payoutRef, setPayoutRef] = useState<string>("");
   const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [submittingPayout, setSubmittingPayout] = useState(false);
@@ -93,6 +93,10 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
     const amt = parseFloat(payoutAmount);
     if (isNaN(amt) || amt <= 0) {
       setNotice({ type: "warning", message: "Enter a valid positive payout amount." });
+      return;
+    }
+    if (!payoutMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
       return;
     }
 
@@ -479,6 +483,7 @@ export default function DoctorPayoutsPage({ setNotice, onNavigate }: Props) {
                     value={payoutMode}
                     onChange={(e) => setPayoutMode(e.target.value)}
                   >
+                    <option value="">Select payment mode</option>
                     <option value="Bank transfer">Bank transfer</option>
                     <option value="Cash">Cash</option>
                     <option value="Cheque">Cheque</option>

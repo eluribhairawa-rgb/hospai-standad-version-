@@ -34,7 +34,7 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
 
   // Payment Form State
   const [amountReceived, setAmountReceived] = useState<string>("");
-  const [paymentMode, setPaymentMode] = useState<string>("UPI");
+  const [paymentMode, setPaymentMode] = useState<string>("");
   const [transactionRef, setTransactionRef] = useState<string>("");
   const [settlementNotes, setSettlementNotes] = useState<string>("");
   const [settling, setSettling] = useState(false);
@@ -205,6 +205,10 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
     const selectedList = unpaidBills.filter((b: any) => selectedBills[Number(b.id ?? b.invoice_id)]);
     if (selectedList.length === 0) {
       setNotice({ type: "warning", message: "Please select at least one bill to settle." });
+      return;
+    }
+    if (!paymentMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
       return;
     }
 
@@ -764,6 +768,7 @@ export default function PatientBillsPaymentsPage({ setNotice, onNavigate, select
                       value={paymentMode}
                       onChange={(e) => setPaymentMode(e.target.value)}
                     >
+                      <option value="">Select payment mode</option>
                       <option value="UPI">UPI</option>
                       <option value="Cash">Cash</option>
                       <option value="Card">Credit / Debit Card</option>

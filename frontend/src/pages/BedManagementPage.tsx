@@ -132,8 +132,8 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
   const [dischargeForm, setDischargeForm] = useState({
     discount: "",
     return_excess: true,
-    refund_method: "Cash",
-    payment_mode: "cash",
+    refund_method: "",
+    payment_mode: "",
     notes: "Discharged in stable condition",
   });
   const [submittingDischarge, setSubmittingDischarge] = useState(false);
@@ -383,7 +383,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
     }
     setDischargeBed(bed);
     setDischargePreview(null);
-    setDischargeForm({ discount: "", return_excess: true, refund_method: "Cash", payment_mode: "cash", notes: "Discharged in stable condition" });
+    setDischargeForm({ discount: "", return_excess: true, refund_method: "", payment_mode: "", notes: "Discharged in stable condition" });
     setLoadingDischargePreview(true);
     try {
       const preview = await apiFetch<DischargeBillPreview>(`/api/bed/allocations/${bed.allocation_id}/discharge-bill`);
@@ -398,6 +398,18 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
 
   const confirmDischargeBill = async () => {
     if (!dischargeBed?.allocation_id) return;
+    if (dischargePreview) {
+      const adv = advanceFigures(dischargePreview, dischargeForm.discount);
+      const toCollect = Math.max(0, dischargePreview.grand_total - (Number(dischargeForm.discount) || 0) - adv.applied);
+      if (toCollect > 0 && !dischargeForm.payment_mode) {
+        setNotice({ type: "warning", message: "Please select a payment mode for the balance collected now." });
+        return;
+      }
+      if (dischargeForm.return_excess && adv.excess > 0 && !dischargeForm.refund_method) {
+        setNotice({ type: "warning", message: "Please select a refund method." });
+        return;
+      }
+    }
     setSubmittingDischarge(true);
     try {
       const res = await apiFetch<{ advance_paid?: number; refund_requests?: { refund_no: string; amount: number }[]; invoice_no: string; total_amount: number; paid_amount: number }>(
@@ -1542,6 +1554,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
                             <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
                               <span>Refund method</span>
                               <Select value={dischargeForm.refund_method} onChange={(e) => setDischargeForm((p) => ({ ...p, refund_method: e.target.value }))} style={{ maxWidth: 200 }}>
+                                <option value="">Select method</option>
                                 <option value="Cash">Cash</option>
                                 <option value="UPI">UPI</option>
                                 <option value="Bank Transfer">Bank Transfer</option>
@@ -1564,6 +1577,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
                     value={dischargeForm.payment_mode}
                     onChange={(e) => setDischargeForm((p) => ({ ...p, payment_mode: e.target.value }))}
                   >
+                    <option value="">Select payment mode</option>
                     <option value="cash">Cash</option>
                     <option value="card">Card</option>
                     <option value="upi">UPI</option>

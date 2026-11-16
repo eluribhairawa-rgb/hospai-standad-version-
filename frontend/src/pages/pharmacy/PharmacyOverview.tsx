@@ -148,7 +148,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
   const [erSelectedBatch, setErSelectedBatch] = useState<StockBatch | null>(null);
   const [erQuantity, setErQuantity] = useState(1);
   const [erBillingMode, setErBillingMode] = useState<"IMMEDIATE_PAYMENT" | "EMERGENCY_ACCOUNT">("IMMEDIATE_PAYMENT");
-  const [erPaymentMode, setErPaymentMode] = useState("cash");
+  const [erPaymentMode, setErPaymentMode] = useState("");
   const [erSubmitting, setErSubmitting] = useState(false);
 
   const handleOpenNewPr = (medicineName?: string) => {
@@ -270,6 +270,11 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
     }
     if (erQuantity <= 0 || erQuantity > erSelectedBatch.qty_available) {
       setNotice({ type: "warning", message: `Quantity must be between 1 and ${erSelectedBatch.qty_available}.` });
+      return;
+    }
+
+    if (erBillingMode === "IMMEDIATE_PAYMENT" && !erPaymentMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
       return;
     }
 
@@ -2271,6 +2276,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                   onChange={(e) => setErPaymentMode(e.target.value)}
                   style={{ padding: "4px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px" }}
                 >
+                  <option value="">Select payment mode</option>
                   <option value="cash">Cash</option>
                   <option value="upi">UPI / Online</option>
                   <option value="card">Card</option>

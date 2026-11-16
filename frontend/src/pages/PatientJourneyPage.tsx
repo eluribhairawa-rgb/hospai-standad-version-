@@ -171,7 +171,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
   const [deptFilter, setDeptFilter] = useState("all");
   const [sortOrder, setSortOrder] = useState<"oldest" | "newest">("oldest");
   const [dueOpen, setDueOpen] = useState(false);
-  const [payMode, setPayMode] = useState("cash");
+  const [payMode, setPayMode] = useState("");
   const [paying, setPaying] = useState(false);
   const [exporting, setExporting] = useState<"" | "pdf" | "print">("");
   const [reportModal, setReportModal] = useState<{ title: string; loading: boolean; content: Record<string, unknown> | null } | null>(null);
@@ -210,6 +210,10 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
 
   const payOutstanding = async () => {
     if (!journey) return;
+    if (!payMode) {
+      setNotice({ type: "warning", message: "Please select a payment mode." });
+      return;
+    }
     const dueInvoices = journey.due_invoices || [];
     const invoicedDue = dueInvoices.reduce((t, i) => t + i.due, 0);
     const uninvoiced = Math.max(0, Math.round((netDueOf(journey) - invoicedDue) * 100) / 100);
@@ -1026,7 +1030,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
               </label>
               <label style={{ fontSize: "12px", color: "#475569" }}>Payment mode
                 <select value={payMode} onChange={(e) => setPayMode(e.target.value)} style={{ width: "100%", marginTop: "4px", padding: "8px", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
-                  <option value="cash">Cash</option><option value="card">Card</option><option value="upi">UPI</option><option value="bank">Bank transfer</option>
+                  <option value="">Select payment mode</option><option value="cash">Cash</option><option value="card">Card</option><option value="upi">UPI</option><option value="bank">Bank transfer</option>
                 </select>
               </label>
             </div>

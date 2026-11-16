@@ -74,7 +74,7 @@ export default function IpDischargeBillingPage({
   const [payerDraft, setPayerDraft] = useState<AdmissionPayer>(EMPTY_PAYER);
   const [savingPayer, setSavingPayer] = useState(false);
   const [discountAmount, setDiscountAmount] = useState<string>("500");
-  const [paymentMode, setPaymentMode] = useState<string>("UPI");
+  const [paymentMode, setPaymentMode] = useState<string>("");
   const [paymentAmount, setPaymentAmount] = useState<string>("");
   const [transactionRef, setTransactionRef] = useState<string>("");
   const [dischargeNotes, setDischargeNotes] = useState<string>("Routine discharge settlement");
@@ -232,6 +232,11 @@ export default function IpDischargeBillingPage({
     try {
       const billToInsurer = paymentMode === "Insurance";
       const tenderAmt = billToInsurer ? 0 : parseFloat(paymentAmount) || 0;
+      if (tenderAmt > 0 && !paymentMode) {
+        setNotice({ type: "warning", message: "Please select a payment mode." });
+        setSettling(false);
+        return;
+      }
       const payments = [];
       if (tenderAmt > 0) {
         payments.push({
@@ -490,7 +495,7 @@ export default function IpDischargeBillingPage({
 
   // An insured stay is billed to the insurer by default; otherwise the usual cash-type modes apply.
   const openFinaliseModal = () => {
-    setPaymentMode(isInsurancePayer ? "Insurance" : "UPI");
+    setPaymentMode(isInsurancePayer ? "Insurance" : "");
     setFinaliseModalOpen(true);
   };
 
@@ -1728,6 +1733,7 @@ export default function IpDischargeBillingPage({
                 value={paymentMode}
                 onChange={(e) => setPaymentMode(e.target.value)}
               >
+                <option value="">Select payment mode</option>
                 {isInsurancePayer && <option value="Insurance">Insurance: bill {admission?.insurance_provider || "the insurer"}</option>}
                 <option value="UPI">UPI</option>
                 <option value="Cash">Cash</option>
