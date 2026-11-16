@@ -69,7 +69,7 @@ type ReportTemplate = {
 type EditTab = "details" | "parameters" | "processing" | "pricing" | "history";
 
 const blankService = (): Partial<DiagService> => ({
-  code: "", name: "", service_type: "LAB", department: "", active: true, rate: 0,
+  code: "", name: "", service_type: "" as any, department: "", active: true, rate: "" as any,
   turnaround_time: "", turnaround_hours: null, preparation_requirements: "", specimen_type: "", container_type: "",
   modality: "", body_region: "", laterality: "", requires_scheduling: false, report_template: "generic",
 });
@@ -167,6 +167,14 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
   const saveDetails = async () => {
     if (!form.code?.trim() || !form.name?.trim()) {
       setNotice({ type: "warning", message: "Code and name are required." });
+      return;
+    }
+    if (!form.service_type) {
+      setNotice({ type: "warning", message: "Please select a service type." });
+      return;
+    }
+    if ((form.rate as any) === "" || form.rate == null) {
+      setNotice({ type: "warning", message: "Please enter the rate." });
       return;
     }
     setSaving(true);
@@ -333,7 +341,8 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
                   <div><Label>Service code</Label><Input value={form.code || ""} onChange={(e) => patchForm({ code: e.target.value })} disabled={!isNew} /></div>
                   <div><Label>Service name</Label><Input value={form.name || ""} onChange={(e) => patchForm({ name: e.target.value })} /></div>
                   <div><Label>Type</Label>
-                    <Select value={form.service_type} onChange={(e) => patchForm({ service_type: e.target.value as DiagService["service_type"] })}>
+                    <Select value={form.service_type || ""} onChange={(e) => patchForm({ service_type: e.target.value as DiagService["service_type"] })}>
+                      <option value="">Select type</option>
                       <option value="LAB">Laboratory</option>
                       <option value="IMAGING">Imaging</option>
                       <option value="OTHER">Other</option>

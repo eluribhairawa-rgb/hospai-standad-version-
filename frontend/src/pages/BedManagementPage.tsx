@@ -130,7 +130,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
   const [dischargePreview, setDischargePreview] = useState<DischargeBillPreview | null>(null);
   const [loadingDischargePreview, setLoadingDischargePreview] = useState(false);
   const [dischargeForm, setDischargeForm] = useState({
-    discount: "0",
+    discount: "",
     return_excess: true,
     refund_method: "Cash",
     payment_mode: "cash",
@@ -383,7 +383,7 @@ export default function BedManagementPage({ setNotice, onNavigate }: Props) {
     }
     setDischargeBed(bed);
     setDischargePreview(null);
-    setDischargeForm({ discount: "0", return_excess: true, refund_method: "Cash", payment_mode: "cash", notes: "Discharged in stable condition" });
+    setDischargeForm({ discount: "", return_excess: true, refund_method: "Cash", payment_mode: "cash", notes: "Discharged in stable condition" });
     setLoadingDischargePreview(true);
     try {
       const preview = await apiFetch<DischargeBillPreview>(`/api/bed/allocations/${bed.allocation_id}/discharge-bill`);

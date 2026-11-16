@@ -209,7 +209,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const { departments, doctors: doctorList, loading: directoryLoading } = useDoctorDirectory();
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("");
-  const [consultationFee, setConsultationFee] = useState<string | number>(0);
+  const [consultationFee, setConsultationFee] = useState<string | number>("");
   const [appointmentType, setAppointmentType] = useState<"Consultation" | "Review" | "Follow-up">("Consultation");
   const [paymentMode, setPaymentMode] = useState<"Cash" | "UPI" | "Card" | "Waived">("Cash");
   const [appointmentSlot, setAppointmentSlot] = useState("Immediate Live Queue (Walk-in)");

@@ -86,12 +86,12 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     return combined;
   }, [customAdmissionTypes]);
 
-  const [admissionType, setAdmissionType] = useState(DEFAULT_ADMISSION_TYPES[0]);
+  const [admissionType, setAdmissionType] = useState("");
   const [isCustomTypeMode, setIsCustomTypeMode] = useState(false);
   const [isManageTypesOpen, setIsManageTypesOpen] = useState(false);
   const [newTypeInput, setNewTypeInput] = useState("");
 
-  const [triagePriority, setTriagePriority] = useState<"Critical" | "Urgent" | "Stable">("Stable");
+  const [triagePriority, setTriagePriority] = useState<"" | "Critical" | "Urgent" | "Stable">("");
   const [reasonForAdmission, setReasonForAdmission] = useState("");
   const [expectedStay, setExpectedStay] = useState("");
   const [notes, setNotes] = useState("");
@@ -267,9 +267,9 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     setDoctorOrder(null);
     setDepartment("");
     setConsultingDoctor("");
-    setAdmissionType(DEFAULT_ADMISSION_TYPES[0]);
+    setAdmissionType("");
     setIsCustomTypeMode(false);
-    setTriagePriority("Stable");
+    setTriagePriority("");
     setReasonForAdmission("");
     setExpectedStay("");
     setNotes("");
@@ -298,6 +298,14 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
     }
     if (!consultingDoctor) {
       setNotice({ type: "warning", message: "Please select a consulting doctor." });
+      return;
+    }
+    if (!admissionType.trim()) {
+      setNotice({ type: "warning", message: "Please select the admission type." });
+      return;
+    }
+    if (!triagePriority) {
+      setNotice({ type: "warning", message: "Please select the clinical acuity / triage." });
       return;
     }
     if (!reasonForAdmission.trim()) {
@@ -717,6 +725,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
                 className="pharmacy-rx-search-input"
                 style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
               >
+                <option value="">Select admission type</option>
                 {allAdmissionTypes.map((type) => (
                   <option key={type} value={type}>
                     {type}
@@ -765,6 +774,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
               className="pharmacy-rx-search-input"
               style={{ height: "42px", padding: "0 12px", borderRadius: "8px", border: "1px solid #cbd5e1", width: "100%", boxSizing: "border-box" }}
             >
+              <option value="">Select acuity</option>
               <option value="Critical">🔴 Critical (ICU Priority)</option>
               <option value="Urgent">🟡 Urgent (High Dependency)</option>
               <option value="Stable">🟢 Stable (Standard Ward)</option>
@@ -1165,7 +1175,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
                           const next = customAdmissionTypes.filter((x) => x !== t);
                           saveCustomTypes(next);
                           if (admissionType === t) {
-                            setAdmissionType(DEFAULT_ADMISSION_TYPES[0]);
+                            setAdmissionType("");
                           }
                         }}
                         style={{
@@ -1195,7 +1205,7 @@ export default function InpatientAdmissionPage({ setNotice, onNavigate }: Props)
                 size="sm"
                 onClick={() => {
                   saveCustomTypes([]);
-                  setAdmissionType(DEFAULT_ADMISSION_TYPES[0]);
+                  setAdmissionType("");
                   setNotice({ type: "info", message: "Reset to default types." });
                 }}
                 style={{ color: "#64748b" }}

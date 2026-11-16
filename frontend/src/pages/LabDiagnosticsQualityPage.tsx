@@ -562,7 +562,7 @@ function MaintenanceForm({ equipmentId, logs, setNotice, onSaved }: { equipmentI
 function ReagentLotForm({ setNotice, onSaved }: { setNotice: Dispatch<SetStateAction<Notice | null>>; onSaved: () => void }) {
   const [itemName, setItemName] = useState("");
   const [lotNo, setLotNo] = useState("");
-  const [quantity, setQuantity] = useState(0);
+  const [quantity, setQuantity] = useState<number | "">("");
   const [unit, setUnit] = useState("");
   const [expiry, setExpiry] = useState("");
   const [storage, setStorage] = useState("");
@@ -575,7 +575,7 @@ function ReagentLotForm({ setNotice, onSaved }: { setNotice: Dispatch<SetStateAc
     if (
       await submitAction(
         setNotice,
-        () => apiFetch("/api/diag/reagent-lots", { method: "POST", body: JSON.stringify({ item_name: itemName, lot_no: lotNo, quantity, unit, expiry_date: expiry || null, storage_location: storage }) }),
+        () => apiFetch("/api/diag/reagent-lots", { method: "POST", body: JSON.stringify({ item_name: itemName, lot_no: lotNo, quantity: Number(quantity) || 0, unit, expiry_date: expiry || null, storage_location: storage }) }),
         "Could not add reagent lot.",
         "Lot received."
       )
@@ -588,7 +588,7 @@ function ReagentLotForm({ setNotice, onSaved }: { setNotice: Dispatch<SetStateAc
     <div className="diag-form-grid">
       <div><Label>Item name</Label><Input value={itemName} onChange={(e) => setItemName(e.target.value)} /></div>
       <div><Label>Lot / batch no.</Label><Input value={lotNo} onChange={(e) => setLotNo(e.target.value)} /></div>
-      <div><Label>Quantity</Label><Input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /></div>
+      <div><Label>Quantity</Label><Input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value === "" ? "" : Number(e.target.value))} /></div>
       <div><Label>Unit</Label><Input value={unit} onChange={(e) => setUnit(e.target.value)} /></div>
       <div><Label>Expiry date</Label><Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} /></div>
       <div><Label>Storage location</Label><Input value={storage} onChange={(e) => setStorage(e.target.value)} /></div>

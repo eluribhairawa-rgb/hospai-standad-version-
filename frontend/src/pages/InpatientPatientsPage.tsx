@@ -85,7 +85,7 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
   const [dischargePreview, setDischargePreview] = useState<DischargeBillPreview | null>(null);
   const [loadingDischargePreview, setLoadingDischargePreview] = useState(false);
   const [dischargeForm, setDischargeForm] = useState({
-    discount: "0",
+    discount: "",
     return_excess: true,
     refund_method: "Cash",
     payment_mode: "cash",
@@ -164,7 +164,7 @@ export default function InpatientPatientsPage({ setNotice, onNavigate }: Props) 
     setDischargeStep("bill");
     setDischargePreview(null);
     setDischargeForm({
-      discount: "0",
+      discount: "",
       return_excess: true,
       refund_method: "Cash",
       // An insured stay is billed to the insurer; nothing is collected from the patient by default.
