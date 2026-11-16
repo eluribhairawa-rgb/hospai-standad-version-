@@ -468,10 +468,14 @@ const PAGE_SUBTITLES: Record<string, string> = {
   admin: "Clinic administration panel.",
 };
 
-const DEFAULT_IDLE_TIMEOUT_SECONDS = 20 * 60;
+const DEFAULT_IDLE_TIMEOUT_SECONDS = 8 * 60 * 60;
 
 function formatMinutes(ms: number): string {
   const minutes = Math.round((ms / 60000) * 10) / 10;
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
   return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 

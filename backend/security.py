@@ -26,7 +26,7 @@ SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "hospai_session")
 # Inactivity timeout. Every user-driven request slides the expiry forward by
 # this much; the session ends after this long with no activity. Fractional
 # values are allowed (used by the automated tests to keep idle waits short).
-SESSION_TTL_MINUTES = float(os.getenv("SESSION_TTL_MINUTES", "20"))
+SESSION_TTL_MINUTES = float(os.getenv("SESSION_TTL_MINUTES", "480"))
 SESSION_TTL_SECONDS = int(round(SESSION_TTL_MINUTES * 60))
 SESSION_PEPPER = os.getenv("SESSION_PEPPER", "")
 

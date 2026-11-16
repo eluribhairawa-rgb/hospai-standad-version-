@@ -5,7 +5,7 @@ const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "wheel", "touchsta
 const TICK_MS = 1_000;
 // Throttle for persisting activity to localStorage on high-frequency events.
 const SHARED_WRITE_THROTTLE_MS = 2_000;
-const WARNING_LEAD_MS = 2 * 60_000;
+const WARNING_LEAD_MS = 5 * 60_000;
 const KEEPALIVE_MIN_GAP_MS = 60_000;
 
 export type IdleLogoutState = {
