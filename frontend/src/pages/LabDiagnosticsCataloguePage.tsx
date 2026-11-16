@@ -445,10 +445,11 @@ export default function LabDiagnosticsCataloguePage({ setNotice }: Props) {
 
               {editTab === "pricing" && selected && (
                 <table className="diag-data-table">
-                  <thead><tr><th>Rate</th><th>Payer type</th><th>Changed by</th><th>Changed at</th></tr></thead>
+                  <thead><tr><th>Rate</th><th>Previous rate</th><th>Payer type</th><th>Changed by</th><th>Changed at</th></tr></thead>
                   <tbody>
-                    {(selected.pricing_history || []).map((h) => (
-                      <tr key={h.id}><td>Rs. {h.rate}</td><td>{h.payer_type}</td><td>{h.changed_by || "-"}</td><td>{new Date(h.changed_at).toLocaleString()}</td></tr>
+                    {(selected.pricing_history || []).map((h, i, rows) => (
+                      // Rows arrive newest first, so the next row is the rate this one replaced.
+                      <tr key={h.id}><td>Rs. {h.rate}</td><td>{rows[i + 1] ? `Rs. ${rows[i + 1].rate}` : "Initial rate"}</td><td>{h.payer_type}</td><td>{h.changed_by || "-"}</td><td>{new Date(h.changed_at).toLocaleString()}</td></tr>
                     ))}
                   </tbody>
                 </table>
