@@ -9785,6 +9785,23 @@ button.hosp-rev-due-row:hover .hosp-pay-pill {
   align-items: center;
 }
 
+.doctors-history-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.doctors-history-scroll .table-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface, #fff);
+}
+
+.doctors-history-count {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
 .block-date {
   display: block;
   font-size: 0.9rem;

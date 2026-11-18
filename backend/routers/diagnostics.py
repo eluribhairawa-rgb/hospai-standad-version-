@@ -255,8 +255,8 @@ def diag_invoice_record_payment(invoice_id: int, request: Request, payload: dict
 
 @router.get("/diag/lab/worklist")
 def diag_lab_worklist(stage: Optional[str] = None, q: Optional[str] = None, priority: Optional[str] = None,
-                       db: Session = Depends(get_audited_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
-    return {"items": filter_rows(lq.list_diag_lab_worklist(db, stage=stage, search=q, priority=priority), scope)}
+                       date: Optional[str] = None, db: Session = Depends(get_audited_db), user: dict = Depends(require_permissions("diag.read")), scope: set | None = Depends(patient_scope)):
+    return {"items": filter_rows(lq.list_diag_lab_worklist(db, stage=stage, search=q, priority=priority, order_date=date), scope)}
 
 
 @router.get("/diag/lab/items/{item_id}")

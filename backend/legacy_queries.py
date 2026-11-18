@@ -1086,7 +1086,25 @@ def get_all_patients(db, hospital_id=None, visit_status=None):
         rows = [row for row in rows if row["is_inpatient"]]
     elif normalized_status == "op":
         rows = [row for row in rows if not row["is_inpatient"]]
-    return rows
+    # Overlay the latest recorded height/weight (captured at registration into patient_vitals) like search_patients does,
+    # so the profile editor shows them.
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT ON (patient_id) patient_id, weight, height FROM patient_vitals "
+            "ORDER BY patient_id, recorded_at DESC, id DESC"
+        )
+        latest = {r["patient_id"]: r for r in cursor.fetchall()}
+    merged = []
+    for row in rows:
+        row_dict = dict(row)
+        v = latest.get(row_dict.get("patient_id"))
+        if v:
+            for k in ("weight", "height"):
+                if v[k] is not None:
+                    row_dict[k] = v[k]
+        merged.append(row_dict)
+    return merged
 
 
 
@@ -1250,7 +1268,7 @@ def add_patient_vitals(db, patient_id, data):
         except ValueError: return None
 
     pulse = parse_int(data.get("pulse"))
-    temperature = normalize_temperature_c(data.get("temperature"))
+    temperature = normalize_temperature_f(data.get("temperature"))
     weight = parse_float(data.get("weight"))
     height = parse_float(data.get("height"))
     spo2 = parse_float(data.get("spo2"))
@@ -1296,21 +1314,21 @@ def add_patient_vitals(db, patient_id, data):
         return None
 
 
-def normalize_temperature_c(value, strict=False):
-    """Body temperature in degrees Celsius. A reading of 50 or more can only be Fahrenheit (older forms, OCR) and is
-    converted. Out-of-range values (not 30-45 C) raise ValueError when strict, else are dropped."""
+def normalize_temperature_f(value, strict=False):
+    """Body temperature in degrees Fahrenheit. A reading of 30-50 can only be Celsius (older forms, OCR) and is
+    converted. Out-of-range values (not 86-113 F) raise ValueError when strict, else are dropped."""
     if value in ("", None, "null"):
         return None
     try:
         t = float(str(value).replace("°", "").replace("C", "").replace("F", "").strip())
     except (TypeError, ValueError):
         return None
-    if t >= 50:
-        t = (t - 32.0) * 5.0 / 9.0
+    if 30.0 <= t <= 50.0:
+        t = t * 9.0 / 5.0 + 32.0
     t = round(t, 1)
-    if not 30.0 <= t <= 45.0:
+    if not 86.0 <= t <= 113.0:
         if strict:
-            raise ValueError("Temperature must be between 30 and 45 °C.")
+            raise ValueError("Temperature must be between 86 and 113 °F.")
         return None
     return t
 
@@ -1350,7 +1368,7 @@ def record_vitals(db, patient_id, data, username, encounter_id=None, admission_i
                 patient_id,
                 str(data.get("bp") or "").strip() or None,
                 parse_int(data.get("pulse")),
-                normalize_temperature_c(data.get("temperature"), strict=True),
+                normalize_temperature_f(data.get("temperature"), strict=True),
                 parse_float(data.get("spo2")),
                 parse_float(data.get("weight")),
                 parse_float(data.get("height")),
@@ -2886,6 +2904,7 @@ def list_appointments(db, appointment_date=None, status=None, visit_type=None, d
                 p.gender AS gender,
                 p.weight AS weight,
                 p.height AS height,
+                p.symptoms AS symptoms,
                 p.phone AS mobile,
                 p.phone AS phone,
                 p.created_at AS registration_date,
@@ -12027,7 +12046,7 @@ def get_diag_patient_running_charges(db, admission_id):
 _HAS_RELEASED_REPORT_SQL = "EXISTS (SELECT 1 FROM diag_reports rr WHERE rr.order_item_id = oi.id AND rr.status IN ('released', 'amended'))"
 
 
-def list_diag_lab_worklist(db, stage=None, search=None, priority=None):
+def list_diag_lab_worklist(db, stage=None, search=None, priority=None, order_date=None):
     """stage: awaiting_collection | collected | received | testing | results_entered | for_review | released"""
     with get_connection(db) as conn:
         cursor = conn.cursor()
@@ -12036,6 +12055,9 @@ def list_diag_lab_worklist(db, stage=None, search=None, priority=None):
         if priority:
             clauses.append("o.priority = ?")
             params.append(priority)
+        if order_date:
+            clauses.append("DATE(o.created_at) = DATE(?)")
+            params.append(order_date)
         if search:
             like = f"%{search.strip().lower()}%"
             clauses.append("(LOWER(p.name) LIKE ? OR LOWER(p.last_name) LIKE ? OR LOWER(p.patient_id) LIKE ? OR LOWER(sp.specimen_no) LIKE ?)")
@@ -14164,7 +14186,7 @@ def get_admission_clinical_history(db, identifier, hospital_id=None):
                 bp_str = f"BP: {v.get('bp_systolic')}/{v.get('bp_diastolic')} mmHg" if v.get("bp_systolic") else (f"BP: {v.get('blood_pressure')}" if v.get("blood_pressure") else "")
                 pulse_str = f"Pulse: {v.get('heart_rate') or v.get('pulse')} bpm" if (v.get('heart_rate') or v.get('pulse')) else ""
                 spo2_str = f"SpO2: {v.get('spo2')}%" if v.get('spo2') else ""
-                temp_str = f"Temp: {v.get('temperature')}°C" if v.get('temperature') else ""
+                temp_str = f"Temp: {v.get('temperature')}°F" if v.get('temperature') else ""
                 v_parts = ", ".join(filter(None, [bp_str, pulse_str, temp_str, spo2_str]))
                 treatment_lines.append(f"   [{v_time_str}] {v_parts or 'Vitals stable'}")
         else:

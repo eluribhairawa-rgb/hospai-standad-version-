@@ -95,6 +95,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState("awaiting_collection");
   const [search, setSearch] = useState("");
+  const [filterDate, setFilterDate] = useState(""); // ISO yyyy-mm-dd; empty shows every date
   const [selected, setSelected] = useState<WorklistRow | null>(null);
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
@@ -122,7 +123,7 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
   const load = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ stage, ...(search.trim() ? { q: search.trim() } : {}) });
+      const params = new URLSearchParams({ stage, ...(search.trim() ? { q: search.trim() } : {}), ...(filterDate ? { date: filterDate } : {}) });
       const data = await apiFetch<{ items: WorklistRow[] }>(`/api/diag/lab/worklist?${params}`);
       setRows(data.items || []);
     } catch (err: any) {
@@ -134,14 +135,15 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
 
   const loadStageCounts = async () => {
     try {
-      const results = await Promise.all(STAGES.map((s) => apiFetch<{ items: WorklistRow[] }>(`/api/diag/lab/worklist?stage=${s.key}`)));
+      const dateParam = filterDate ? `&date=${encodeURIComponent(filterDate)}` : "";
+      const results = await Promise.all(STAGES.map((s) => apiFetch<{ items: WorklistRow[] }>(`/api/diag/lab/worklist?stage=${s.key}${dateParam}`)));
       const next: Record<string, number> = {};
       STAGES.forEach((s, idx) => { next[s.key] = (results[idx].items || []).length; });
       setStageCounts(next);
     } catch { /* KPI counts are supplementary; worklist itself still loads independently */ }
   };
 
-  useEffect(() => { void load(); void loadStageCounts(); }, [stage]);
+  useEffect(() => { void load(); void loadStageCounts(); }, [stage, filterDate]);
   useEffect(() => { const t = window.setTimeout(() => void load(), 300); return () => window.clearTimeout(t); }, [search]);
   useEffect(() => { apiFetch<{ vendors: Vendor[] }>("/api/lab/vendors-list").then((d) => setVendors(d.vendors || [])).catch(() => {}); }, []);
   useEffect(() => { apiFetch<{ equipment: Equipment[] }>("/api/diag/equipment").then((d) => setEquipmentList(d.equipment || [])).catch(() => {}); }, []);
@@ -433,7 +435,20 @@ export default function LabDiagnosticsLabPage({ setNotice, onNavigate }: Props) 
             </TabsTrigger>
           ))}
         </Tabs>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "12px" }}>
+            <span>Date</span>
+            <input
+              type="date"
+              aria-label="Filter worklist by date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              style={{ height: "32px", padding: "0 8px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+            />
+          </label>
+          {filterDate && (
+            <Button variant="ghost" size="sm" onClick={() => setFilterDate("")}>All dates</Button>
+          )}
           {onNavigate && (
             <Button
               variant="secondary"

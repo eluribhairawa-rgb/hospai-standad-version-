@@ -1,7 +1,7 @@
 // Orders & Billing: one order screen for all four service types (In-house, External,
 // Outsourcing, Home Visit). Patient Details changes per type; Select Services and the
 // Order summary (bill, discount, remarks, Save Draft / Generate Invoice) are shared.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FiClock, FiTrash2 } from "react-icons/fi";
 import { Button, Input, Label, Modal, Select, Textarea } from "../components/ui";
@@ -101,6 +101,9 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
   // ---- draft / checkout ----
   const [draft, setDraft] = useState<{ id: number; orderNo: string; signature: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Investigations advised in the patient's latest e-prescription (free text), and the patient they were auto-loaded for.
+  const [rxTests, setRxTests] = useState("");
+  const rxAutoLoadedFor = useRef("");
   const [checkout, setCheckout] = useState<{ order: LabOrder; invoice: LabInvoice | null } | null>(null);
 
   useEffect(() => {
@@ -133,6 +136,13 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
     setPatient(p);
     setEncounters([]);
     setEncounterKey("");
+    setRxTests("");
+    rxAutoLoadedFor.current = "";
+    if (serviceType === "IN_HOUSE") {
+      apiFetch<{ prescriptions?: { lab_tests?: string | null }[] }>(`/api/prescriptions?patient_id=${encodeURIComponent(p.patient_id)}`)
+        .then((d) => setRxTests((d.prescriptions || []).find((r) => (r.lab_tests || "").trim())?.lab_tests?.trim() || ""))
+        .catch(() => {});
+    }
     if (serviceType === "HOME_VISIT" && p.address) setAddress((a) => a || p.address || "");
     if (serviceType !== "IN_HOUSE") return;
     const [appts, admissions] = await Promise.all([
@@ -186,6 +196,37 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
   const allShownSelected = shown.length > 0 && shown.every((s) => selected.has(s.id));
   const toggleAllShown = () => (allShownSelected ? shown.forEach((s) => remove(s.id)) : shown.forEach(add));
   const patchLine = (id: number, patch: Partial<Line>) => setLines((prev) => prev.map((l) => (l.service_id === id ? { ...l, ...patch } : l)));
+
+  // ---- e-prescription: advised investigations -> order summary ----
+  const loadEPrescription = useCallback((silent: boolean) => {
+    const tokens = rxTests.split(/[\n,;]+/).map((t) => t.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim()).filter(Boolean);
+    if (tokens.length === 0) {
+      if (!silent) setNotice({ type: "info", message: "No investigations advised in this patient's e-prescription." });
+      return;
+    }
+    const norm = (v: string) => v.toLowerCase().replace(/\s+/g, " ").trim();
+    const matched: DiagService[] = [];
+    const unmatched: string[] = [];
+    tokens.forEach((t) => {
+      const q = norm(t);
+      const hit = services.find((s) => norm(s.name) === q || norm(s.code) === q)
+        || (q.length >= 3 ? services.find((s) => norm(s.name).includes(q) || (norm(s.name).length >= 3 && q.includes(norm(s.name)))) : undefined);
+      if (hit) { if (!matched.some((m) => m.id === hit.id)) matched.push(hit); } else unmatched.push(t);
+    });
+    matched.forEach(add);
+    if (silent && matched.length === 0) return;
+    setNotice({
+      type: unmatched.length ? "warning" : "success",
+      message: `${matched.length} test(s) loaded from the e-prescription.${unmatched.length ? ` Not found in the catalogue: ${unmatched.join(", ")}.` : ""}`,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rxTests, services, setNotice]);
+  useEffect(() => {
+    if (serviceType !== "IN_HOUSE" || !patient || !rxTests || services.length === 0) return;
+    if (rxAutoLoadedFor.current === patient.patient_id) return;
+    rxAutoLoadedFor.current = patient.patient_id;
+    loadEPrescription(true);
+  }, [serviceType, patient, rxTests, services, loadEPrescription]);
 
   // ---- bill ----
   const gross = lines.reduce((sum, l) => sum + l.rate, 0);
@@ -398,7 +439,14 @@ export default function LabOrderWorkspace({ serviceType, setNotice, onOrderSaved
 
         {/* --------------------------------------------------------- services --- */}
         <section className="diag-card">
-          <div className="lab-ob-card-head"><h3>Select Services</h3></div>
+          <div className="lab-ob-card-head"><h3>Select Services</h3>
+            {serviceType === "IN_HOUSE" && patient && (
+              <Button type="button" variant="secondary" size="sm" disabled={!rxTests} onClick={() => loadEPrescription(false)}
+                title={rxTests ? "Add the tests advised in the doctor's e-prescription" : "No investigations advised in the e-prescription"}>
+                Load e-Prescription
+              </Button>
+            )}
+          </div>
           <Input placeholder="Search test name or code" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="lab-ob-tabs">
             {SERVICE_TABS.map((t) => {

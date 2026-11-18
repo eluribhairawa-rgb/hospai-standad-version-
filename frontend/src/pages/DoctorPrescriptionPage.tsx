@@ -600,9 +600,9 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
     put(f.diagnosis, setDiagnosis, "Diagnosis");
     put(f.vitals.bp, setVitalsBp, "BP");
     put(f.vitals.pulse, setVitalsPulse, "Pulse");
-    // A scanned sheet may carry a Fahrenheit reading; the field is in degrees Celsius.
+    // A scanned sheet may carry a Celsius reading; the field is in degrees Fahrenheit.
     const scannedTemp = parseFloat(String(f.vitals.temperature || "").replace(/[^0-9.]/g, ""));
-    put(Number.isFinite(scannedTemp) ? String(scannedTemp >= 50 ? Math.round(((scannedTemp - 32) * 5 / 9) * 10) / 10 : scannedTemp) : "", setVitalsTemp, "Temperature");
+    put(Number.isFinite(scannedTemp) ? String(scannedTemp < 50 ? Math.round((scannedTemp * 9 / 5 + 32) * 10) / 10 : scannedTemp) : "", setVitalsTemp, "Temperature");
     put(f.vitals.weight, setVitalsWeight, "Weight");
     put(f.vitals.spo2, setVitalsSpo2, "SpO2");
     put(f.labs.fbs, setLabFbs, "FBS");
@@ -995,7 +995,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
         }
         if (latest.temperature !== null && latest.temperature !== undefined && String(latest.temperature).trim() !== "") {
           const tStr = String(latest.temperature).trim();
-          setVitalsTemp(tStr.includes("°") ? tStr : `${tStr} °C`);
+          setVitalsTemp(tStr.includes("°") ? tStr : `${tStr} °F`);
         }
         if (latest.weight !== null && latest.weight !== undefined && String(latest.weight).trim() !== "") {
           const wStr = String(latest.weight).trim();
@@ -3066,7 +3066,7 @@ export default function DoctorPrescriptionPage({ setNotice, onOpenPatient, onNav
                   style={{ fontSize: "12px", padding: "6px 8px" }}
                   value={vitalsTemp}
                   onChange={(e) => setVitalsTemp(e.target.value)}
-                  placeholder="e.g. 37.0 °C"
+                  placeholder="e.g. 98.6 °F"
                 />
               </div>
               <div className="doctor-rx-field">

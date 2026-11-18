@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { apiFetch, reportError } from "../lib/api";
 import { formatPhone, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
@@ -6,6 +6,7 @@ import { generatePDFBlob, downloadPDF, printPDF, patientFilename } from "../lib/
 import type { StandardPdfPayload } from "../lib/exportService";
 import { Button, Modal } from "../components/ui";
 import type { Notice, Patient } from "../types";
+import type { ReportDetail } from "../lib/diagReports";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -174,7 +175,9 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
   const [payMode, setPayMode] = useState("");
   const [paying, setPaying] = useState(false);
   const [exporting, setExporting] = useState<"" | "pdf" | "print">("");
-  const [reportModal, setReportModal] = useState<{ title: string; loading: boolean; content: Record<string, unknown> | null } | null>(null);
+  // Document viewer: the generated PDF is rendered inline, with print and download.
+  const [docPreview, setDocPreview] = useState<{ title: string; loading: boolean; blob: Blob | null; url: string | null; filename: string } | null>(null);
+  const docPreviewUrl = useRef<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("selected_journey_patient");
@@ -308,17 +311,73 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
     });
   };
 
-  const openReport = async (reportId: number, title: string) => {
-    setReportModal({ title, loading: true, content: null });
+  const closeDocPreview = () => {
+    if (docPreviewUrl.current) { URL.revokeObjectURL(docPreviewUrl.current); docPreviewUrl.current = null; }
+    setDocPreview(null);
+  };
+  useEffect(() => () => { if (docPreviewUrl.current) URL.revokeObjectURL(docPreviewUrl.current); }, []);
+
+  /** Builds the branded PDF for one document on the server and shows it in the preview modal. */
+  const openDocumentPdf = async (title: string, build: () => Promise<{ subtitle: string; suffix: string; sections: StandardPdfPayload["sections"]; totals?: StandardPdfPayload["totals"] }>) => {
+    if (!journey) return;
+    setDocPreview({ title, loading: true, blob: null, url: null, filename: "" });
     try {
-      const data = await apiFetch<{ content: Record<string, unknown> | string; status: string; authorized_by?: string; released_at?: string }>(`/api/diag/reports/${reportId}`);
-      const content = typeof data.content === "string" ? { text: data.content } : (data.content || {});
-      setReportModal({ title, loading: false, content: { ...content, "Authorized by": data.authorized_by, "Released at": data.released_at, "Status": data.status } });
+      const doc = await build();
+      const mobile = splitStoredPhone(journey.patient.phone, journey.patient.phone_country_code);
+      const { blob, filename } = await generatePDFBlob({
+        title, subtitle: doc.subtitle, operator_name: "HospAI",
+        filename: patientFilename(journey.patient.name, journey.patient.patient_id, doc.suffix),
+        patient_info: {
+          patient_name: journey.patient.name, patient_id: journey.patient.patient_id,
+          age: journey.patient.age ?? undefined, gender: journey.patient.gender ?? undefined,
+          consulting_doctor: journey.doctor_name ?? undefined, department: journey.department ?? undefined,
+          mobile: mobile.value ? formatPhone(mobile.countryCode, mobile.value) : undefined,
+        },
+        sections: doc.sections, totals: doc.totals,
+      }, { dated: false });
+      if (docPreviewUrl.current) URL.revokeObjectURL(docPreviewUrl.current);
+      const url = URL.createObjectURL(blob);
+      docPreviewUrl.current = url;
+      setDocPreview({ title, loading: false, blob, url, filename });
     } catch (error) {
-      setReportModal(null);
-      reportError(setNotice, error as { message?: string; status?: number }, "Unable to load report.");
+      setDocPreview(null);
+      reportError(setNotice, error as { message?: string; status?: number }, `Unable to generate the ${title.toLowerCase()} PDF.`);
     }
   };
+
+  const openReport = (reportId: number, title: string) => openDocumentPdf(title, async () => {
+    const data = await apiFetch<ReportDetail>(`/api/diag/reports/${reportId}`);
+    const content: Record<string, string> = typeof data.content === "string" ? { summary: data.content } : (data.content || {});
+    const item = data.order_item || {};
+    const sections: StandardPdfPayload["sections"] = [{
+      title: "Report Details", headers: ["Item", "Details"],
+      rows: [
+        ["Order", data.order_no || "-"], ["Test", data.service_name || "-"], ["Version", String(data.version ?? "-")],
+        ["Status", data.status || "-"], ["Authorized by", data.authorized_by || "-"],
+        ["Released at", (data.released_at || data.authorized_at || "-").toString().slice(0, 16).replace("T", " ")],
+      ],
+    }];
+    if (data.report_type === "LAB") {
+      const results: any[] = item.results || [];
+      sections.push({
+        title: "Results", headers: ["Parameter", "Result", "Unit", "Reference range", "Flag"],
+        rows: results.length ? results.map((r) => [
+          r.parameter_name, String(r.value_numeric ?? r.value_text ?? "-"), r.unit || "-",
+          r.ref_range_text || `${r.ref_low ?? ""}-${r.ref_high ?? ""}`, r.flag ? String(r.flag).replace("_", " ").toUpperCase() : "-",
+        ]) : [["No results recorded", "-", "-", "-", "-"]],
+      });
+      if (content.summary) sections.push({ title: "Summary", headers: ["Item", "Details"], rows: [["Summary", content.summary]] });
+    } else {
+      sections.push({
+        title: "Findings", headers: ["Item", "Details"],
+        rows: [
+          ["Clinical indication", content.clinical_indication || item.clinical_indication || "-"], ["Comparison", content.comparison || "-"],
+          ["Technique", content.technique || "-"], ["Findings", content.findings || "-"], ["Impression", content.impression || "-"],
+        ],
+      });
+    }
+    return { subtitle: `${data.service_name || title} · Order ${data.order_no || ""}`, suffix: `${data.report_type === "LAB" ? "Lab" : "Imaging"}_${data.order_no || reportId}`, sections };
+  });
 
   const buildPdfPayload = (): Omit<StandardPdfPayload, "filename"> & { filename: string } => {
     if (!journey || !journey.selected) throw new Error("No journey loaded.");
@@ -438,7 +497,7 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
       title: "Patient Journey Summary",
       subtitle: `${journey.selected.label} · ${journey.selected.start?.slice(0, 10) || ""}${journey.selected.end && journey.selected.end !== journey.selected.start ? ` – ${journey.selected.end.slice(0, 10)}` : ""}`,
       filename: patientFilename(journey.patient.name, journey.patient.patient_id),
-      operator_name: "HospAI System",
+      operator_name: "HospAI",
       patient_info: {
         patient_name: journey.patient.name, patient_id: journey.patient.patient_id,
         age: journey.patient.age ?? undefined, gender: journey.patient.gender ?? undefined,
@@ -965,22 +1024,47 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
                             if (evt?.report_id) void openReport(evt.report_id, d.label);
                           } else if (d.type === "pharmacy_slip") {
                             const evt = journey.events.find((e) => e.type === "pharmacy_issued" && e.items && e.items.length > 0);
-                            setReportModal({ title: "Pharmacy issue slip", loading: false, content: { "Medicines": evt?.items?.map((it) => `${it.name} × ${it.quantity} = ${formatCurrency(it.amount)}`).join("; ") || "-" } });
+                            void openDocumentPdf("Pharmacy issue slip", async () => {
+                              const items = evt?.items || [];
+                              const total = items.reduce((sum, it) => sum + it.amount, 0);
+                              const rows: string[][] = items.map((it) => [it.name, String(it.quantity), formatCurrency(it.unit_price), formatCurrency(it.amount)]);
+                              if (evt?.gst && evt.gst > 0) {
+                                rows.push(["Subtotal", "", "", formatCurrency(evt.subtotal || total)], ["GST / Tax", "", "", formatCurrency(evt.gst)]);
+                                rows.push(["Total (incl. GST)", "", "", formatCurrency(evt.charge || total + evt.gst)]);
+                              } else rows.push(["Total", "", "", formatCurrency(total)]);
+                              return { subtitle: `${evt?.invoice_no ? `Invoice ${evt.invoice_no} · ` : ""}${evt?.date || ""}`, suffix: `Pharmacy${evt?.invoice_no ? `_${evt.invoice_no}` : ""}`,
+                                sections: [{ title: "Medicines Issued", headers: ["Medicine", "Quantity", "Unit price", "Amount"], rows: rows.length ? rows : [["No items", "", "", ""]] }] };
+                            });
                           } else if (d.type === "final_bill") {
-                            setReportModal({ title: "Final bill", loading: false, content: { "Total charges": formatCurrency(fs.total_charges), "Payments received": formatCurrency(fs.payments_received), "Outstanding": formatCurrency(fs.outstanding) } });
+                            void openDocumentPdf("Final bill", async () => ({
+                              subtitle: journey.selected?.label || "Final bill", suffix: "Final_Bill",
+                              sections: [
+                                { title: "Charges by Category", headers: ["Category", "Amount"], rows: fs.categories.length ? fs.categories.map((c) => [c.label, formatCurrency(c.amount)]) : [["Total charges", formatCurrency(fs.total_charges)]] },
+                                ...(journey.payments.length ? [{ title: "Payments Received", headers: ["Date", "Mode", "Reference", "Invoice", "Amount"], rows: journey.payments.map((p) => [`${p.date} ${p.time}`, p.mode, p.reference, p.invoice_no || "-", formatCurrency(p.amount)]) }] : []),
+                              ],
+                              totals: { subtotal: formatCurrency(fs.total_charges), grand_total: formatCurrency(fs.total_charges), amount_received: formatCurrency(fs.payments_received), balance: formatCurrency(fs.outstanding) },
+                            }));
                           } else if (d.type === "discharge_summary") {
                             const evt = journey.events.find((e) => e.type === "discharge");
-                            setReportModal({ title: "Discharge summary", loading: false, content: { "Discharged": `${evt?.date || ""} ${evt?.time || ""}`, "Notes": evt?.subtitle || "-" } });
+                            void openDocumentPdf("Discharge summary", async () => ({
+                              subtitle: journey.selected?.label || "Discharge summary", suffix: "Discharge_Summary",
+                              sections: [{ title: "Discharge Details", headers: ["Item", "Details"], rows: [["Discharged", `${evt?.date || ""} ${evt?.time || ""}`.trim() || "-"], ["Notes", evt?.subtitle || "-"]] }],
+                            }));
                           } else if (d.type === "prescription") {
-                            const rx = journey.events.find((e) => e.type === "prescription")?.prescription;
-                            setReportModal({ title: "Prescription", loading: false, content: rx ? {
-                              "Reference": `RX-${rx.id}`,
-                              "Medicines": rx.medicines.map((m) => [m.name, m.dosage, m.frequency, m.duration, m.instructions].filter(Boolean).join(" · ")).join("; ") || "-",
-                              ...(rx.diagnosis ? { "Diagnosis": rx.diagnosis } : {}),
-                              ...(rx.lab_tests ? { "Tests advised": rx.lab_tests } : {}),
-                              ...(rx.advice ? { "Advice": rx.advice } : {}),
-                              ...(rx.follow_up_date ? { "Follow-up": rx.follow_up_date } : {}),
-                            } : { "Reference": `RX-${d.ref}` } });
+                            const rxEvt = journey.events.find((e) => e.type === "prescription");
+                            const rx = rxEvt?.prescription;
+                            void openDocumentPdf("Prescription", async () => {
+                              const notes = [
+                                rx?.diagnosis ? ["Diagnosis", rx.diagnosis] : null, rx?.lab_tests ? ["Tests advised", rx.lab_tests] : null,
+                                rx?.advice ? ["Advice", rx.advice] : null, rx?.follow_up_date ? ["Follow-up", rx.follow_up_date] : null,
+                              ].filter(Boolean) as string[][];
+                              return { subtitle: `RX-${rx?.id ?? d.ref ?? ""} · ${rxEvt?.date || ""}`, suffix: `Prescription_RX-${rx?.id ?? d.ref ?? ""}`,
+                                sections: [
+                                  { title: "Medicines", headers: ["Medicine", "Dosage", "Frequency", "Duration", "Instructions"],
+                                    rows: rx?.medicines?.length ? rx.medicines.map((m) => [m.name, m.dosage || "-", m.frequency || "-", m.duration || "-", m.instructions || "-"]) : [["No medicines prescribed", "-", "-", "-", "-"]] },
+                                  ...(notes.length ? [{ title: "Prescription notes", headers: ["Item", "Details"], rows: notes }] : []),
+                                ] };
+                            });
                           }
                         }}
                         style={{ fontSize: "12px", fontWeight: 700, color: "#0891b2", background: "none", border: "none", cursor: "pointer" }}
@@ -1042,24 +1126,21 @@ export default function PatientJourneyPage({ setNotice, onNavigate, selectedPati
         </div>
       )}
 
-      {reportModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setReportModal(null)}>
-          <div style={{ background: "#fff", borderRadius: "14px", padding: "22px 26px", minWidth: "380px", maxWidth: "560px", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>{reportModal.title}</h3>
-              <button type="button" onClick={() => setReportModal(null)} style={{ background: "none", border: "none", fontSize: "16px", cursor: "pointer", color: "#64748b" }}>✕</button>
-            </div>
-            {reportModal.loading ? (
-              <p style={{ color: "#64748b", fontSize: "13px" }}>Loading…</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {Object.entries(reportModal.content || {}).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => (
-                  <div key={k} style={{ fontSize: "13px" }}>
-                    <span style={{ color: "#64748b", fontWeight: 600 }}>{k}: </span>
-                    <span style={{ color: "#0f172a" }}>{String(v)}</span>
-                  </div>
-                ))}
+      {docPreview && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={closeDocPreview}>
+          <div style={{ background: "#fff", borderRadius: "14px", padding: "16px 18px", width: "min(900px, 94vw)", height: "88vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 800, color: "#0f172a" }}>{docPreview.title}</h3>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <Button size="sm" variant="secondary" disabled={!docPreview.blob} onClick={() => docPreview.blob && printPDF(docPreview.blob)}>Print</Button>
+                <Button size="sm" variant="secondary" disabled={!docPreview.blob} onClick={() => docPreview.blob && downloadPDF(docPreview.blob, docPreview.filename)}>Download</Button>
+                <button type="button" aria-label="Close" onClick={closeDocPreview} style={{ background: "none", border: "none", fontSize: "16px", cursor: "pointer", color: "#64748b" }}>✕</button>
               </div>
+            </div>
+            {docPreview.loading || !docPreview.url ? (
+              <p style={{ color: "#64748b", fontSize: "13px" }}>Generating PDF…</p>
+            ) : (
+              <iframe title={docPreview.title} src={docPreview.url} style={{ flex: 1, width: "100%", border: "1px solid #e2e8f0", borderRadius: "8px" }} />
             )}
           </div>
         </div>

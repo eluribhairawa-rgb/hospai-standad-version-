@@ -298,7 +298,7 @@ export default function RoleDashboard({ user, onNavigate, onLogout, setNotice, d
       title: `${personaLabel} Dashboard Report`,
       subtitle: `${data?.scope_label || "Personal dashboard"} · ${currentDateLabel}`,
       filename: `${persona}_dashboard`,
-      operator_name: user?.full_name || user?.username || "HospAI System",
+      operator_name: user?.full_name || user?.username || "HospAI",
       sections,
     } as StandardPdfPayload);
   };

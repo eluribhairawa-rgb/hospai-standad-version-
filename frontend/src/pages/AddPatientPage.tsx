@@ -87,6 +87,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     fee?: string | number;
     paymentMode?: string;
     tokenNo?: string | number;
+    chiefComplaint?: string;
+    vitals?: { bp?: string; pulse?: string; temperature?: string; weight?: string; spo2?: string };
   } | null>(null);
 
   // Existing Patient Search / Auto-fill state
@@ -593,6 +595,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         department: undefined,
         fee: undefined,
         paymentMode,
+        chiefComplaint: symptoms.trim(),
+        vitals: { bp: vitalsBp, pulse: vitalsPulse, temperature: vitalsTemp, weight: vitalsWeight, spo2: vitalsSpo2 },
       };
       setLastRegisteredPatient(regSummary);
 
@@ -922,6 +926,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       department: selectedDepartment,
       fee: consultationFee,
       paymentMode,
+      chiefComplaint: symptoms.trim(),
+      vitals: { bp: vitalsBp, pulse: vitalsPulse, temperature: vitalsTemp, weight: vitalsWeight, spo2: vitalsSpo2 },
     } : null);
 
     if (!target?.patientId) {
@@ -956,6 +962,18 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             <div><strong>Consultation Fee:</strong> ₹ ${target.fee ?? consultationFee} (${target.paymentMode || paymentMode})</div>
           ` : ""}
         </div>
+        ${target.visitType === "OP" || target.visitType === "IP" ? (() => {
+          const v = (target as any).vitals || {};
+          const cc = escapeBrandText(String((target as any).chiefComplaint || "").trim());
+          const val = (x?: string) => (x && String(x).trim() ? escapeBrandText(String(x).trim()) : "—");
+          return `
+        <div style="font-size: 12.5px; color: #1e293b; margin-bottom: 14px; border: 1px solid #ccfbf1; border-radius: 6px; padding: 8px 12px;">
+          <div style="font-size: 11px; font-weight: 700; color: #00828a; letter-spacing: 0.5px; margin-bottom: 4px;">VITALS</div>
+          <div>BP: <strong>${val(v.bp)}</strong> mmHg &nbsp; Pulse: <strong>${val(v.pulse)}</strong> bpm &nbsp; Temp: <strong>${val(v.temperature)}</strong> °F &nbsp; Weight: <strong>${val(v.weight)}</strong> kg &nbsp; SpO₂: <strong>${val(v.spo2)}</strong> %</div>
+          <div style="font-size: 11px; font-weight: 700; color: #00828a; letter-spacing: 0.5px; margin: 8px 0 4px;">DIAGNOSIS / CHIEF COMPLAINT</div>
+          <div>${cc || "—"}</div>
+        </div>`;
+        })() : ""}
         <div style="text-align: center; font-size: 11px; color: #64748b; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
           Please present this slip at the Consultation Desk or Admission Counter.
         </div>
@@ -2070,7 +2088,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
             {[
               { label: "BP", value: vitalsBp, set: (v: string) => setVitalsBp(v.replace(/[^0-9/]/g, "").slice(0, 7)), placeholder: "120/80" },
               { label: "Pulse (bpm)", value: vitalsPulse, set: (v: string) => setVitalsPulse(v.replace(/\D/g, "").slice(0, 3)), placeholder: "72" },
-              { label: "Temp (°C)", value: vitalsTemp, set: (v: string) => setVitalsTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "37.0" },
+              { label: "Temp (°F)", value: vitalsTemp, set: (v: string) => setVitalsTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "98.6" },
               { label: "SpO2 (%)", value: vitalsSpo2, set: (v: string) => setVitalsSpo2(v.replace(/\D/g, "").slice(0, 3)), placeholder: "98" },
               { label: "Resp. Rate", value: vitalsRespRate, set: (v: string) => setVitalsRespRate(v.replace(/\D/g, "").slice(0, 3)), placeholder: "/min" },
               { label: "Height (cm)", value: vitalsHeight, set: (v: string) => setVitalsHeight(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "170" },
@@ -2778,7 +2796,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
               {[
                 { label: "BP", value: emergencyBp, set: (v: string) => setEmergencyBp(v.replace(/[^0-9/]/g, "").slice(0, 7)), placeholder: "120/80" },
                 { label: "Pulse", value: emergencyPulse, set: (v: string) => setEmergencyPulse(v.replace(/\D/g, "").slice(0, 3)), placeholder: "bpm" },
-                { label: "Temp (°C)", value: emergencyTemp, set: (v: string) => setEmergencyTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "37.0" },
+                { label: "Temp (°F)", value: emergencyTemp, set: (v: string) => setEmergencyTemp(v.replace(/[^0-9.]/g, "").slice(0, 5)), placeholder: "98.6" },
                 { label: "SpO2 (%)", value: emergencySpo2, set: (v: string) => setEmergencySpo2(v.replace(/\D/g, "").slice(0, 3)), placeholder: "98" },
                 { label: "Resp. Rate", value: emergencyRespRate, set: (v: string) => setEmergencyRespRate(v.replace(/\D/g, "").slice(0, 3)), placeholder: "/min" },
                 { label: "Pain (0-10)", value: emergencyPainScore, set: (v: string) => setEmergencyPainScore(clampPainScore(v)), placeholder: "0-10" },

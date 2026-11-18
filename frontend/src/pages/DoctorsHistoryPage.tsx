@@ -59,8 +59,6 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
   const [loading, setLoading] = useState(false);
 
   // Pagination states
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5; // Displays 5 entries per page as in the screenshot
 
   const loadFilterOptions = async () => {
     try {
@@ -112,7 +110,6 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
         `/api/doctors-history?${queryParams.toString()}`
       );
       setConsultations(res.history || []);
-      setCurrentPage(1); // Reset to page 1 on new query
     } catch (err) {
       reportError(setNotice, err as { message?: string; status?: number }, "Unable to fetch consultation history.");
     } finally {
@@ -160,7 +157,6 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
       apiFetch<{ history?: ConsultationRecord[] }>("/api/doctors-history")
         .then((res) => {
           setConsultations(res.history || []);
-          setCurrentPage(1);
         })
         .catch((err) => {
           reportError(setNotice, err as { message?: string; status?: number }, "Unable to reset consultation history.");
@@ -172,9 +168,6 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
   };
 
   // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(consultations.length / pageSize));
-  const safePage = Math.min(currentPage, totalPages);
-  const pagedRecords = consultations.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const getStatusBadgeClass = (status: string) => {
     const s = (status || "").toLowerCase();
@@ -313,6 +306,7 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
           {loading ? (
             <p className="muted loading-text">Loading consultation history...</p>
           ) : (
+            <div className="doctors-history-scroll">
             <Table className="module-table module-table-doctors-history" aria-label="Doctors history table">
               <TableHead>
                 <TableCell>Date & Time</TableCell>
@@ -325,8 +319,8 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
                 <TableCell>Action</TableCell>
               </TableHead>
 
-              {pagedRecords.length > 0 ? (
-                pagedRecords.map((record) => (
+              {consultations.length > 0 ? (
+                consultations.map((record) => (
                   <TableRow key={record.id}>
                     <TableCell>{formatAppointmentDate(record.appointment_date)}</TableCell>
                     <TableCell>{record.registered_patient_name || record.patient_name}</TableCell>
@@ -366,42 +360,11 @@ export default function DoctorsHistoryPage({ setNotice, onOpenPatient, scopedDoc
                 </TableRow>
               )}
             </Table>
+            </div>
           )}
 
-          <div className="queue-pagination doctors-history-pagination">
-            <span>
-              Showing {consultations.length ? (safePage - 1) * pageSize + 1 : 0} to{" "}
-              {Math.min(safePage * pageSize, consultations.length)} of {consultations.length} entries
-            </span>
-            <div>
-              <button
-                type="button"
-                disabled={safePage === 1 || loading}
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-              >
-                ‹
-              </button>
-              {Array.from({ length: totalPages }, (_, index) => index + 1)
-                .slice(0, 5)
-                .map((page) => (
-                  <button
-                    key={page}
-                    type="button"
-                    className={safePage === page ? "active" : ""}
-                    disabled={loading}
-                    onClick={() => setCurrentPage(page)}
-                  >
-                    {page}
-                  </button>
-                ))}
-              <button
-                type="button"
-                disabled={safePage === totalPages || loading}
-                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-              >
-                ›
-              </button>
-            </div>
+          <div className="doctors-history-count muted">
+            {consultations.length} {consultations.length === 1 ? "entry" : "entries"}
           </div>
         </CardContent>
       </Card>

@@ -143,7 +143,7 @@ def _ip_stay_events(cursor, patient_id, admission_id, admission, beds, window_st
     for v in _all(cursor):
         d, t = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
         vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
-                f"Temp {v['temperature']} °C" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
+                f"Temp {v['temperature']} °F" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
                 f"RR {v['respiratory_rate']}" if v.get("respiratory_rate") else "", f"Sugar {v['blood_sugar']}" if v.get("blood_sugar") else ""]
         events.append({"date": d, "time": t, "type": "vitals", "title": "Vitals recorded",
                         "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})
@@ -807,7 +807,7 @@ def get_patient_journey(db, patient_id, encounter_type=None, encounter_id=None):
                         continue
                     vd, vt = _split_dt(v["recorded_at"] or v["record_time"] or v["created_at"])
                     vals = [f"BP {v['bp']}" if v["bp"] else "", f"Pulse {v['pulse']}" if v["pulse"] else "",
-                            f"Temp {v['temperature']} °C" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
+                            f"Temp {v['temperature']} °F" if v["temperature"] else "", f"SpO2 {v['spo2']}%" if v["spo2"] else "",
                             f"Weight {v['weight']} kg" if v.get("weight") else "", f"Height {v['height']} cm" if v.get("height") else ""]
                     events.append({"date": vd, "time": vt, "type": "vitals", "title": "Vitals recorded",
                                     "subtitle": " · ".join(x for x in vals if x) or "Vitals recorded", "charge": None, "received": None})

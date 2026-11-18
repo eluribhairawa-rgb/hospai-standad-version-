@@ -557,7 +557,7 @@ function ExecutiveDashboard({
       title: "Executive Dashboard Report",
       subtitle: `Hospital Performance & Revenue Summary for ${currentDateLabel}`,
       filename: "Executive_Dashboard",
-      operator_name: user?.full_name || "HospAI System",
+      operator_name: user?.full_name || "HospAI",
       sections: [
         {
           title: "Dashboard Summary",

@@ -106,7 +106,7 @@ def patient_module_history(patient_id: str, module: str, db: Session = Depends(g
 
         if module == "vitals":
             sections = [
-                _section(cursor, "Patient Vitals & Clinical Measurements", ["Recorded At", "BP", "Pulse (bpm)", "Temp (°C)", "SpO2 (%)", "Weight (kg)", "Height (cm)", "Recorded By"],
+                _section(cursor, "Patient Vitals & Clinical Measurements", ["Recorded At", "BP", "Pulse (bpm)", "Temp (°F)", "SpO2 (%)", "Weight (kg)", "Height (cm)", "Recorded By"],
                          f"""SELECT COALESCE(recorded_at, record_time, created_at), COALESCE(bp, '—'), pulse, temperature, spo2, weight, height, COALESCE(recorded_by, 'Clinical Staff')
                              FROM patient_vitals WHERE patient_id = ? ORDER BY COALESCE(recorded_at, record_time, created_at) DESC LIMIT {LIMIT}""", (patient_id,)),
             ]
@@ -154,7 +154,7 @@ def patient_module_history(patient_id: str, module: str, db: Session = Depends(g
                      f"""SELECT appointment_date, COALESCE(token_no::text, '—'), visit_type, COALESCE(department, '—'), COALESCE(doctor_name, '—'), status, consultation_fee,
                                 consultation_started_at, consultation_completed_at, COALESCE(notes, '—')
                          FROM appointments WHERE patient_id = ? ORDER BY appointment_date DESC LIMIT {LIMIT}""", (patient_id,)),
-            _section(cursor, "3. Clinical Vitals & Triage Measurements", ["Recorded At", "BP", "Pulse (bpm)", "Temp (°C)", "SpO2 (%)", "Weight (kg)", "Height (cm)", "Recorded By"],
+            _section(cursor, "3. Clinical Vitals & Triage Measurements", ["Recorded At", "BP", "Pulse (bpm)", "Temp (°F)", "SpO2 (%)", "Weight (kg)", "Height (cm)", "Recorded By"],
                      f"""SELECT COALESCE(recorded_at, record_time, created_at), COALESCE(bp, '—'), pulse, temperature, spo2, weight, height, COALESCE(recorded_by, 'Clinical Staff')
                          FROM patient_vitals WHERE patient_id = ? ORDER BY COALESCE(recorded_at, record_time, created_at) DESC LIMIT {LIMIT}""", (patient_id,)),
             _section(cursor, "4. Doctor Prescriptions & Medications", ["Date", "Prescription", "Doctor", "Diagnosis", "Medicines", "Dispense status"],
