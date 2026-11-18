@@ -535,7 +535,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
                   <th style={{ padding: "0.6rem 0.75rem" }}>Unit / Form</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>Active Batches</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>Total Quantity</th>
-                  <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }} title="Returned by patients, awaiting release to stock">Returned (Pending)</th>
+                  <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }} title="Returned by patients, awaiting release to stock (already counted in Total Quantity)">Returned (Pending)</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "right" }}>Stock Value</th>
                   <th style={{ padding: "0.6rem 0.75rem" }}>Earliest Expiry</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>Stock Status</th>
@@ -558,7 +558,12 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
                         {m.batch_count}
                       </td>
                       <td style={{ padding: "0.6rem 0.75rem", textAlign: "center", fontWeight: 700 }}>
-                        {m.total_qty}
+                        {m.total_qty + m.returned_pending}
+                        {m.returned_pending > 0 && (
+                          <div style={{ fontSize: "0.68rem", fontWeight: 500, color: "#64748b" }}>
+                            {m.total_qty} sellable + {m.returned_pending} returned
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "0.6rem 0.75rem", textAlign: "center", fontWeight: 700, color: m.returned_pending ? "#b45309" : "#94a3b8" }}>
                         {m.returned_pending || "-"}
