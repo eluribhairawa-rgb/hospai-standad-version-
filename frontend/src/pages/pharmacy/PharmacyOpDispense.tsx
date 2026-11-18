@@ -1061,9 +1061,14 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         const res2 = await apiFetch<{ sales: any[] }>(`/api/pharmacy/sales?patient_id=${encodeURIComponent(q)}`);
         sales = res2?.sales || [];
       }
+      if (sales.length === 0) {
+        // Not an invoice or UHID: treat it as a patient name or mobile number.
+        const res3 = await apiFetch<{ sales: any[] }>(`/api/pharmacy/sales?customer=${encodeURIComponent(q)}`);
+        sales = res3?.sales || [];
+      }
       setFoundSales(sales);
       if (sales.length === 0) {
-        setNotice({ type: "info", message: "No sales found for this invoice or UHID." });
+        setNotice({ type: "info", message: "No sales found for this invoice, UHID, patient name or mobile number." });
       }
     } catch (err) {
       reportError(setNotice, err as any, "Error searching sales");
@@ -2268,14 +2273,14 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
             OP Medicine Returns & Refunds
           </h2>
           <p style={{ color: "#64748b", fontSize: "0.875rem", margin: "0 0 1.25rem 0" }}>
-            Find a completed OP sale by Invoice Number or Patient UHID to process return, refund, and traceable stock adjustment:
+            Find a completed OP sale by Invoice Number, Patient UHID, Patient Name or Mobile Number to process return, refund, and traceable stock adjustment:
           </p>
 
           <div style={{ display: "flex", gap: "0.75rem", maxWidth: "500px", marginBottom: "1.5rem" }}>
             <Input
               value={searchInvoiceNo}
               onChange={(e) => setSearchInvoiceNo(e.target.value)}
-              placeholder="Enter Invoice Number or Patient UHID..."
+              placeholder="Invoice No, UHID, patient name or mobile..."
               onKeyDown={(e) => {
                 if (e.key === "Enter") void handleLookupInvoice();
               }}
@@ -2294,7 +2299,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                 <thead>
                   <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
                     <th style={{ padding: "0.5rem" }}>Medicine</th>
-                    <th style={{ padding: "0.5rem" }}>Patient UHID</th>
+                    <th style={{ padding: "0.5rem" }}>Patient</th>
                     <th style={{ padding: "0.5rem" }}>Sold Qty</th>
                     <th style={{ padding: "0.5rem" }}>Returned</th>
                     <th style={{ padding: "0.5rem", textAlign: "right" }}>Price</th>
@@ -2309,7 +2314,11 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     return (
                       <tr key={sale.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                         <td style={{ padding: "0.5rem", fontWeight: 600 }}>{sale.medicine_name}</td>
-                        <td style={{ padding: "0.5rem", color: "#64748b" }}>{sale.patient_id}</td>
+                        <td style={{ padding: "0.5rem", color: "#64748b" }}>
+                          {sale.customer_name && <div style={{ color: "#0f172a", fontWeight: 600 }}>{sale.customer_name}</div>}
+                          <div>{sale.patient_id || "-"}</div>
+                          {sale.customer_mobile && <div style={{ fontSize: "0.75rem" }}>{sale.customer_mobile}</div>}
+                        </td>
                         <td style={{ padding: "0.5rem", fontWeight: 700 }}>{sale.quantity}</td>
                         <td style={{ padding: "0.5rem", color: returned > 0 ? "#c2410c" : "#94a3b8" }}>{returned}</td>
                         <td style={{ padding: "0.5rem", textAlign: "right" }}>₹{sale.unit_price}</td>

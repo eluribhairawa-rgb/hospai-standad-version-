@@ -7516,7 +7516,7 @@ def create_pharmacy_sale(db, data):
 
 
 def list_pharmacy_sales(db, medicine_name=None, invoice_id=None, patient_id=None, admission_id=None, billing_type=None,
-                         from_date=None, to_date=None, q=None):
+                         from_date=None, to_date=None, q=None, customer=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
         clauses = []
@@ -7562,6 +7562,19 @@ def list_pharmacy_sales(db, medicine_name=None, invoice_id=None, patient_id=None
             clauses.append("(ps.patient_id ILIKE ? OR ps.medicine_name ILIKE ? OR inv.invoice_no ILIKE ? OR inv.referral_source ILIKE ? OR inv.patient_mobile ILIKE ?)")
             like = f"%{str(q).strip()}%"
             params.extend([like, like, like, like, like])
+        if customer:
+            # Patient name (first, last or full, registered or walk-in) or mobile number (any digits of it).
+            text_like = f"%{' '.join(str(customer).split())}%"
+            digits = "".join(ch for ch in str(customer) if ch.isdigit())
+            name_sql = ("(TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.middle_name, '') || ' ' || COALESCE(p.last_name, '')) ILIKE ? "
+                        "OR TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) ILIKE ? OR inv.referral_source ILIKE ?)")
+            if len(digits) >= 4 and len(digits) >= len("".join(ch for ch in str(customer) if ch.isalnum())) - 1:
+                clauses.append(f"({name_sql} OR REGEXP_REPLACE(COALESCE(p.phone, ''), '[^0-9]', '', 'g') LIKE ? "
+                               "OR REGEXP_REPLACE(COALESCE(inv.patient_mobile, ''), '[^0-9]', '', 'g') LIKE ?)")
+                params.extend([text_like, text_like, text_like, f"%{digits}%", f"%{digits}%"])
+            else:
+                clauses.append(name_sql)
+                params.extend([text_like, text_like, text_like])
         where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         cursor.execute(
             f"""

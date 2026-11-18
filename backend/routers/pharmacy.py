@@ -431,11 +431,11 @@ def pharmacy_insurance_case_settle(claim_id: int, request: Request, payload: dic
 def pharmacy_sales_list(medicine_name: str | None = None, patient_id: str | None = None, invoice_id: str | None = None,
                          admission_id: int | None = None, billing_type: str | None = None,
                          from_date: str | None = None, to_date: str | None = None, q: str | None = None,
-                         db: Session = Depends(get_db),
+                         customer: str | None = None, db: Session = Depends(get_db),
                          user: dict = Depends(require_permissions("pharmacy.read")), scope: set | None = Depends(patient_scope)):
     return {"sales": filter_rows(rows_to_dicts(lq.list_pharmacy_sales(db, medicine_name=medicine_name, patient_id=patient_id,
                                                            invoice_id=invoice_id, admission_id=admission_id, billing_type=billing_type,
-                                                           from_date=from_date, to_date=to_date, q=q)), scope)}
+                                                           from_date=from_date, to_date=to_date, q=q, customer=customer)), scope)}
 
 
 @router.get("/summary")

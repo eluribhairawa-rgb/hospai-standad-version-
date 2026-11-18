@@ -1750,7 +1750,8 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
           ))}
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+          <table style={{ width: "100%", minWidth: "900px", tableLayout: "fixed", borderCollapse: "collapse", fontSize: "12.5px" }}>
+            <colgroup><col style={{ width: "9%" }} /><col style={{ width: "12%" }} /><col style={{ width: "14%" }} /><col style={{ width: "14%" }} /><col style={{ width: "5%" }} /><col style={{ width: "9%" }} /><col style={{ width: "13%" }} /><col style={{ width: "10%" }} /><col style={{ width: "8%" }} /><col style={{ width: "6%" }} /></colgroup>
             <thead>
               <tr style={{ borderBottom: "1px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
                 <th style={{ padding: "8px 10px" }}>Credit Note</th>
@@ -1762,7 +1763,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                 <th style={{ padding: "8px 10px" }}>Reason</th>
                 <th style={{ padding: "8px 10px" }}>Stock status</th>
                 <th style={{ padding: "8px 10px" }}>Date / Time</th>
-                <th style={{ padding: "8px 10px" }}>Action</th>
+                <th style={{ padding: "8px 10px", textAlign: "center" }}>Print</th>
               </tr>
             </thead>
             <tbody>
@@ -1899,7 +1900,8 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+          <table style={{ width: "100%", minWidth: "960px", tableLayout: "fixed", borderCollapse: "collapse", fontSize: "12.5px" }}>
+            <colgroup><col style={{ width: "7%" }} /><col style={{ width: "9%" }} /><col style={{ width: "13%" }} /><col style={{ width: "9%" }} /><col style={{ width: "13%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "7%" }} /><col style={{ width: "6%" }} /></colgroup>
             <thead>
               <tr style={{ borderBottom: "1px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
                 <th style={{ padding: "8px 10px" }}>Reference</th>
@@ -1912,7 +1914,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                 <th style={{ padding: "8px 10px", textAlign: "right" }}>Profits</th>
                 <th style={{ padding: "8px 10px" }}>Payment / Status</th>
                 <th style={{ padding: "8px 10px" }}>Date / Time</th>
-                <th style={{ padding: "8px 10px" }}>Action</th>
+                <th style={{ padding: "8px 10px", textAlign: "center" }}>Print</th>
               </tr>
             </thead>
             <tbody>
@@ -1935,10 +1937,10 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                     <td style={{ padding: "8px 10px", fontWeight: 700, color: "#334155" }}>
                       {t.reference}
                     </td>
-                    <td style={{ padding: "8px 10px", fontWeight: 600, color: "#0f172a" }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 600, color: "#0f172a", wordBreak: "break-word" }}>
                       {t.patient_name}
                     </td>
-                    <td style={{ padding: "8px 10px", color: "#64748b", fontFamily: "monospace" }}>
+                    <td style={{ padding: "8px 10px", color: "#64748b", fontFamily: "monospace", fontSize: "11.5px", wordBreak: "break-all" }}>
                       {t.uhid}
                     </td>
                     <td style={{ padding: "8px 10px" }}>
@@ -2033,7 +2035,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                     <td style={{ padding: "8px 10px", color: "#64748b", fontSize: "11.5px" }}>
                       {t.date_time}
                     </td>
-                    <td style={{ padding: "8px 10px" }}>
+                    <td style={{ padding: "8px 6px", textAlign: "center" }}>
                       <button
                         type="button"
                         title={`Print all operations for ${t.patient_name || "this patient"}`}
