@@ -6,6 +6,7 @@ import { Button, Input, Modal } from "../../components/ui";
 import { apiFetch, reportError } from "../../lib/api";
 import { downloadCsv } from "../../lib/csvExport";
 import type { Notice } from "../../types";
+import { fetchAndPrintCreditNote } from "../../lib/creditNote";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -27,6 +28,7 @@ type StockItem = {
   mfg_date?: string;
   expiry_date?: string;
   qty_available: number;
+  qty_quarantine?: number;
   quantity: number;
   unit_price: number;
   mrp?: number;
@@ -54,10 +56,12 @@ type StockMovement = {
 
 export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<
-    "overview" | "ledger" | "batches" | "low_stock" | "adjustments" | "physical_count" | "transfers"
+    "overview" | "ledger" | "batches" | "low_stock" | "returns" | "adjustments" | "physical_count" | "transfers"
   >("overview");
 
   const [loading, setLoading] = useState(false);
+  const [patientReturns, setPatientReturns] = useState<any[]>([]);
+  const [reviewingReturn, setReviewingReturn] = useState<number | null>(null);
   const [stock, setStock] = useState<StockItem[]>([]);
   const [ledgerMovements, setLedgerMovements] = useState<StockMovement[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -188,8 +192,32 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
     );
   };
 
+  const loadPatientReturns = async () => {
+    try {
+      const res = await apiFetch<{ returns: any[] }>("/api/pharmacy/returns");
+      setPatientReturns(res.returns || []);
+    } catch (err) {
+      reportError(setNotice, err as any, "Failed to load patient returns");
+    }
+  };
+
+  // Release puts the returned units back into saleable stock; reject writes them off.
+  const reviewReturn = async (id: number, action: "release" | "reject") => {
+    setReviewingReturn(id);
+    try {
+      await apiFetch(`/api/pharmacy/returns/${id}/${action}`, { method: "POST", body: JSON.stringify(action === "reject" ? { reason: "Returned medicine not fit for resale" } : {}) });
+      setNotice({ type: "success", message: action === "release" ? "Returned medicine added back to available stock." : "Returned medicine written off." });
+      await Promise.all([loadPatientReturns(), loadStock(), loadLedger()]);
+    } catch (err) {
+      reportError(setNotice, err as any, `Failed to ${action} return`);
+    } finally {
+      setReviewingReturn(null);
+    }
+  };
+
   useEffect(() => {
     void loadStock();
+    void loadPatientReturns();
     void loadLedger();
     void loadSuppliers();
   }, []);
@@ -211,6 +239,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
       medicine_name: string;
       generic_name?: string;
       total_qty: number;
+      returned_pending: number;
       batch_count: number;
       total_val: number;
       nearest_exp?: string;
@@ -227,6 +256,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
         medicine_name: item.medicine_name,
         generic_name: item.generic_name,
         total_qty: 0,
+        returned_pending: 0,
         batch_count: 0,
         total_val: 0,
         nearest_exp: item.expiry_date,
@@ -238,6 +268,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
       };
 
       existing.total_qty += item.qty_available;
+      existing.returned_pending += item.qty_quarantine || 0;
       existing.batch_count += 1;
       existing.total_val += (item.qty_available * (item.unit_price || 0));
       if (!existing.unit_type && item.unit_type) existing.unit_type = item.unit_type;
@@ -455,6 +486,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
           { id: "ledger", label: "Stock Ledger (Audit Trail)" },
           { id: "batches", label: "Batch & Expiry" },
           { id: "low_stock", label: `Low Stock (${lowStockItems.length})` },
+          { id: "returns", label: `Patient Returns (${patientReturns.filter((r) => r.status === "quarantined").length} pending)` },
           { id: "physical_count", label: "Physical Stock Count" },
           { id: "transfers", label: "Stock Transfer" },
         ].map((tab) => (
@@ -503,6 +535,7 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
                   <th style={{ padding: "0.6rem 0.75rem" }}>Unit / Form</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>Active Batches</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>Total Quantity</th>
+                  <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }} title="Returned by patients, awaiting release to stock">Returned (Pending)</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "right" }}>Stock Value</th>
                   <th style={{ padding: "0.6rem 0.75rem" }}>Earliest Expiry</th>
                   <th style={{ padding: "0.6rem 0.75rem", textAlign: "center" }}>Stock Status</th>
@@ -526,6 +559,9 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
                       </td>
                       <td style={{ padding: "0.6rem 0.75rem", textAlign: "center", fontWeight: 700 }}>
                         {m.total_qty}
+                      </td>
+                      <td style={{ padding: "0.6rem 0.75rem", textAlign: "center", fontWeight: 700, color: m.returned_pending ? "#b45309" : "#94a3b8" }}>
+                        {m.returned_pending || "-"}
                       </td>
                       <td style={{ padding: "0.6rem 0.75rem", textAlign: "right", fontWeight: 600, color: "#00828a" }}>
                         ₹{m.total_val.toFixed(2)}
@@ -720,6 +756,65 @@ export default function PharmacyInventoryStock({ setNotice, onNavigate }: Props)
       )}
 
       {/* 4. LOW STOCK */}
+      {activeTab === "returns" && (
+        <div style={{ background: "#ffffff", borderRadius: "10px", padding: "1.25rem", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+          <p style={{ margin: "0 0 1rem 0", color: "#64748b", fontSize: "0.85rem" }}>
+            Medicines returned by patients are held here until checked. <strong>Add to Stock</strong> puts them back into available stock; <strong>Write Off</strong> removes them.
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table className="pharmacy-data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Credit Note</th>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Patient</th>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Medicine</th>
+                  <th style={{ padding: "0.5rem 0.75rem", textAlign: "center" }}>Qty</th>
+                  <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Refund</th>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Reason</th>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Date</th>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Status</th>
+                  <th style={{ padding: "0.5rem 0.75rem" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patientReturns.map((r) => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "0.5rem 0.75rem", fontWeight: 700 }}>CN-{String(r.id).padStart(5, "0")}</td>
+                    <td style={{ padding: "0.5rem 0.75rem" }}>{r.patient_name || "-"}<div style={{ fontSize: "0.72rem", color: "#64748b", fontFamily: "monospace" }}>{r.patient_id || ""}</div></td>
+                    <td style={{ padding: "0.5rem 0.75rem" }}>{r.medicine_name}</td>
+                    <td style={{ padding: "0.5rem 0.75rem", textAlign: "center", fontWeight: 700 }}>{r.quantity}</td>
+                    <td style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>₹{Number(r.refund_amount || 0).toFixed(2)}</td>
+                    <td style={{ padding: "0.5rem 0.75rem", color: "#475569" }}>{r.reason}</td>
+                    <td style={{ padding: "0.5rem 0.75rem", color: "#64748b", fontSize: "0.78rem" }}>{String(r.created_at || "").slice(0, 16).replace("T", " ")}</td>
+                    <td style={{ padding: "0.5rem 0.75rem" }}>
+                      <span style={{ padding: "2px 8px", borderRadius: "12px", fontSize: "0.72rem", fontWeight: 700,
+                        background: r.status === "quarantined" ? "#fef3c7" : r.status === "released" ? "#dcfce7" : "#fee2e2",
+                        color: r.status === "quarantined" ? "#92400e" : r.status === "released" ? "#166534" : "#991b1b" }}>
+                        {r.status === "quarantined" ? "Pending review" : r.status === "released" ? "Added to stock" : "Written off"}
+                      </span>
+                    </td>
+                    <td style={{ padding: "0.5rem 0.75rem", whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", gap: "0.4rem" }}>
+                        {r.status === "quarantined" && (
+                          <>
+                            <Button type="button" size="sm" variant="secondary" disabled={reviewingReturn === r.id} onClick={() => void reviewReturn(r.id, "release")}>Add to Stock</Button>
+                            <Button type="button" size="sm" variant="ghost" disabled={reviewingReturn === r.id} onClick={() => void reviewReturn(r.id, "reject")}>Write Off</Button>
+                          </>
+                        )}
+                        <Button type="button" size="sm" variant="ghost" onClick={() => void fetchAndPrintCreditNote(r.id).catch((err) => reportError(setNotice, err as any, "Unable to print credit note"))}>Credit Note</Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {patientReturns.length === 0 && (
+                  <tr><td colSpan={9} style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8" }}>No patient medicine returns yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {activeTab === "low_stock" && (
         <div style={{ background: "#ffffff", borderRadius: "10px", padding: "1.25rem", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>

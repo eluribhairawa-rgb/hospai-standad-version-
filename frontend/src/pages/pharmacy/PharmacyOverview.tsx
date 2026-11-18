@@ -6,6 +6,7 @@ import type { Notice, Patient } from "../../types";
 import DateCalendarPicker, { toIsoDate, parseIsoDate } from "../../components/DateCalendarPicker";
 import { DonutChart } from "../../components/charts";
 import { printViaIframe } from "../../lib/printViaIframe";
+import { fetchAndPrintCreditNote } from "../../lib/creditNote";
 import { buildPrintDocumentHtml } from "../../lib/printTemplates";
 
 type Props = {
@@ -94,6 +95,14 @@ type PharmacySummary = {
   low_stock_items?: LowStockItem[];
   top_medicines?: TopMedicine[];
   recent_transactions?: RecentTransaction[];
+  returns_summary?: {
+    today_count: number;
+    today_units: number;
+    today_refund: number;
+    pending_review_units: number;
+    pending_review_count: number;
+    recent: { id: number; credit_note_no: string; patient_name: string; uhid: string; medicine_name: string; quantity: number; refund_amount: number; reason?: string; status?: string; date_time: string }[];
+  };
   sales_trend?: { date: string; op_amount: number; ip_amount: number; er_amount: number }[];
   today_activity?: {
     op_dispensations: number;
@@ -500,8 +509,9 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
   }, [chartBars]);
 
   // Print Recent Pharmacy Operations report
-  const handlePrintRecentOperations = () => {
-    const transactions = summary?.recent_transactions || [];
+  const handlePrintRecentOperations = (patientOnly?: RecentTransaction[]) => {
+    const transactions = patientOnly || summary?.recent_transactions || [];
+    const patientLabel = patientOnly?.[0] ? `${patientOnly[0].patient_name || "-"} (${patientOnly[0].uhid || "-"})` : "";
     if (transactions.length === 0) {
       setNotice({ type: "info", message: "No recent pharmacy operations to print." });
       return;
@@ -555,9 +565,10 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
 
     try {
       const html = buildPrintDocumentHtml({
-        title: "Recent Pharmacy Operations",
+        title: patientLabel ? `Pharmacy Operations - ${patientLabel}` : "Recent Pharmacy Operations",
         subtitleLines: [
           "HospAI · Pharmacy Operations & Financial Audit Log",
+          ...(patientLabel ? [`Patient: ${patientLabel}`] : []),
           "Unified audit log across OP Dispensations, Inpatient Issues, and Emergency Orders",
           `Report Date: ${dateRange === toIsoDate(new Date()) ? `Today (${dateRange})` : dateRange}`,
           `Records: ${transactions.length}`,
@@ -1713,6 +1724,81 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
         </div>
       </div>
 
+      {/* PATIENT MEDICINE RETURNS */}
+      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px 20px", marginBottom: "1.25rem", boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
+          <div>
+            <h2 style={{ fontSize: "14px", fontWeight: 700, margin: 0, color: "#0f172a" }}>Patient Medicine Returns</h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "#64748b" }}>Medicines returned by patients, refunds issued and stock awaiting review</p>
+          </div>
+          <button type="button" onClick={() => onNavigate("pharmacy-inventory-stock")}
+            style={{ fontSize: "12px", fontWeight: 700, color: "#00828a", background: "none", border: "none", cursor: "pointer" }}>
+            Review in Stock →
+          </button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "10px", marginBottom: "12px" }}>
+          {[
+            { label: "Returns today", value: String(summary?.returns_summary?.today_count ?? 0), sub: `${summary?.returns_summary?.today_units ?? 0} unit(s)` },
+            { label: "Refunded today", value: `₹${(summary?.returns_summary?.today_refund ?? 0).toFixed(2)}`, sub: "credit notes issued" },
+            { label: "Awaiting stock review", value: String(summary?.returns_summary?.pending_review_units ?? 0), sub: `${summary?.returns_summary?.pending_review_count ?? 0} return(s) pending` },
+          ].map((k) => (
+            <div key={k.label} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 12px" }}>
+              <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>{k.label}</div>
+              <div style={{ fontSize: "20px", fontWeight: 800, color: "#0f172a" }}>{k.value}</div>
+              <div style={{ fontSize: "11px", color: "#94a3b8" }}>{k.sub}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
+                <th style={{ padding: "8px 10px" }}>Credit Note</th>
+                <th style={{ padding: "8px 10px" }}>Patient</th>
+                <th style={{ padding: "8px 10px" }}>UHID</th>
+                <th style={{ padding: "8px 10px" }}>Medicine</th>
+                <th style={{ padding: "8px 10px", textAlign: "center" }}>Qty</th>
+                <th style={{ padding: "8px 10px", textAlign: "right" }}>Refund</th>
+                <th style={{ padding: "8px 10px" }}>Reason</th>
+                <th style={{ padding: "8px 10px" }}>Stock status</th>
+                <th style={{ padding: "8px 10px" }}>Date / Time</th>
+                <th style={{ padding: "8px 10px" }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(summary?.returns_summary?.recent || []).map((r) => (
+                <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <td style={{ padding: "8px 10px", fontWeight: 700, color: "#334155" }}>{r.credit_note_no}</td>
+                  <td style={{ padding: "8px 10px", fontWeight: 600, color: "#0f172a" }}>{r.patient_name}</td>
+                  <td style={{ padding: "8px 10px", color: "#64748b", fontFamily: "monospace" }}>{r.uhid}</td>
+                  <td style={{ padding: "8px 10px", color: "#334155" }}>{r.medicine_name}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 700 }}>{r.quantity}</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹{r.refund_amount.toFixed(2)}</td>
+                  <td style={{ padding: "8px 10px", color: "#475569" }}>{r.reason || "-"}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px",
+                      background: r.status === "quarantined" ? "#fef3c7" : r.status === "released" ? "#dcfce7" : "#fee2e2",
+                      color: r.status === "quarantined" ? "#92400e" : r.status === "released" ? "#166534" : "#991b1b" }}>
+                      {r.status === "quarantined" ? "Pending review" : r.status === "released" ? "Added to stock" : "Written off"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "8px 10px", color: "#64748b", fontSize: "11.5px" }}>{r.date_time.replace("T", " ")}</td>
+                  <td style={{ padding: "8px 10px" }}>
+                    <button type="button" onClick={() => void fetchAndPrintCreditNote(r.id).catch((err) => setNotice({ type: "error", message: err instanceof Error ? err.message : "Unable to print credit note." }))}
+                      style={{ fontSize: "11.5px", fontWeight: 700, color: "#00828a", background: "#f0fdfa", border: "1px solid #ccfbf1", borderRadius: "6px", padding: "3px 9px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                      Credit Note
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {(summary?.returns_summary?.recent || []).length === 0 && (
+                <tr><td colSpan={10} style={{ padding: "18px 8px", textAlign: "center", color: "#94a3b8" }}>No patient medicine returns yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* ========================================================================= */}
       {/* 8. RECENT PHARMACY TRANSACTIONS TABLE */}
       {/* ========================================================================= */}
@@ -1738,7 +1824,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <button
               type="button"
-              onClick={handlePrintRecentOperations}
+              onClick={() => handlePrintRecentOperations()}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1826,6 +1912,7 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                 <th style={{ padding: "8px 10px", textAlign: "right" }}>Profits</th>
                 <th style={{ padding: "8px 10px" }}>Payment / Status</th>
                 <th style={{ padding: "8px 10px" }}>Date / Time</th>
+                <th style={{ padding: "8px 10px" }}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -1946,12 +2033,26 @@ export default function PharmacyOverview({ setNotice, onNavigate }: Props) {
                     <td style={{ padding: "8px 10px", color: "#64748b", fontSize: "11.5px" }}>
                       {t.date_time}
                     </td>
+                    <td style={{ padding: "8px 10px" }}>
+                      <button
+                        type="button"
+                        title={`Print all operations for ${t.patient_name || "this patient"}`}
+                        onClick={() => {
+                          const all = summary?.recent_transactions || [];
+                          const mine = all.filter((x) => (t.uhid ? x.uhid === t.uhid : x.patient_name === t.patient_name));
+                          handlePrintRecentOperations(mine);
+                        }}
+                        style={{ fontSize: "11.5px", fontWeight: 700, color: "#00828a", background: "#f0fdfa", border: "1px solid #ccfbf1", borderRadius: "6px", padding: "3px 9px", cursor: "pointer", whiteSpace: "nowrap" }}
+                      >
+                        Print
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
               {(!summary?.recent_transactions || summary.recent_transactions.length === 0) && (
                 <tr>
-                  <td colSpan={10} style={{ padding: "18px 8px", textAlign: "center", color: "#94a3b8" }}>
+                  <td colSpan={11} style={{ padding: "18px 8px", textAlign: "center", color: "#94a3b8" }}>
                     No recent pharmacy transactions.
                   </td>
                 </tr>

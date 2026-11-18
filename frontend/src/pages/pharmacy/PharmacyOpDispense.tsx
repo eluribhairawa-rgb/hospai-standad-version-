@@ -8,6 +8,8 @@ import type { Notice, Patient } from "../../types";
 import { printViaIframe } from "../../lib/printViaIframe";
 import { buildPrintDocumentHtml, buildPrintLabelsHtml } from "../../lib/printTemplates";
 import { downloadCsv } from "../../lib/csvExport";
+import { printCreditNote } from "../../lib/creditNote";
+import type { CreditNote } from "../../lib/creditNote";
 import { COUNTRY_CODE_RULES, COUNTRY_CODES, parsePhoneInput, validateMobileByCountry, withCountryCode, splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 
 type Props = {
@@ -273,6 +275,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
   const [returnQty, setReturnQty] = useState<string>("1");
   const [returnReason, setReturnReason] = useState<string>("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [lastCreditNote, setLastCreditNote] = useState<CreditNote | null>(null);
 
   // Incoming doctor e-prescriptions (pending / partially dispensed)
   const [incomingRx, setIncomingRx] = useState<IncomingRx[]>([]);
@@ -1085,7 +1088,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
 
     setReturnSubmitting(true);
     try {
-      await apiFetch("/api/pharmacy/returns", {
+      const ret = await apiFetch<{ return_id: number | null; refund_amount?: number | null }>("/api/pharmacy/returns", {
         method: "POST",
         body: JSON.stringify({
           original_sale_id: returnItem.id,
@@ -1094,7 +1097,15 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
         }),
       });
 
-      setNotice({ type: "success", message: `Return processed and refund applied for ${returnItem.medicine_name}.` });
+      let refundText = "";
+      if (ret?.return_id) {
+        try {
+          const res = await apiFetch<{ credit_note: CreditNote }>(`/api/pharmacy/returns/${ret.return_id}/credit-note`);
+          setLastCreditNote(res.credit_note);
+          refundText = ` Refund ₹${res.credit_note.refund_amount.toFixed(2)} (${res.credit_note.credit_note_no}).`;
+        } catch { /* the return is saved; the credit note can be reprinted from Inventory > Patient Returns */ }
+      }
+      setNotice({ type: "success", message: `Return processed and refund applied for ${returnItem.medicine_name}.${refundText}` });
       setReturnItem(null);
       setReturnReason("");
       setReturnQty("1");
@@ -2327,6 +2338,19 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {lastCreditNote && (
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "1rem 1.25rem", maxWidth: "600px", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+              <div style={{ fontSize: "0.875rem", color: "#14532d" }}>
+                <strong>{lastCreditNote.credit_note_no}</strong> · {lastCreditNote.medicine_name} × {lastCreditNote.quantity}
+                <div>Refund amount: <strong>₹{lastCreditNote.refund_amount.toFixed(2)}</strong> ({(lastCreditNote.payment_mode || "cash").toUpperCase()})</div>
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <Button type="button" variant="secondary" onClick={() => printCreditNote(lastCreditNote)}>Print Credit Note</Button>
+                <Button type="button" variant="ghost" onClick={() => setLastCreditNote(null)}>Dismiss</Button>
+              </div>
             </div>
           )}
 

@@ -7405,16 +7405,24 @@ def reject_pharmacy_return(db, return_id, username, reason=None):
 
 
 
+_RETURN_SELECT = """
+    SELECT r.*, pi.medicine_name, pi.batch_no, ps.patient_id, ps.admission_id, ps.invoice_id,
+           ps.unit_price AS unit_price, ps.payment_mode AS payment_mode, ps.billing_type AS billing_type,
+           TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) AS patient_name,
+           inv.invoice_no AS invoice_no,
+           ROUND(CAST(COALESCE(NULLIF(ps.unit_price, 0), ps.amount / NULLIF(ps.quantity, 0), 0) * r.quantity AS numeric), 2) AS refund_amount
+    FROM pharmacy_returns r
+    JOIN pharmacy_inventory pi ON pi.id = r.pharmacy_inventory_id
+    JOIN pharmacy_sales ps ON ps.id = r.original_sale_id
+    LEFT JOIN patients p ON p.patient_id = ps.patient_id
+    LEFT JOIN invoices inv ON inv.id = ps.invoice_id
+"""
+
+
 def list_pharmacy_returns(db, status=None, admission_id=None, patient_id=None):
     with get_connection(db) as conn:
         cursor = conn.cursor()
-        query = """
-            SELECT r.*, pi.medicine_name, pi.batch_no, ps.patient_id, ps.admission_id
-            FROM pharmacy_returns r
-            JOIN pharmacy_inventory pi ON pi.id = r.pharmacy_inventory_id
-            JOIN pharmacy_sales ps ON ps.id = r.original_sale_id
-            WHERE 1=1
-        """
+        query = _RETURN_SELECT + " WHERE 1=1"
         params = []
         if status:
             query += " AND r.status = ?"
@@ -7429,6 +7437,20 @@ def list_pharmacy_returns(db, status=None, admission_id=None, patient_id=None):
         cursor.execute(query, tuple(params))
         return cursor.fetchall()
 
+
+def get_pharmacy_return_receipt(db, return_id):
+    """Credit note data for one return: what was returned, the refund amount and how it was refunded."""
+    with get_connection(db) as conn:
+        cursor = conn.cursor()
+        cursor.execute(_RETURN_SELECT + " WHERE r.id = ?", (return_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        data["credit_note_no"] = f"CN-{int(data['id']):05d}"
+        data["refund_amount"] = float(data.get("refund_amount") or 0)
+        data["unit_price"] = float(data.get("unit_price") or 0)
+        return data
 
 
 def list_stock_movements(db, stock_source=None, medicine_name=None):
@@ -7958,6 +7980,27 @@ def get_pharmacy_summary(db):
                 "status": "Completed",
             })
 
+    # Patient medicine returns: refunds issued, units awaiting restock review, latest returns.
+    all_returns = [dict(r) for r in list_pharmacy_returns(db)]
+    today_str = str(current_ist_datetime().date())
+    today_returns = [r for r in all_returns if str(r.get("created_at") or "")[:10] == today_str and r.get("status") != "rejected"]
+    returns_summary = {
+        "today_count": len(today_returns),
+        "today_units": sum(int(r["quantity"] or 0) for r in today_returns),
+        "today_refund": round(sum(float(r.get("refund_amount") or 0) for r in today_returns), 2),
+        "pending_review_units": sum(int(r["quantity"] or 0) for r in all_returns if r.get("status") == "quarantined"),
+        "pending_review_count": sum(1 for r in all_returns if r.get("status") == "quarantined"),
+        "recent": [
+            {
+                "id": r["id"], "credit_note_no": f"CN-{int(r['id']):05d}", "patient_name": r.get("patient_name") or r.get("patient_id") or "Walk-in",
+                "uhid": r.get("patient_id") or "-", "medicine_name": r["medicine_name"], "quantity": int(r["quantity"] or 0),
+                "refund_amount": float(r.get("refund_amount") or 0), "reason": r.get("reason"), "status": r.get("status"),
+                "date_time": str(r.get("created_at") or "")[:16],
+            }
+            for r in all_returns[:10]
+        ],
+    }
+
     return {
         "low_stock_count": low_stock,
         "out_of_stock_count": out_of_stock,
@@ -7988,6 +8031,7 @@ def get_pharmacy_summary(db):
         "low_stock_items": low_stock_items,
         "top_medicines": top_medicines,
         "recent_transactions": recent_transactions,
+        "returns_summary": returns_summary,
         "sales_trend": sales_trend,
         "today_activity": {
             "op_dispensations": opd_prescriptions_count,

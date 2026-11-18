@@ -274,7 +274,17 @@ def pharmacy_returns_create(request: Request, payload: dict = Body(...), db: Ses
                         {"quantity": payload.get("quantity"), "reason": payload.get("reason")})
         return {"return_id": None, "insurance_bill_reduced": True}
     log_audit_event(db, user, client_ip(request), "create", "pharmacy_returns", str(return_id), {})
-    return {"return_id": return_id}
+    note = lq.get_pharmacy_return_receipt(db, return_id)
+    return {"return_id": return_id, "refund_amount": note["refund_amount"] if note else None}
+
+
+@router.get("/returns/{return_id}/credit-note")
+def pharmacy_return_credit_note(return_id: int, db: Session = Depends(get_db),
+                                 user: dict = Depends(require_permissions("pharmacy.read"))):
+    note = lq.get_pharmacy_return_receipt(db, return_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Return not found.")
+    return {"credit_note": note}
 
 
 @router.post("/returns/{return_id}/release")
