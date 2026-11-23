@@ -122,7 +122,7 @@ def _ip_stay_events(cursor, patient_id, admission_id, admission, beds, window_st
     cursor.execute("SELECT * FROM doctor_clinical_notes WHERE admission_id = ? ORDER BY created_at, id", (admission_id,))
     for n in _all(cursor):
         d, t = _split_dt(n["created_at"])
-        summary = [_dr(n["doctor_name"]) + (f" (entered by nurse {n['created_by']})" if n.get("entered_role") == "nurse" else ""), f"Diagnosis: {n['diagnosis']}" if n["diagnosis"] else "",
+        summary = [_dr(n["doctor_name"]) + (f" (entered by {'nurse' if n.get('entered_role') == 'nurse' else 'staff'} {n['created_by']})" if n.get("entered_role") in ("nurse", "staff") else ""), f"Diagnosis: {n['diagnosis']}" if n["diagnosis"] else "",
                    READY.get(n["discharge_readiness"], ""),
                    (n["objective_analysis"] or n["subjective"] or "")[:140]]
         events.append({"date": d, "time": t, "type": "doctor_note", "title": "Doctor clinical note",

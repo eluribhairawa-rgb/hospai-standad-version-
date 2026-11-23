@@ -91,7 +91,7 @@ const WhatsAppIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-const DEFAULT_FREQUENCIES: string[] = [
+export const DEFAULT_FREQUENCIES: string[] = [
   "1-0-1",
   "1-0-0",
   "0-0-1",
@@ -109,9 +109,9 @@ const DEFAULT_FREQUENCIES: string[] = [
   "Weekly Once",
 ];
 
-const FREQUENCIES_STORAGE_KEY = "hospai_prescription_frequencies";
+export const FREQUENCIES_STORAGE_KEY = "hospai_prescription_frequencies";
 
-function getStoredFrequencies(): string[] {
+export function getStoredFrequencies(): string[] {
   try {
     const raw = localStorage.getItem(FREQUENCIES_STORAGE_KEY);
     if (raw) {
@@ -136,7 +136,7 @@ interface FrequencyComboboxProps {
   placeholder?: string;
 }
 
-const FrequencyCombobox: React.FC<FrequencyComboboxProps> = ({
+export const FrequencyCombobox: React.FC<FrequencyComboboxProps> = ({
   value,
   onChange,
   options,

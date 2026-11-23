@@ -5,6 +5,7 @@ import { doctorsInDepartment, useDoctorDirectory } from "../lib/doctorDirectory"
 import { apiFetch, reportError } from "../lib/api";
 import { formatDateTimeIST } from "../lib/format";
 import type { Notice } from "../types";
+import { DEFAULT_FREQUENCIES, FREQUENCIES_STORAGE_KEY, FrequencyCombobox, getStoredFrequencies } from "./DoctorPrescriptionPage";
 
 type Props = {
   setNotice: Dispatch<SetStateAction<Notice | null>>;
@@ -13,6 +14,8 @@ type Props = {
   /** Nursing staff can enter notes on behalf of the patient's attending doctor. */
   isNurse?: boolean;
   isAdmin?: boolean;
+  /** Any user with write permission can record notes; non-doctors record them on behalf of the attending doctor. */
+  canRecord?: boolean;
   username?: string;
 };
 
@@ -60,6 +63,10 @@ type ClinicalNote = {
   updated_at?: string | null;
 };
 
+type RxMedicine = { medicine_name: string; dosage: string; frequency: string; duration: string; instructions: string };
+const EMPTY_MED: RxMedicine = { medicine_name: "", dosage: "", frequency: "", duration: "", instructions: "" };
+const DURATIONS = ["3 Days", "5 Days", "7 Days", "10 Days", "14 Days", "1 Month", "Continuous"];
+
 const READINESS: Record<string, { label: string; color: string; bg: string }> = {
   not_assessed: { label: "Not assessed", color: "#64748b", bg: "#f1f5f9" },
   not_ready: { label: "Not ready for discharge", color: "#b91c1c", bg: "#fef2f2" },
@@ -90,8 +97,8 @@ function ReadinessBadge({ value }: { value?: string | null }) {
   return <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 9px", borderRadius: 999, color: r.color, background: r.bg }}>{r.label}</span>;
 }
 
-export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNurse = false, isAdmin = false, username = "" }: Props) {
-  const canWrite = !!scopedDoctor || isNurse;
+export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNurse = false, isAdmin = false, canRecord = false, username = "" }: Props) {
+  const canWrite = !!scopedDoctor || isNurse || canRecord;
   const { departments, doctors } = useDoctorDirectory();
   const [transferDept, setTransferDept] = useState("");
   const [transferDoctor, setTransferDoctor] = useState("");
@@ -102,7 +109,7 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
   const canEdit = (n: ClinicalNote) =>
     scopedDoctor
       ? String(n.doctor_name).trim().toLowerCase() === scopedDoctor.trim().toLowerCase()
-      : isNurse && String(n.created_by || "").trim().toLowerCase() === username.trim().toLowerCase();
+      : String(n.created_by || "").trim().toLowerCase() === username.trim().toLowerCase();
   const [patients, setPatients] = useState<AssignedPatient[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -112,6 +119,14 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [medicines, setMedicines] = useState<RxMedicine[]>([{ ...EMPTY_MED }]);
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [freqOptions, setFreqOptions] = useState<string[]>(getStoredFrequencies);
+  const saveFreqOptions = (next: string[]) => {
+    setFreqOptions(next);
+    try { localStorage.setItem(FREQUENCIES_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  const updateMed = (i: number, patch: Partial<RxMedicine>) => setMedicines((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
 
   const selected = patients.find((p) => p.admission_id === selectedId) || null;
 
@@ -143,6 +158,11 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
   };
 
   useEffect(() => { void loadPatients(); }, []);
+  useEffect(() => {
+    apiFetch<{ medicines?: { medicine_name?: string; brand_name?: string }[] }>("/api/pharmacy/medicines")
+      .then((res) => setCatalog(Array.from(new Set((res?.medicines || []).map((m) => String(m.medicine_name || m.brand_name || "").trim()).filter(Boolean)))))
+      .catch(() => setCatalog([]));
+  }, []);
   const loadTransfers = async (admissionId: number) => {
     try {
       const data = await apiFetch<{ transfers?: typeof transfers }>(`/api/admissions/${admissionId}/doctor-transfers`);
@@ -154,6 +174,7 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
 
   useEffect(() => {
     setForm(EMPTY_FORM);
+    setMedicines([{ ...EMPTY_MED }]);
     setEditingId(null);
     setTransferDept("");
     setTransferDoctor("");
@@ -208,19 +229,44 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
 
   const save = async () => {
     if (!selected) return;
-    if (!TEXT_KEYS.some((k) => form[k].trim())) {
-      setNotice({ type: "warning", message: "Enter at least one clinical finding before saving." });
+    const meds = medicines.filter((m) => m.medicine_name.trim());
+    const hasText = TEXT_KEYS.some((k) => form[k].trim());
+    if (!hasText && meds.length === 0) {
+      setNotice({ type: "warning", message: "Enter at least one clinical finding or medicine before saving." });
       return;
     }
     setSaving(true);
     try {
-      if (editingId) {
-        await apiFetch(`/api/doctor-notes/${editingId}`, { method: "PUT", body: JSON.stringify(form) });
-      } else {
-        await apiFetch(`/api/admissions/${selected.admission_id}/doctor-notes`, { method: "POST", body: JSON.stringify(form) });
+      if (hasText) {
+        if (editingId) {
+          await apiFetch(`/api/doctor-notes/${editingId}`, { method: "PUT", body: JSON.stringify(form) });
+        } else {
+          await apiFetch(`/api/admissions/${selected.admission_id}/doctor-notes`, { method: "POST", body: JSON.stringify(form) });
+        }
       }
-      setNotice({ type: "success", message: `${editingId ? "Clinical note updated" : "Clinical note saved"} for ${selected.patient_name}. It now shows in the patient journey and the discharge summary.` });
+      let ordered = 0;
+      if (meds.length) {
+        // Same route as the Doctor Prescription screen: for an admitted patient this raises a
+        // medication order that appears in Pharmacy > IP Dispense.
+        const rx = await apiFetch<{ ip_order?: { items?: number } | null }>("/api/prescriptions", {
+          method: "POST",
+          body: JSON.stringify({
+            patient_id: selected.patient_id,
+            doctor_name: selected.consulting_doctor || scopedDoctor || "",
+            department: selected.department || "",
+            diagnosis: form.diagnosis.trim(),
+            advice: form.advice.trim(),
+            medicines: meds,
+            send_to_pharmacy: true,
+            save_token: `clinical-${selected.admission_id}-${Date.now()}`,
+          }),
+        });
+        ordered = rx?.ip_order?.items || 0;
+      }
+      const base = hasText ? `${editingId ? "Clinical note updated" : "Clinical note saved"} for ${selected.patient_name}.` : `Medicines saved for ${selected.patient_name}.`;
+      setNotice({ type: "success", message: `${base}${ordered ? ` ${ordered} medicine${ordered === 1 ? "" : "s"} sent to IP Dispense.` : hasText ? " It now shows in the patient journey and the discharge summary." : ""}` });
       setForm(EMPTY_FORM);
+      setMedicines([{ ...EMPTY_MED }]);
       setEditingId(null);
       await Promise.all([loadNotes(selected.admission_id), loadPatients()]);
     } catch (error) {
@@ -243,12 +289,12 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
       <div style={{ marginBottom: 16 }}>
         {!canWrite && (
           <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#92400e" }}>
-            You are viewing as an administrator. Only attending doctors and nurses can record clinical notes.
+            You have read-only access. Ask an administrator for write permission to record clinical notes.
           </div>
         )}
-        {isNurse && !scopedDoctor && (
+        {canWrite && !scopedDoctor && (
           <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", fontSize: 12.5, color: "#1e40af" }}>
-            You are entering notes as nursing staff. Each note is recorded under the patient's attending doctor and marked "entered by nurse {username}".
+            Each note you enter is recorded under the patient's attending doctor and marked "entered by {isNurse ? "nurse" : "staff"} {username}".
           </div>
         )}
       </div>
@@ -323,6 +369,67 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
                   </div>
 
                   <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>Medicines (sent to IP Dispense)</div>
+                      {canWrite && !handedOver && (
+                        <Button variant="ghost" onClick={() => setMedicines((p) => [...p, { ...EMPTY_MED }])} disabled={saving} style={{ fontSize: 12 }}>+ Add medicine</Button>
+                      )}
+                    </div>
+                    <p style={{ margin: "2px 0 8px", fontSize: 12.5, color: "#64748b" }}>Optional. Saving raises a medication order for pharmacy to issue to this patient's ward.</p>
+                    <datalist id="clinical-med-catalog">{catalog.map((n) => <option key={n} value={n} />)}</datalist>
+                    <div className="doctor-rx-table-wrap" style={{ minHeight: 0, overflow: "visible" }}>
+                      <table className="doctor-rx-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 35 }}>#</th>
+                            <th style={{ minWidth: 160 }}>Medicine Name</th>
+                            <th style={{ width: 95 }}>Dosage</th>
+                            <th style={{ width: 170 }}>Frequency</th>
+                            <th style={{ width: 120 }}>Duration</th>
+                            <th style={{ minWidth: 130 }}>Instructions</th>
+                            <th style={{ width: 40, textAlign: "center" }}>Del</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {medicines.map((m, i) => (
+                            <tr key={i}>
+                              <td style={{ textAlign: "center", fontWeight: 700, color: "#64748b" }}>{i + 1}</td>
+                              <td><input type="text" className="table-input" list="clinical-med-catalog" placeholder="Medicine name..." value={m.medicine_name} onChange={(e) => updateMed(i, { medicine_name: e.target.value })} disabled={saving || !canWrite} /></td>
+                              <td><input type="text" className="table-input" placeholder="Dosage" value={m.dosage} onChange={(e) => updateMed(i, { dosage: e.target.value })} disabled={saving || !canWrite} /></td>
+                              <td style={{ position: "relative" }}>
+                                <FrequencyCombobox
+                                  value={m.frequency}
+                                  onChange={(val) => updateMed(i, { frequency: val })}
+                                  options={freqOptions}
+                                  onAddOption={(opt) => { if (!freqOptions.includes(opt)) saveFreqOptions([...freqOptions, opt]); }}
+                                  onDeleteOption={(opt) => saveFreqOptions(freqOptions.filter((o) => o !== opt))}
+                                  onResetDefaults={() => saveFreqOptions(DEFAULT_FREQUENCIES)}
+                                />
+                              </td>
+                              <td>
+                                <select className="duration-select" value={m.duration} onChange={(e) => updateMed(i, { duration: e.target.value })} disabled={saving || !canWrite}>
+                                  <option value="">Select duration...</option>
+                                  {DURATIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+                                </select>
+                              </td>
+                              <td><input type="text" className="table-input" placeholder="Instructions (e.g. After Food)" value={m.instructions} onChange={(e) => updateMed(i, { instructions: e.target.value })} disabled={saving || !canWrite} /></td>
+                              <td style={{ textAlign: "center" }}>
+                                <button type="button" className="trash-btn" title="Remove Medicine" disabled={saving}
+                                  onClick={() => setMedicines((p) => (p.length > 1 ? p.filter((_, idx) => idx !== i) : [{ ...EMPTY_MED }]))}>
+                                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  </svg>
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: "1px dashed #cbd5e1", paddingTop: 12 }}>
                     <div style={{ fontSize: 12, fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>Discharge summary details</div>
                     <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#64748b" }}>Optional. Anything written here fills the matching section of the Discharge Summary.</p>
                   </div>
@@ -343,8 +450,8 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
                     <Button variant="primary" onClick={() => void save()} disabled={saving} style={{ background: "#00828a", borderColor: "#00828a" }}>
                       {saving ? "Saving..." : editingId ? "Update note" : "Save clinical note"}
                     </Button>
-                    {(editingId || Object.values(form).some((v) => v && v !== "not_assessed")) && (
-                      <Button variant="ghost" onClick={() => { setForm(EMPTY_FORM); setEditingId(null); }} disabled={saving}>Clear</Button>
+                    {(editingId || medicines.some((m) => m.medicine_name.trim()) || Object.values(form).some((v) => v && v !== "not_assessed")) && (
+                      <Button variant="ghost" onClick={() => { setForm(EMPTY_FORM); setMedicines([{ ...EMPTY_MED }]); setEditingId(null); }} disabled={saving}>Clear</Button>
                     )}
                   </div>
                 )}
@@ -412,7 +519,7 @@ export default function DoctorClinicalNotesPage({ setNotice, scopedDoctor, isNur
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <div style={{ fontSize: 12.5, color: "#475569" }}>
                         <strong style={{ color: "#0f172a" }}>{n.doctor_name}</strong>
-                        {n.entered_role === "nurse" ? ` (entered by nurse ${n.created_by})` : ""} · <strong style={{ color: "#0f172a" }}>{selected.patient_id}</strong> · {formatDateTimeIST(n.created_at)}
+                        {n.entered_role === "nurse" || n.entered_role === "staff" ? ` (entered by ${n.entered_role} ${n.created_by})` : ""} · <strong style={{ color: "#0f172a" }}>{selected.patient_id}</strong> · {formatDateTimeIST(n.created_at)}
                         {n.updated_at && n.created_at && n.updated_at !== n.created_at ? " · edited" : ""}
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

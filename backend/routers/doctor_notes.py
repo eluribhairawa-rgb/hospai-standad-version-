@@ -1,9 +1,9 @@
 """Doctor Clinicals: the attending doctor's daily clinical notes for an admitted patient.
 
 Notes are stored in doctor_clinical_notes (linked by admission_id and the doctor's user id) and are read
-back by the Inpatient Patients profile, the Patient Journey and the Discharge Summary. Only a login linked
-to a doctor can write; admins can read. A doctor works only on patients assigned to them (consulting
-doctor on the admission form, or the doctor on the bed allocation)."""
+back by the Inpatient Patients profile, the Patient Journey and the Discharge Summary. Any user with write
+permission can record a note: a doctor-linked login signs it as themselves (and works only on patients assigned
+to them), anyone else records it on behalf of the patient's attending doctor, marked "entered by <user>"."""
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -29,13 +29,14 @@ def _is_admin(user):
 
 
 def _writer(user):
-    """('doctor', doctor name) for a doctor-linked login, ('nurse', None) for nursing staff; anyone else may not write."""
+    """('doctor', doctor name) for a doctor-linked login, ('nurse', None) for nursing staff, ('staff', None) for
+    any other user (recorded on behalf of the attending doctor)."""
     doctor = security.scoped_doctor_name(user)
     if doctor:
         return "doctor", doctor
     if not _is_admin(user) and nurse_assignments.is_nurse_title((user or {}).get("job_role")):
         return "nurse", None
-    raise HTTPException(status_code=403, detail="Only attending doctors and nurses can record clinical notes.")
+    return "staff", None
 
 
 def _attending_doctor(cursor, admission_id):
@@ -95,8 +96,6 @@ def doctor_notes_my_patients(db: Session = Depends(get_db), user: dict = Depends
     """Currently admitted patients assigned to the logged-in doctor (admins see every admitted patient)."""
     doctor = security.scoped_doctor_name(user)
     is_nurse = (not doctor) and (not _is_admin(user)) and nurse_assignments.is_nurse_title(user.get("job_role"))
-    if not doctor and not is_nurse and not _is_admin(user):
-        raise HTTPException(status_code=403, detail="Doctor Clinicals is for attending doctors and nurses.")
     mine = nurse_assignments.assigned_patient_ids(db, hospital_id, user.get("username")) if is_nurse else set()
     with legacy_sql.get_connection(db) as conn:
         cursor = conn.cursor()
@@ -154,7 +153,7 @@ def doctor_notes_my_patients(db: Session = Depends(get_db), user: dict = Depends
         })
     if is_nurse:
         out.sort(key=lambda p: not p["assigned_to_me"])
-    return {"patients": out, "doctor": doctor, "role": "doctor" if doctor else ("nurse" if is_nurse else "admin")}
+    return {"patients": out, "doctor": doctor, "role": "doctor" if doctor else ("nurse" if is_nurse else "staff")}
 
 
 @router.get("/admissions/{admission_id}/doctor-notes")
@@ -186,10 +185,10 @@ def doctor_notes_create(admission_id: int, request: Request, payload: dict = Bod
                 raise HTTPException(status_code=403, detail="This patient is not assigned to you.")
             note_doctor, doctor_id = doctor, user.get("id")
         else:
-            # A nurse records the note on behalf of the patient's attending doctor.
+            # A nurse / other staff member records the note on behalf of the patient's attending doctor.
             note_doctor, doctor_id = _attending_doctor(cursor, admission_id), None
             if not note_doctor:
-                raise HTTPException(status_code=409, detail="This admission has no attending doctor on record, so a nurse cannot enter a note for it.")
+                raise HTTPException(status_code=409, detail="This admission has no attending doctor on record, so a note cannot be entered for it on their behalf.")
         columns = ["hospital_id", "admission_id", "patient_id", "doctor_id", "doctor_name", *TEXT_FIELDS, "discharge_readiness",
                    "created_by", "updated_by", "entered_role"]
         values = [hospital_id, admission_id, adm["patient_id"], doctor_id, note_doctor, *(data[k] for k in TEXT_FIELDS),
