@@ -212,14 +212,19 @@ function ExecutiveDashboard({
       const list: any[] = res?.pending_payments || [];
       setPendingBills(list);
 
+      // One payment settles one patient's (UHID's) invoices. Preselect only when every unpaid
+      // invoice belongs to the same patient; otherwise the cashier picks a patient first.
       const initialMap: Record<number, boolean> = {};
       let total = 0;
-      list.forEach((b) => {
-        initialMap[b.id] = true;
-        total += Number(b.balance || 0);
-      });
+      const onePatient = list.length > 0 && list.every((b) => uhidKey(b) === uhidKey(list[0]));
+      if (onePatient) {
+        list.forEach((b) => {
+          initialMap[b.id] = true;
+          total += Number(b.balance || 0);
+        });
+      }
       setSelectedBillIds(initialMap);
-      setPayAmount(String(total || dueRevenue || 0));
+      setPayAmount(String(onePatient ? total : 0));
     } catch (err: any) {
       if (setNotice) {
         reportError(setNotice, err);
@@ -229,7 +234,23 @@ function ExecutiveDashboard({
     }
   };
 
+  // UHID of the current selection: only invoices of this patient can be added to it.
+  // Walk-in invoices carry no UHID; they form their own group so they are never mixed with a patient's.
+  const NO_UHID = "__no_uhid__";
+  const uhidKey = (b: any) => String(b?.patient_id ?? "").trim() || NO_UHID;
+  const uhidLabel = (b: any) => (uhidKey(b) === NO_UHID ? "No UHID (walk-in)" : uhidKey(b));
+  const lockedBill = pendingBills.find((b) => selectedBillIds[b.id]);
+  const lockedKey = lockedBill ? uhidKey(lockedBill) : null;
+  const lockedPatientId = lockedBill ? uhidLabel(lockedBill) : null;
+  const patientBills = lockedKey ? pendingBills.filter((b) => uhidKey(b) === lockedKey) : [];
+
   const toggleSelectBill = (id: number) => {
+    const bill = pendingBills.find((b) => b.id === id);
+    if (!bill) return;
+    if (lockedKey && uhidKey(bill) !== lockedKey) {
+      if (setNotice) setNotice({ type: "warning", message: `Invoices of different patients can't be paid together. Clear the selection for ${lockedPatientId} to pick another patient.` });
+      return;
+    }
     setSelectedBillIds((prev) => {
       const updated = { ...prev, [id]: !prev[id] };
       const nextTotal = pendingBills
@@ -240,15 +261,16 @@ function ExecutiveDashboard({
     });
   };
 
+  // Select every unpaid invoice of the chosen patient, or clear the selection.
   const toggleSelectAll = () => {
-    const allSelected = pendingBills.length > 0 && pendingBills.every((b) => selectedBillIds[b.id]);
-    if (allSelected) {
+    const allSelected = patientBills.length > 0 && patientBills.every((b) => selectedBillIds[b.id]);
+    if (allSelected || patientBills.length === 0) {
       setSelectedBillIds({});
       setPayAmount("0");
     } else {
       const nextMap: Record<number, boolean> = {};
       let total = 0;
-      pendingBills.forEach((b) => {
+      patientBills.forEach((b) => {
         nextMap[b.id] = true;
         total += Number(b.balance || 0);
       });
@@ -1624,14 +1646,17 @@ function ExecutiveDashboard({
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
                 <span style={{ fontWeight: 700, fontSize: "0.86rem", color: "#0f172a" }}>
                   Unpaid Bills / Pending Invoices ({pendingBills.length})
+                  <span style={{ display: "block", fontWeight: 500, fontSize: "0.72rem", color: "#64748b" }}>
+                    {lockedPatientId ? `Paying for ${lockedPatientId}. Invoices of other patients are disabled until you clear the selection.` : "Select invoices of one patient (same UHID) to pay together."}
+                  </span>
                 </span>
-                {pendingBills.length > 0 && (
+                {lockedPatientId && (
                   <button
                     type="button"
                     onClick={toggleSelectAll}
                     style={{ background: "none", border: "none", color: "#0284c7", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer" }}
                   >
-                    {pendingBills.every((b) => selectedBillIds[b.id]) ? "Deselect All" : "Select All"}
+                    {patientBills.every((b) => selectedBillIds[b.id]) ? "Deselect All" : `Select all of ${lockedPatientId}`}
                   </button>
                 )}
               </div>
@@ -1651,18 +1676,22 @@ function ExecutiveDashboard({
                 <div className="hosp-dues-bills-container">
                   {pendingBills.map((bill) => {
                     const isSelected = !!selectedBillIds[bill.id];
+                    const otherPatient = !!lockedKey && uhidKey(bill) !== lockedKey;
                     return (
                       <div
                         key={bill.id}
                         className={`hosp-dues-bill-item ${isSelected ? "selected" : ""}`}
                         onClick={() => toggleSelectBill(bill.id)}
+                        style={otherPatient ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
+                        title={otherPatient ? `Different patient (${uhidLabel(bill)}); clear the current selection to choose it` : undefined}
                       >
                         <div className="hosp-dues-bill-left">
                           <input
                             type="checkbox"
                             checked={isSelected}
+                            disabled={otherPatient}
                             onChange={() => {}}
-                            style={{ cursor: "pointer", width: "16px", height: "16px", accentColor: "#0284c7" }}
+                            style={{ cursor: otherPatient ? "not-allowed" : "pointer", width: "16px", height: "16px", accentColor: "#0284c7" }}
                           />
                           <div className="hosp-dues-bill-info">
                             <h4>
@@ -1672,7 +1701,8 @@ function ExecutiveDashboard({
                               </span>
                             </h4>
                             <p>
-                              Patient: <strong>{bill.patient_name || bill.patient_id}</strong> ({bill.patient_id})
+                              Patient: <strong>{bill.patient_name || "Walk-in"}</strong>
+                              {" · "}UHID: <strong style={{ color: uhidKey(bill) === NO_UHID ? "#b45309" : "#0f172a" }}>{uhidLabel(bill)}</strong>
                               {bill.date ? ` · ${bill.date}` : ""}
                             </p>
                           </div>
@@ -1770,7 +1800,7 @@ function ExecutiveDashboard({
                 variant="ghost"
                 onClick={() => {
                   setPayDuesModalOpen(false);
-                  const firstPid = pendingBills.find((b) => selectedBillIds[b.id])?.patient_id;
+                  const firstPid = String(pendingBills.find((b) => selectedBillIds[b.id])?.patient_id || "").trim();
                   if (firstPid) localStorage.setItem("selected_billing_patient", firstPid);
                   go("billing-patient-bills");
                 }}
