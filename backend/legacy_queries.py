@@ -3216,6 +3216,27 @@ def _expand_schedule_dates(raw_schedule_date):
 
 
 
+def _assert_roster_unique(cursor, doctor_name, department, exclude_id=None):
+    """A doctor can be on the roster once per department: the same name in a different
+    department is allowed, the same name in the same department is not."""
+    name = " ".join(str(doctor_name or "").split()).lower()
+    dept = " ".join(str(department or "").split()).lower()
+    cursor.execute(
+        """
+        SELECT id FROM doctor_schedules
+        WHERE schedule_date IS NULL AND LOWER(TRIM(doctor_name)) = ? AND LOWER(TRIM(COALESCE(department, ''))) = ?
+          AND (? IS NULL OR id != ?)
+        LIMIT 1
+        """,
+        (name, dept, exclude_id, exclude_id),
+    )
+    if cursor.fetchone():
+        raise ValueError(
+            f"Dr. {str(doctor_name).strip()} is already added in the {str(department or '').strip() or 'same'} department. "
+            "The same doctor can be added only once per department; choose a different department."
+        )
+
+
 def create_doctor_schedule(db, data):
     with get_connection(db) as conn:
         cursor = conn.cursor()
@@ -3231,6 +3252,7 @@ def create_doctor_schedule(db, data):
 
         # --- Permanent roster entry (no date) ---
         if not raw_date:
+            _assert_roster_unique(cursor, doctor_name, data.get("department"))
             cursor.execute(
                 """
                 INSERT INTO doctor_schedules (
@@ -3356,6 +3378,12 @@ def update_doctor_schedule(db, schedule_id, data):
         new_date = data.get("schedule_date", existing["schedule_date"])
         new_start = data.get("start_time", existing["start_time"])
         new_end = data.get("end_time", existing["end_time"])
+        if not new_date:
+            new_department = data.get("department", existing["department"])
+            changed = (str(new_doctor or "").strip().lower() != str(existing["doctor_name"] or "").strip().lower()
+                       or str(new_department or "").strip().lower() != str(existing["department"] or "").strip().lower())
+            if changed:  # editing fees/status of an existing entry is always allowed
+                _assert_roster_unique(cursor, new_doctor, new_department, exclude_id=schedule_id)
         # Block overlapping schedules for the SAME doctor on the same date,
         # but exclude the row being updated from the conflict check.
         cursor.execute(

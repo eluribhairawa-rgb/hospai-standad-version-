@@ -64,13 +64,20 @@ function PatientPicker({
           shown.map((p) => {
             const checked = selected.includes(p.patient_id);
             return (
-              <label key={p.patient_id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "7px 12px", borderTop: "1px solid #f1f5f9", cursor: "pointer", background: checked ? "#f0fdfa" : "#fff", fontSize: "12.5px" }}>
-                <input type={multi ? "checkbox" : "radio"} checked={checked} onChange={() => toggle(p.patient_id)} />
-                <span style={{ fontWeight: 700, color: "#1e293b", minWidth: "120px" }}>{patientFullName(p)}</span>
-                <span style={{ color: "#00828a", fontWeight: 600 }}>{p.patient_id}</span>
-                <span style={{ color: "#64748b" }}>{p.phone || p.family_mobile || "No mobile"}</span>
-                <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: 700, color: p.is_inpatient ? "#0369a1" : "#475569" }}>{p.is_inpatient ? "IPD" : "OPD"}</span>
-              </label>
+              <div
+                key={p.patient_id}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggle(p.patient_id)}
+                onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(p.patient_id); } }}
+                style={{ display: "grid", gridTemplateColumns: "20px minmax(120px, 1.4fr) minmax(150px, 1.2fr) minmax(110px, 1fr) 40px", alignItems: "center", columnGap: "12px", width: "100%", boxSizing: "border-box", padding: "8px 12px", borderTop: "1px solid #f1f5f9", cursor: "pointer", background: checked ? "#f0fdfa" : "#fff", fontSize: "12.5px", textAlign: "left" }}
+              >
+                <input type={multi ? "checkbox" : "radio"} checked={checked} onChange={() => toggle(p.patient_id)} onClick={(e) => e.stopPropagation()} style={{ width: "16px", height: "16px", margin: 0, padding: 0 }} />
+                <span style={{ fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={patientFullName(p)}>{patientFullName(p)}</span>
+                <span style={{ color: "#00828a", fontWeight: 600, whiteSpace: "nowrap" }}>{p.patient_id}</span>
+                <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>{p.phone || p.family_mobile || "No mobile"}</span>
+                <span style={{ textAlign: "right", fontSize: "11px", fontWeight: 700, color: p.is_inpatient ? "#0369a1" : "#475569" }}>{p.is_inpatient ? "IPD" : "OPD"}</span>
+              </div>
             );
           })
         )}
