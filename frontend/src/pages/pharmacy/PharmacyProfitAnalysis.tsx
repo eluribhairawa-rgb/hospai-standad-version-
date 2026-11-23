@@ -95,7 +95,8 @@ export default function PharmacyProfitAnalysis({ setNotice, onNavigate }: Props)
   const [sortBy, setSortBy] = useState<SortKey>("profit_earned");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  // All medicines load at once and the table scrolls, instead of paging.
+  const pageSize = 5000;
   const [data, setData] = useState<ProfitResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -391,19 +392,11 @@ export default function PharmacyProfitAnalysis({ setNotice, onNavigate }: Props)
           </div>
 
           {data && data.total_rows > 0 && (
-            <div className="ppa-pager">
+            <div className="ppa-pager ppa-pager-count">
               <span>
                 {firstRow}–{lastRow} of {data.total_rows} medicines
                 {(search || groupValue) && <> · filtered profit <strong>{inr(data.filtered_profit, 0)}</strong></>}
               </span>
-              <div className="ppa-pager-controls">
-                <select aria-label="Rows per page" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
-                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}
-                </select>
-                <button type="button" disabled={data.page <= 1} onClick={() => setPage(data.page - 1)} aria-label="Previous page">‹</button>
-                <span>Page {data.page} of {data.pages}</span>
-                <button type="button" disabled={data.page >= data.pages} onClick={() => setPage(data.page + 1)} aria-label="Next page">›</button>
-              </div>
             </div>
           )}
         </section>

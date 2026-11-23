@@ -240,7 +240,7 @@ def sort_and_page(rows, sort_by="profit_earned", sort_dir="desc", page=1, page_s
         unknown = [r for r in rows if r[sort_by] is None]
         known.sort(key=lambda r: (r[sort_by], r["medicine_name"].lower()), reverse=reverse)
         ordered = known + sorted(unknown, key=lambda r: r["medicine_name"].lower())  # unknowns always last
-    page_size = min(max(int(page_size or 25), 1), 100)
+    page_size = min(max(int(page_size or 25), 1), 5000)
     total = len(ordered)
     pages = max(1, -(-total // page_size))
     page = min(max(int(page or 1), 1), pages)
