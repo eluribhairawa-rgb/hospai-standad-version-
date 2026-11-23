@@ -300,7 +300,12 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
       return;
     }
     const path = employee.status === "active" ? "deactivate" : "activate";
-    await apiFetch(`/api/employees/${employee.employee_id}/${path}`, { method: "POST" });
+    try {
+      await apiFetch(`/api/employees/${employee.employee_id}/${path}`, { method: "POST" });
+    } catch (error) {
+      reportError(setNotice, error as { message?: string; status?: number }, "Unable to change the employee status.");
+      return;
+    }
     void loadEmployees(query);
     void loadStats();
   };
@@ -515,10 +520,12 @@ export default function EmployeesPage({ setNotice, canWriteEmployees }: Props) {
                   )}
 
                   <div className="form-actions">
-                    <Button variant="secondary" onClick={() => void toggleStatus(emp)} disabled={!canWriteEmployees}>
+                    <Button variant="secondary" onClick={() => void toggleStatus(emp)} disabled={!canWriteEmployees || (emp.user_type === "super_admin" && emp.status === "active")}
+                      title={emp.user_type === "super_admin" && emp.status === "active" ? "Super Admin accounts are protected and cannot be deactivated" : undefined}>
                       {emp.status === "active" ? "Deactivate" : "Activate"}
                     </Button>
-                    <Button variant="destructive" onClick={() => setDeleteTarget(emp)} disabled={!canWriteEmployees}>
+                    <Button variant="destructive" onClick={() => setDeleteTarget(emp)} disabled={!canWriteEmployees || emp.user_type === "super_admin"}
+                      title={emp.user_type === "super_admin" ? "Super Admin accounts are protected and cannot be deleted" : undefined}>
                       Delete
                     </Button>
                   </div>

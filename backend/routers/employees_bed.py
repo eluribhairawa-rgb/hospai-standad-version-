@@ -85,7 +85,11 @@ def employees_activate(employee_id: str, db: Session = Depends(get_db), user: di
 @router.post("/employees/{employee_id}/deactivate")
 def employees_deactivate(employee_id: str, db: Session = Depends(get_db), user: dict = Depends(require_permissions("admin.users.deactivate")),
                           hospital_id: int = Depends(current_hospital_id)):
-    if not lq.deactivate_employee(db, employee_id, hospital_id=hospital_id):
+    try:
+        deactivated = lq.deactivate_employee(db, employee_id, hospital_id=hospital_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not deactivated:
         raise HTTPException(status_code=404, detail="Employee not found")
     return {"status": "inactive"}
 

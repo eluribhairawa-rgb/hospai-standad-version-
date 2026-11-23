@@ -2248,6 +2248,8 @@ def deactivate_employee(db, employee_id, hospital_id=None):
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        if _is_protected_super_admin(cursor, employee_id, scoped_hospital_id):
+            raise ValueError(PROTECTED_SUPER_ADMIN_MSG)
         cursor.execute(
             "UPDATE users SET status='inactive' WHERE employee_id=? AND hospital_id=?",
             (employee_id, scoped_hospital_id),
@@ -2270,10 +2272,22 @@ def activate_employee(db, employee_id, hospital_id=None):
 
 
 
+PROTECTED_SUPER_ADMIN_MSG = ("Super Admin accounts are protected and cannot be deleted or deactivated. "
+                             "They are the hospital's root credentials.")
+
+
+def _is_protected_super_admin(cursor, employee_id, hospital_id):
+    cursor.execute("SELECT user_type FROM users WHERE employee_id=? AND hospital_id=?", (employee_id, hospital_id))
+    row = cursor.fetchone()
+    return bool(row) and str(row[0] or "").strip().lower() == "super_admin"
+
+
 def delete_employee(db, employee_id, hospital_id=None):
     scoped_hospital_id = hospital_id or resolve_hospital_id(db)
     with get_connection(db) as conn:
         cursor = conn.cursor()
+        if _is_protected_super_admin(cursor, employee_id, scoped_hospital_id):
+            raise ValueError(PROTECTED_SUPER_ADMIN_MSG)
         cursor.execute(
             "SELECT id FROM users WHERE employee_id=? AND hospital_id=?",
             (employee_id, scoped_hospital_id),
