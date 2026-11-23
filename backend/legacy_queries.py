@@ -2635,10 +2635,29 @@ def create_appointment(db, data):
         return appointment_id, token_no
 
 
+def apply_percent_discount(amount, percent):
+    """(discount_amount, net_amount) for a percentage discount, rounded to paise.
+    The percentage must be 0-100; anything else raises ValueError."""
+    try:
+        pct = float(percent or 0)
+    except (TypeError, ValueError):
+        raise ValueError("Discount must be a number between 0 and 100.")
+    if pct < 0 or pct > 100 or pct != pct:
+        raise ValueError("Discount must be between 0% and 100%.")
+    gross = float(amount or 0)
+    discount = round(gross * pct / 100.0, 2)
+    return discount, round(gross - discount, 2)
+
+
 def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
-    """Atomically creates appointment, syncs patient data, creates invoice and payment."""
+    """Atomically creates appointment, syncs patient data, creates invoice and payment.
+    An optional payload["discount_percent"] reduces the fee: the invoice keeps the gross as
+    subtotal, the discount amount, and the net as the amount billed and collected."""
     import re
     from datetime import datetime
+    gross_fee = float(consultation_fee or 0)
+    discount_pct = float(payload.get("discount_percent") or 0)
+    discount_amount, consultation_fee = apply_percent_discount(gross_fee, discount_pct)
     with get_connection(db) as conn:
         # 1. Create Appointment (Inlined logic to avoid nested commits)
         appointment_date = payload["appointment_date"]
@@ -2755,12 +2774,13 @@ def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
                 appointment_date,
                 token_no,
                 _normalize_appointment_status(payload.get("status", "scheduled")),
-                payload.get("notes"),
+                (f"{payload.get('notes') or ''} | Discount: {discount_pct:g}% (₹{discount_amount:.2f})".strip(" |")
+                 if discount_amount > 0 else payload.get("notes")),
                 appointment_kind,
                 payload.get("follow_up_for"),
                 payload.get("reminder_sent_at"),
                 1 if payload.get("no_show_marked") else 0,
-                resolved_fee,
+                apply_percent_discount(resolved_fee, discount_pct)[1],
             ),
         )
         appointment_id = cursor.lastrowid
@@ -2839,7 +2859,7 @@ def create_op_appointment_with_invoice(db, payload, consultation_fee, username):
                 """,
                 (
                     invoice_no, patient_id, "OP", payload.get("doctor_name"), None, None,
-                    0, 0, 0, consultation_fee, 0, consultation_fee, "due", op_name, 0, 0, appointment_id
+                    gross_fee, 0, discount_amount, consultation_fee, 0, consultation_fee, "due", op_name, 0, 0, appointment_id
                 )
             )
             invoice_id = cursor.lastrowid

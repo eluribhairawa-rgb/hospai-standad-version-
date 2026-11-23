@@ -1,3 +1,4 @@
+import { applyPercentDiscount, cleanPercent, formatRupees } from "../lib/discount";
 import { useState, useMemo, useEffect } from "react";
 import { brandTitle, escapeBrandText } from "../lib/branding";
 import type { Dispatch, SetStateAction } from "react";
@@ -68,6 +69,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     doctor: string;
     department: string;
     fee: string | number;
+    discountPercent?: number;
     paymentMode: string;
     date: string;
   } | null>(null);
@@ -85,6 +87,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     doctor?: string;
     department?: string;
     fee?: string | number;
+    discountPercent?: number;
     paymentMode?: string;
     tokenNo?: string | number;
     chiefComplaint?: string;
@@ -212,6 +215,9 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
   const [selectedDepartment, setSelectedDepartment] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("");
   const [consultationFee, setConsultationFee] = useState<string | number>("");
+  // Percentage discount on the (locked) consultation fee; the payable amount is the fee after discount.
+  const [discountPercent, setDiscountPercent] = useState("");
+  const feeCalc = applyPercentDiscount(consultationFee, discountPercent);
   const [appointmentType, setAppointmentType] = useState<"" | "Consultation" | "Review" | "Follow-up">("");
   const [paymentMode, setPaymentMode] = useState<"" | "Cash" | "UPI" | "Card" | "Waived">("");
   const [appointmentSlot, setAppointmentSlot] = useState("Immediate Live Queue (Walk-in)");
@@ -358,6 +364,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     setSelectedDepartment(dept);
     setSelectedDoctor("");
     setConsultationFee(0);
+    setDiscountPercent("");
   };
 
   // When doctor changes, update fee
@@ -820,6 +827,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         department: selectedDepartment,
         doctor_name: selectedDoctor,
         consultation_fee: Number(consultationFee) || 500,
+        discount_percent: feeCalc.pct || undefined,
         visit_type: visitType === "IP" ? "ip" : "op",
         appointment_date: new Date().toLocaleDateString("en-CA"), // local date; toISOString() is UTC (yesterday before 5:30 AM IST)
         payment_mode: paymentMode.toLowerCase(),
@@ -841,7 +849,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         appointmentId: apptRes?.appointment_id,
         doctor: selectedDoctor,
         department: selectedDepartment,
-        fee: consultationFee,
+        fee: feeCalc.net,
+        discountPercent: feeCalc.pct,
         paymentMode,
         date: new Date().toLocaleDateString("en-GB"),
       });
@@ -859,7 +868,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
         tokenNo,
         doctor: selectedDoctor,
         department: selectedDepartment,
-        fee: consultationFee,
+        fee: feeCalc.net,
+        discountPercent: feeCalc.pct,
         paymentMode,
       }));
 
@@ -885,6 +895,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       setExistingPatient(null);
       setSelectedDoctor("");
       setConsultationFee(0);
+      setDiscountPercent("");
       void fetchNextUhid();
     } catch (err: any) {
       reportError(setNotice, err, "Failed to book appointment.");
@@ -901,6 +912,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
     setSelectedDepartment("");
     setSelectedDoctor("");
     setConsultationFee(0);
+    setDiscountPercent("");
     setAppointmentType("");
     setPaymentMode("");
     setBookedAppointment(null);
@@ -924,7 +936,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       visitType,
       doctor: selectedDoctor,
       department: selectedDepartment,
-      fee: consultationFee,
+      fee: feeCalc.net,
+      discountPercent: feeCalc.pct,
       paymentMode,
       chiefComplaint: symptoms.trim(),
       vitals: { bp: vitalsBp, pulse: vitalsPulse, temperature: vitalsTemp, weight: vitalsWeight, spo2: vitalsSpo2 },
@@ -959,7 +972,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
           ${target.visitType === "OP" || target.visitType === "IP" ? `
             <div><strong>Department:</strong> ${target.department || selectedDepartment}</div>
             <div><strong>Consulting Doctor:</strong> ${target.doctor || selectedDoctor}</div>
-            <div><strong>Consultation Fee:</strong> ₹ ${target.fee ?? consultationFee} (${target.paymentMode || paymentMode})</div>
+            <div><strong>Consultation Fee${(target as any).discountPercent ? ` (after ${(target as any).discountPercent}% discount)` : ""}:</strong> ₹ ${target.fee ?? feeCalc.net} (${target.paymentMode || paymentMode})</div>
           ` : ""}
         </div>
         ${target.visitType === "OP" || target.visitType === "IP" ? (() => {
@@ -994,7 +1007,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       visitType,
       doctor: selectedDoctor,
       department: selectedDepartment,
-      fee: consultationFee,
+      fee: feeCalc.net,
+      discountPercent: feeCalc.pct,
       paymentMode,
       tokenNo: bookedAppointment?.tokenNo,
     } : null);
@@ -1021,7 +1035,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
       `Visit Type: ${target.visitType}`,
       target.department || selectedDepartment ? `Department: ${target.department || selectedDepartment}` : "",
       target.doctor || selectedDoctor ? `Consulting Doctor: ${target.doctor || selectedDoctor}` : "",
-      target.fee !== undefined ? `Consultation Fee: ₹ ${target.fee ?? consultationFee}` : "",
+      target.fee !== undefined ? `Consultation Fee${(target as any).discountPercent ? ` (after ${(target as any).discountPercent}% discount)` : ""}: ₹ ${target.fee ?? feeCalc.net}` : "",
       `----------------------------------------`,
       `Please present this token at the consultation desk or nursing counter.`,
       `Wishing you good health!`,
@@ -2273,7 +2287,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                   #{bookedAppointment.tokenNo}
                 </div>
                 <div style={{ fontSize: "12.5px", color: "#475569", fontWeight: 600, marginTop: "2px" }}>
-                  UHID: {patientId} • Fee: ₹{bookedAppointment.fee} ({bookedAppointment.paymentMode})
+                  UHID: {patientId} • Fee: ₹{bookedAppointment.fee}{bookedAppointment.discountPercent ? ` after ${bookedAppointment.discountPercent}% discount` : ""} ({bookedAppointment.paymentMode})
                 </div>
               </div>
 
@@ -2457,7 +2471,8 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                       type="number"
                       min="0"
                       value={consultationFee}
-                      onChange={(e) => setConsultationFee(e.target.value)}
+                      readOnly
+                      title="The consultation fee comes from Doctor Scheduling and cannot be edited. Use the discount instead."
                       placeholder=""
                       style={{
                         height: "42px",
@@ -2470,15 +2485,16 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                         width: "100%",
                         boxSizing: "border-box",
                         outline: "none",
-                        background: "#ffffff",
+                        background: "#f8fafc",
+                        cursor: "not-allowed",
                       }}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Row 2: Consultation Type, Payment Mode, Appointment Slot */}
-              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1.2fr", gap: "18px", marginBottom: "20px" }}>
+              {/* Row 2: Consultation Type, Discount (%), Payment Mode, Appointment Slot */}
+              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.8fr 1fr 1.2fr", gap: "18px", marginBottom: "12px" }}>
                 <div>
                   <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#1e293b", display: "block", marginBottom: "6px" }}>
                     Consultation Type
@@ -2494,6 +2510,25 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                     <option value="Review">Follow-up / Review Visit</option>
                     <option value="Follow-up">Report Evaluation</option>
                   </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#1e293b", display: "block", marginBottom: "6px" }}>
+                    Discount (%)
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={discountPercent}
+                      onChange={(e) => setDiscountPercent(cleanPercent(e.target.value))}
+                      placeholder="0"
+                      disabled={!consultationFee || Number(consultationFee) <= 0}
+                      className="pharmacy-rx-search-input"
+                      style={{ height: "42px", padding: "0 12px", borderRadius: "8px 0 0 8px", border: "1px solid #cbd5e1", borderRight: "none", width: "100%", boxSizing: "border-box", fontWeight: 700 }}
+                    />
+                    <span style={{ height: "42px", padding: "0 12px", display: "flex", alignItems: "center", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: "0 8px 8px 0", fontWeight: 800, color: "#475569" }}>%</span>
+                  </div>
                 </div>
 
                 <div>
@@ -2528,6 +2563,14 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                 </div>
               </div>
 
+              {Number(consultationFee) > 0 && (
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "baseline", gap: "14px", flexWrap: "wrap", marginBottom: "16px", fontSize: "13px", color: "#475569", fontWeight: 600 }}>
+                  <span>Fee {formatRupees(feeCalc.gross)}</span>
+                  {feeCalc.pct > 0 && <span style={{ color: "#b45309" }}>− Discount {feeCalc.pct}% ({formatRupees(feeCalc.discount)})</span>}
+                  <span style={{ fontSize: "15px", fontWeight: 800, color: "#00828a" }}>Amount payable: {formatRupees(feeCalc.net)}</span>
+                </div>
+              )}
+
               {/* Queue routing banner */}
               <div
                 style={{
@@ -2547,7 +2590,7 @@ export default function AddPatientPage({ setNotice, onNavigate, onCreate }: Prop
                 <span style={{ fontSize: "13px", color: selectedDoctor ? "#115e59" : "#92400e", fontWeight: 500 }}>
                   {selectedDoctor ? (
                     <>
-                      Booking appointment assigns <strong>{selectedDoctor}</strong> ({selectedDepartment}), records ₹{consultationFee} fee, generates a <strong>Live Queue Token</strong>, and places patient into <strong>Queue Management</strong>.
+                      Booking appointment assigns <strong>{selectedDoctor}</strong> ({selectedDepartment}), records {formatRupees(feeCalc.net)} fee{feeCalc.pct > 0 ? ` (after ${feeCalc.pct}% discount)` : ""}, generates a <strong>Live Queue Token</strong>, and places patient into <strong>Queue Management</strong>.
                     </>
                   ) : !selectedDepartment ? (
                     <>Please select a department and consulting doctor to book the consultation appointment.</>

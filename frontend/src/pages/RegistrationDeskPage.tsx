@@ -10,6 +10,7 @@ import { printViaIframe } from "../lib/printViaIframe";
 import { filterInteger, filterDecimal } from "../lib/format";
 import { cleanCountryCode, formatPhone, normalizeSearchQuery, splitStoredPhone, toWhatsAppNumber } from "../lib/phone";
 import PhoneInput from "../components/PhoneInput";
+import { applyPercentDiscount, cleanPercent, formatRupees } from "../lib/discount";
 
 type RegistrationMode = "appointment-in" | "appointment-out" | "consent" | "insurance";
 
@@ -306,6 +307,7 @@ export default function RegistrationDeskPage({ mode, selectedPatient, setNotice 
   const [savingAppointment, setSavingAppointment] = useState(false);
   const [isRazorpayReady, setIsRazorpayReady] = useState(true);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [discountPercent, setDiscountPercent] = useState("");
 
   const [departments, setDepartments] = useState<Department[]>([]);
   const [departmentInput, setDepartmentInput] = useState("");
@@ -790,11 +792,13 @@ const activeDepartments = (data.departments || []).filter((department) => {
           appointment_kind: appointmentForm.appointment_kind || "new", fee_kind: selectedAppointmentPatient?.eligible_for_free_followup ? "free_followup" : undefined,
           notes: buildAppointmentNotes() || undefined,
           consultation_fee: consultationFee,
+          discount_percent: applyPercentDiscount(consultationFee, discountPercent).pct || undefined,
           payment_mode: appointmentForm.payment_mode || "cash",
           operator_name: appointmentForm.operator_name.trim() || undefined,
         }),
       });
       setPaymentConfirmed(false);
+      setDiscountPercent("");
       setAppointmentForm((prev) => ({
         ...DEFAULT_APPOINTMENT_FORM,
         patient_type: prev.patient_type,
@@ -1707,6 +1711,14 @@ const activeDepartments = (data.departments || []).filter((department) => {
                 {Number(appointmentForm.consultation_fee) === 0 && selectedAppointmentPatient?.last_consultation_date && (
                   <span style={{ position: "absolute", right: "10px", bottom: "10px", fontSize: "11px", color: "#16a34a", fontWeight: "600", pointerEvents: "none" }}>Free Follow-up</span>
                 )}
+              </Label>
+              <Label>
+                Discount (%)
+                <Input value={discountPercent} onChange={(event) => setDiscountPercent(cleanPercent(event.target.value))} placeholder="0" inputMode="decimal" disabled={!(Number(appointmentForm.consultation_fee) > 0)} />
+                {Number(appointmentForm.consultation_fee) > 0 && (() => {
+                  const c = applyPercentDiscount(appointmentForm.consultation_fee, discountPercent);
+                  return <span style={{ display: "block", marginTop: 4, fontSize: 12, fontWeight: 700, color: "#00828a" }}>{c.pct > 0 ? `${formatRupees(c.gross)} − ${c.pct}% = ` : ""}Payable {formatRupees(c.net)}</span>;
+                })()}
               </Label>
               <Label style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "8px", marginTop: "24px" }}>
                 <input

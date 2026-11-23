@@ -10,6 +10,7 @@ import { buildPrintDocumentHtml, buildPrintLabelsHtml } from "../../lib/printTem
 import { downloadCsv } from "../../lib/csvExport";
 import { printCreditNote } from "../../lib/creditNote";
 import type { CreditNote } from "../../lib/creditNote";
+import { cleanPercent } from "../../lib/discount";
 import { COUNTRY_CODE_RULES, COUNTRY_CODES, parsePhoneInput, validateMobileByCountry, withCountryCode, splitStoredPhone, toWhatsAppNumber } from "../../lib/phone";
 
 type Props = {
@@ -175,6 +176,8 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
 
   // Cart
   const [cart, setCart] = useState<CartItem[]>([]);
+  // One bill-level discount (%) applied to every line; totals, print and the saved sale all follow it.
+  const [billDiscount, setBillDiscount] = useState("");
   const [paymentMode, setPaymentMode] = useState<string>("cash");
   const [dispenseStockSource, setDispenseStockSource] = useState<"CASH" | "INSURANCE">("CASH");
   const [insuranceVerifyRef, setInsuranceVerifyRef] = useState("");
@@ -527,6 +530,11 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
     updated[index].quantity = qty;
     setCart(updated);
   };
+
+  useEffect(() => {
+    const pct = Math.max(0, Math.min(100, Number(billDiscount) || 0));
+    setCart((prev) => (prev.some((c) => c.discount_percent !== pct) ? prev.map((c) => ({ ...c, discount_percent: pct })) : prev));
+  }, [billDiscount, cart.length]);
 
   const handleUpdateCartDiscount = (index: number, disc: number) => {
     const updated = [...cart];
@@ -913,6 +921,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
 
       setPrintModalOpen(true);
       setCart([]);
+      setBillDiscount("");
       setLoadedRx(null);
       setPaymentType("full");
       setPaidAmountInput("");
@@ -1618,7 +1627,7 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                     type="button"
                     className="ui-button ghost"
                     style={{ color: "#e11d48", fontSize: "0.8rem", padding: 0 }}
-                    onClick={() => setCart([])}
+                    onClick={() => { setCart([]); setBillDiscount(""); }}
                   >
                     Clear Cart
                   </button>
@@ -1855,8 +1864,24 @@ export default function PharmacyOpDispense({ setNotice, onNavigate }: Props) {
                   <span>Subtotal:</span>
                   <span style={{ fontWeight: 600 }}>₹{cartTotals.subtotal.toFixed(2)}</span>
                 </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#475569" }}>
+                  <span>Discount (%):</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={billDiscount}
+                      onChange={(e) => setBillDiscount(cleanPercent(e.target.value))}
+                      placeholder="0"
+                      disabled={cart.length === 0}
+                      aria-label="Discount percent"
+                      style={{ width: 70, padding: "4px 8px", borderRadius: 6, border: "1px solid #cbd5e1", textAlign: "right", fontWeight: 700 }}
+                    />
+                    <span style={{ fontWeight: 700 }}>%</span>
+                  </span>
+                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", color: "#16a34a" }}>
-                  <span>Discount:</span>
+                  <span>Discount amount:</span>
                   <span style={{ fontWeight: 600 }}>- ₹{cartTotals.totalDiscount.toFixed(2)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", color: "#475569" }}>

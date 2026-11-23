@@ -11,6 +11,7 @@ import { formatDateTimeIST, getISTDateTimeKey, getTimestamp, stripUploadTimestam
 import { printViaIframe } from "../lib/printViaIframe";
 import { PRINT_BRAND_HEADER_DATA_URI, PRINT_WATERMARK_DATA_URI } from "../lib/printBrand";
 import type { DocumentItem, Notice, Patient } from "../types";
+import { applyPercentDiscount, cleanPercent, formatRupees } from "../lib/discount";
 
 type ProfileUpdates = {
   age: number | string;
@@ -156,6 +157,8 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
   const [doctorName, setDoctorName] = useState("");
   const [doctorDepartment, setDoctorDepartment] = useState("");
   const [reviewFee, setReviewFee] = useState("");
+  const [discountPercent, setDiscountPercent] = useState("");
+  const feeCalc = applyPercentDiscount(reviewFee, discountPercent);
   const [paymentMode, setPaymentMode] = useState("");
   const [readmitValidationErrors, setReadmitValidationErrors] = useState<Record<string, string>>({});
   const [doctorSchedules, setDoctorSchedules] = useState<DoctorSchedule[]>([]);
@@ -408,6 +411,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
     setOcrStatus({});
     setProfileUpdates(normalizeProfile(patient));
     setPaymentMode("");
+    setDiscountPercent("");
     setReadmitValidationErrors({});
     // Fetch full patient details and auto-fill previous consultation details
     try {
@@ -536,7 +540,8 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
     const doctor = doctorName || "Doctor not assigned";
     const mobile = (profileUpdates.phone ? formatPhone(profileUpdates.phone_country_code, profileUpdates.phone) : "")
       || formatPhone(activePatient.phone_country_code, activePatient.phone) || activePatient.family_mobile || "-";
-    const fee = Number(reviewFee || 0).toFixed(2);
+    const fee = feeCalc.gross.toFixed(2);
+    const netFee = feeCalc.net.toFixed(2);
     const operatorName = "name";
     const visitTime = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true });
 
@@ -653,15 +658,20 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
             
             <div class="totals-wrap">
               <table class="totals-table">
+                ${feeCalc.pct > 0 ? `<tr>
+                  <td style="text-align: left;">Discount (${safeText(feeCalc.pct)}%)</td>
+                  <td style="text-align: center; width: 10mm;">:</td>
+                  <td style="text-align: right; font-weight: bold;">- ${safeText(feeCalc.discount.toFixed(2))}</td>
+                </tr>` : ""}
                 <tr>
                   <td style="text-align: left;">Total Amount</td>
                   <td style="text-align: center; width: 10mm;">:</td>
-                  <td style="text-align: right; font-weight: bold;">${safeText(fee)}</td>
+                  <td style="text-align: right; font-weight: bold;">${safeText(netFee)}</td>
                 </tr>
                 <tr>
                   <td style="text-align: left;">Amount Paid</td>
                   <td style="text-align: center; width: 10mm;">:</td>
-                  <td style="text-align: right; font-weight: bold;">${safeText(fee)}</td>
+                  <td style="text-align: right; font-weight: bold;">${safeText(netFee)}</td>
                 </tr>
               </table>
             </div>
@@ -736,6 +746,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
         doctorName ? `Doctor: ${doctorName}` : "",
         doctorDepartment ? `Department: ${doctorDepartment}` : "",
         `Review Fee: ${reviewFee}`,
+        feeCalc.pct > 0 ? `Discount: ${feeCalc.pct}% (₹${feeCalc.discount.toFixed(2)})` : "",
         paymentMode ? `Payment Mode: ${paymentMode}` : ""
       ].filter(Boolean).join(" | ");
       const finalNotes = [additionalNotes, notes ? `[Admission Notes]\n${notes}` : ""].filter(Boolean).join("\n\n");
@@ -756,6 +767,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
           appointment_kind: "follow_up",
           notes: finalNotes,
           consultation_fee: Number(reviewFee) || 0,
+          discount_percent: feeCalc.pct || undefined,
           payment_mode: paymentMode || "cash",
         }),
       });
@@ -1042,6 +1054,7 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                           onChange={(event) => {
                             const value = event.target.value;
                             setDoctorName(value);
+                            setDiscountPercent("");
                             const match = getDoctorScheduleForName(value);
                             if (match) {
                               setReviewFee(String(match.review_fee ?? match.consultation_fee ?? ""));
@@ -1085,6 +1098,15 @@ export default function ReadmitPage({ onSelect, setNotice, onReadmitComplete, oc
                           title="Review fee is dynamically fetched from Doctor Scheduling"
                         />
                         {readmitValidationErrors.reviewFee && <span className="field-error">{readmitValidationErrors.reviewFee}</span>}
+                      </Label>
+                      <Label>
+                        <span className="label-text">Discount (%)</span>
+                        <Input value={discountPercent} onChange={(event) => setDiscountPercent(cleanPercent(event.target.value))} placeholder="0" inputMode="decimal" aria-label="Discount percent" disabled={!(Number(reviewFee) > 0)} />
+                        {Number(reviewFee) > 0 && (
+                          <span style={{ display: "block", marginTop: 4, fontSize: 12, fontWeight: 700, color: "#00828a" }}>
+                            {feeCalc.pct > 0 ? `${formatRupees(feeCalc.gross)} − ${feeCalc.pct}% = ` : ""}Payable {formatRupees(feeCalc.net)}
+                          </span>
+                        )}
                       </Label>
                       <Label>
                         <span className="label-text">Payment Mode <span className="required-marker">*</span></span>
