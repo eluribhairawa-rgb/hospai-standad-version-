@@ -1220,35 +1220,41 @@ export function SurveyReportsPanel({ setNotice }: { setNotice: SetNotice }) {
         <PanelHeader title="Survey Reports" subtitle={`Detailed patient feedback · ${filterText}`}>
           <ExportMenu disabled={!report} onCsv={() => void exportReport("csv")} onExcel={() => void exportReport("xlsx")} onPdf={() => void exportReport("pdf")} />
         </PanelHeader>
-        <form onSubmit={(e) => { e.preventDefault(); setApplied({ ...draft }); }} style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <Field label="From"><input type="date" value={draft.date_from} max={draft.date_to || undefined} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} style={{ ...S.input, width: "150px" }} /></Field>
-          <Field label="To"><input type="date" value={draft.date_to} min={draft.date_from || undefined} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} style={{ ...S.input, width: "150px" }} /></Field>
-          <Field label="Survey">
-            <select value={draft.template_id} onChange={(e) => setDraft({ ...draft, template_id: e.target.value })} style={{ ...S.input, width: "190px" }}>
+        <form onSubmit={(e) => { e.preventDefault(); setApplied({ ...draft }); }} style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+          <Field label="From" style={{ flex: "1 1 115px", minWidth: "115px", maxWidth: "145px" }}>
+            <input type="date" value={draft.date_from} max={draft.date_to || undefined} onChange={(e) => setDraft({ ...draft, date_from: e.target.value })} style={S.input} />
+          </Field>
+          <Field label="To" style={{ flex: "1 1 115px", minWidth: "115px", maxWidth: "145px" }}>
+            <input type="date" value={draft.date_to} min={draft.date_from || undefined} onChange={(e) => setDraft({ ...draft, date_to: e.target.value })} style={S.input} />
+          </Field>
+          <Field label="Survey" style={{ flex: "1.2 1 125px", minWidth: "120px" }}>
+            <select value={draft.template_id} onChange={(e) => setDraft({ ...draft, template_id: e.target.value })} style={S.input}>
               <option value="">All surveys</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </Field>
-          <Field label="Type">
-            <select value={draft.survey_type} onChange={(e) => setDraft({ ...draft, survey_type: e.target.value })} style={{ ...S.input, width: "150px" }}>
+          <Field label="Type" style={{ flex: "1 1 110px", minWidth: "105px" }}>
+            <select value={draft.survey_type} onChange={(e) => setDraft({ ...draft, survey_type: e.target.value })} style={S.input}>
               <option value="">All types</option>
               {(Object.keys(SURVEY_TYPE_LABELS) as SurveyType[]).map((t) => <option key={t} value={t}>{SURVEY_TYPE_LABELS[t]}</option>)}
             </select>
           </Field>
-          <Field label="Doctor">
-            <select value={draft.doctor} onChange={(e) => setDraft({ ...draft, doctor: e.target.value })} style={{ ...S.input, width: "170px" }}>
+          <Field label="Doctor" style={{ flex: "1.1 1 120px", minWidth: "115px" }}>
+            <select value={draft.doctor} onChange={(e) => setDraft({ ...draft, doctor: e.target.value })} style={S.input}>
               <option value="">All doctors</option>
               {doctorOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </Field>
-          <Field label="Department">
-            <select value={draft.department} onChange={(e) => setDraft({ ...draft, department: e.target.value })} style={{ ...S.input, width: "170px" }}>
+          <Field label="Department" style={{ flex: "1.1 1 120px", minWidth: "115px" }}>
+            <select value={draft.department} onChange={(e) => setDraft({ ...draft, department: e.target.value })} style={S.input}>
               <option value="">All departments</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </Field>
-          <button type="submit" style={{ ...S.btnPrimary, background: "#10b981", borderColor: "#10b981" }}>Apply</button>
-          <button type="button" style={S.btn} onClick={() => { setDraft(initial); setApplied(initial); }}>Reset</button>
+          <div style={{ display: "flex", gap: "6px", alignItems: "flex-end", flexShrink: 0 }}>
+            <button type="submit" style={{ ...S.btnPrimary, background: "#10b981", borderColor: "#10b981" }}>Apply</button>
+            <button type="button" style={S.btn} onClick={() => { setDraft(initial); setApplied(initial); }}>Reset</button>
+          </div>
         </form>
       </div>
 

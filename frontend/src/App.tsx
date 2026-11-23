@@ -1535,15 +1535,6 @@ function App() {
             )}
             <button
               type="button"
-              className="sidebar-tab"
-              style={{ color: "#94a3b8", fontWeight: 600, background: "transparent", border: "none", width: "100%", textAlign: "left" }}
-              onClick={() => setNotice({ type: "info", message: "Pharmacy team: Chief Pharmacist John, Lead Tech Sarah, Dispensing Assistant Ravi." })}
-            >
-              <span className="sidebar-tab-icon"><SidebarIcon name="team" /></span>
-              <span>Pharmacy Team</span>
-            </button>
-            <button
-              type="button"
               className="sidebar-tab logout-footer-btn"
               onClick={() => setLogoutConfirmOpen(true)}
               style={{ marginTop: "4px", color: "#94a3b8", fontWeight: 600 }}
@@ -1750,7 +1741,7 @@ function App() {
         {page === "bed-management" && hasPermission("patients.write") && <BedManagementPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />}
         {page === "inpatient-patients" && hasPermission("patients.read") && <InpatientPatientsPage key={pageKeys[page] || 0} setNotice={setNotice} onNavigate={navigateToPage} />}
         {page === "doctor-clinicals" && hasPermission("patients.read") && (
-          <DoctorClinicalNotesPage key={pageKeys[page] || 0} setNotice={setNotice} scopedDoctor={scopedDoctor} isNurse={isNurseUser(user)} isAdmin={isAdmin} username={user?.username || ""} />
+          <DoctorClinicalNotesPage key={pageKeys[page] || 0} setNotice={setNotice} scopedDoctor={scopedDoctor} isNurse={isNurseUser(user)} isAdmin={isAdmin} canRecord={hasPermission("patients.write")} username={user?.username || ""} />
         )}
         {page === "nurse-station" && hasPermission("patients.write") && (
           <NurseEmarPage key={pageKeys[page] || 0} setNotice={setNotice} />

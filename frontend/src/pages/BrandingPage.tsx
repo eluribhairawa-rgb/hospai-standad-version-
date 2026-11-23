@@ -205,7 +205,7 @@ export default function BrandingPage({ setNotice }: Props) {
                 e.stopPropagation();
               }
             }}
-            placeholder={"e.g. Sunrise Multispeciality Hospital\nShivaji Nagar, Siddipet"}
+            placeholder="e.g. Sunrise Multispeciality Hospital"
             style={{ resize: "vertical", minHeight: 64, fontFamily: "inherit" }}
           />
 
