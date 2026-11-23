@@ -40,6 +40,8 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
   const [returns, setReturns] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [dateFilter, setDateFilter] = useState<string>("all");
+  // Clicking a KPI card narrows the itemized table below to that category (click again to clear).
+  const [salesCard, setSalesCard] = useState<"all" | "op" | "ipd" | "insurance" | "returned">("all");
 
   const loadData = async () => {
     setLoading(true);
@@ -149,6 +151,37 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
 
     return { totalRevenue, opRevenue, ipdRevenue, cashRevenue, insuranceRevenue, totalReturned };
   }, [filteredSales, filteredReturns, sales]);
+
+  // Inventory cards: Units -> in-stock batches by quantity; Cost / MRP -> in-stock batches by that value.
+  const [invCard, setInvCard] = useState<"all" | "units" | "cost" | "mrp">("all");
+  const stockRows = useMemo(() => {
+    const value = (b: StockBatch, mrp: boolean) => (b.qty_available || 0) * ((mrp ? b.mrp : 0) || b.unit_price || 0);
+    if (invCard === "all") return stock;
+    const inStock = stock.filter((b) => (b.qty_available || 0) > 0);
+    if (invCard === "units") return [...inStock].sort((a, b) => (b.qty_available || 0) - (a.qty_available || 0));
+    return [...inStock].sort((a, b) => value(b, invCard === "mrp") - value(a, invCard === "mrp"));
+  }, [stock, invCard]);
+
+  const visibleSales = useMemo(() => {
+    if (salesCard === "op") return filteredSales.filter((s) => !s.admission_id);
+    if (salesCard === "ipd") return filteredSales.filter((s) => !!s.admission_id);
+    if (salesCard === "insurance") return filteredSales.filter((s) => s.stock_source === "INSURANCE");
+    return filteredSales;
+  }, [filteredSales, salesCard]);
+
+  // Returned items with the sale they came from (medicine, patient, refund value).
+  const returnedRows = useMemo(() => {
+    const byId = new Map(sales.map((x) => [x.id, x]));
+    return filteredReturns.map((r) => {
+      const sale = byId.get(r.original_sale_id);
+      return { ...r, sale, refund: (r.quantity || 0) * (sale?.unit_price || 0) };
+    });
+  }, [filteredReturns, sales]);
+
+  const CARD_TITLES: Record<string, string> = {
+    all: "Itemized Sales Breakdown", op: "OP Counter Sales", ipd: "IPD Admission Charges",
+    insurance: "Insurance / Scheme Sales", returned: "Returned / Refunded Items",
+  };
 
   // Inventory Valuation Metrics
   const inventoryValuation = useMemo(() => {
@@ -378,46 +411,72 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
             </span>
           </div>
 
-          {/* Revenue KPI Cards */}
+          {/* Revenue KPI Cards (click one to see the records behind it) */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Total Pharmacy Revenue</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#0f172a", marginTop: "4px" }}>
-                ₹{salesMetrics.totalRevenue.toFixed(2)}
-              </div>
-            </div>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>OP Counter Sales</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#00828a", marginTop: "4px" }}>
-                ₹{salesMetrics.opRevenue.toFixed(2)}
-              </div>
-            </div>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>IPD Admission Charges</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#0284c7", marginTop: "4px" }}>
-                ₹{salesMetrics.ipdRevenue.toFixed(2)}
-              </div>
-            </div>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Insurance / Scheme Revenue</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#7c3aed", marginTop: "4px" }}>
-                ₹{salesMetrics.insuranceRevenue.toFixed(2)}
-              </div>
-            </div>
-            <div style={{ background: "#fff7ed", padding: "1.25rem", borderRadius: "10px", border: "1px solid #fed7aa" }}>
-              <div style={{ fontSize: "0.8rem", color: "#9a3412", fontWeight: 700, textTransform: "uppercase" }}>Returned / Refunded</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#c2410c", marginTop: "4px" }}>
-                -₹{salesMetrics.totalReturned.toFixed(2)}
-              </div>
-            </div>
+            {([
+              ["all", "Total Pharmacy Revenue", `₹${salesMetrics.totalRevenue.toFixed(2)}`, "#0f172a", "#ffffff", "#e2e8f0", "#64748b"],
+              ["op", "OP Counter Sales", `₹${salesMetrics.opRevenue.toFixed(2)}`, "#00828a", "#ffffff", "#e2e8f0", "#64748b"],
+              ["ipd", "IPD Admission Charges", `₹${salesMetrics.ipdRevenue.toFixed(2)}`, "#0284c7", "#ffffff", "#e2e8f0", "#64748b"],
+              ["insurance", "Insurance / Scheme Revenue", `₹${salesMetrics.insuranceRevenue.toFixed(2)}`, "#7c3aed", "#ffffff", "#e2e8f0", "#64748b"],
+              ["returned", "Returned / Refunded", `-₹${salesMetrics.totalReturned.toFixed(2)}`, "#c2410c", "#fff7ed", "#fed7aa", "#9a3412"],
+            ] as const).map(([key, label, value, color, bg, border, labColor]) => {
+              const active = salesCard === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSalesCard(active && key !== "all" ? "all" : key)}
+                  aria-pressed={active}
+                  title={`Show ${label.toLowerCase()} records`}
+                  style={{ background: bg, padding: "1.25rem", borderRadius: "10px", border: active ? `2px solid ${color}` : `1px solid ${border}`, textAlign: "left", cursor: "pointer", font: "inherit", boxShadow: active ? "0 2px 8px rgba(15,23,42,0.12)" : "none", transition: "box-shadow .15s" }}
+                >
+                  <div style={{ fontSize: "0.8rem", color: labColor, fontWeight: 700, textTransform: "uppercase" }}>{label}</div>
+                  <div style={{ fontSize: "1.6rem", fontWeight: 800, color, marginTop: "4px" }}>{value}</div>
+                </button>
+              );
+            })}
           </div>
 
           {/* Sales Breakdown Table */}
           <div style={{ background: "#ffffff", borderRadius: "10px", padding: "1.25rem", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
             <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>
-              Itemized Sales Breakdown
+              {CARD_TITLES[salesCard]}
+              <span style={{ marginLeft: 8, fontSize: "0.8rem", fontWeight: 600, color: "#64748b" }}>
+                ({salesCard === "returned" ? returnedRows.length : visibleSales.length} record{(salesCard === "returned" ? returnedRows.length : visibleSales.length) === 1 ? "" : "s"})
+              </span>
             </h3>
-            <div style={{ overflowX: "auto" }}>
+            {salesCard === "returned" ? (
+              <div style={{ overflow: "auto", maxHeight: 520 }}>
+                <table className="pharmacy-data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
+                      <th style={{ padding: "0.5rem 0.75rem" }}>Medicine</th>
+                      <th style={{ padding: "0.5rem 0.75rem", textAlign: "center" }}>Returned Qty</th>
+                      <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Refund Amount</th>
+                      <th style={{ padding: "0.5rem 0.75rem" }}>Reason</th>
+                      <th style={{ padding: "0.5rem 0.75rem" }}>Patient UHID</th>
+                      <th style={{ padding: "0.5rem 0.75rem" }}>Date / Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returnedRows.map((r) => (
+                      <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "0.5rem 0.75rem", fontWeight: 600 }}>{r.sale?.medicine_name || `Sale #${r.original_sale_id}`}</td>
+                        <td style={{ padding: "0.5rem 0.75rem", textAlign: "center", fontWeight: 700 }}>{r.quantity}</td>
+                        <td style={{ padding: "0.5rem 0.75rem", textAlign: "right", fontWeight: 700, color: "#c2410c" }}>-₹{r.refund.toFixed(2)}</td>
+                        <td style={{ padding: "0.5rem 0.75rem", color: "#475569" }}>{r.reason || "Return"}</td>
+                        <td style={{ padding: "0.5rem 0.75rem", color: "#64748b" }}>{r.sale?.patient_id || "-"}</td>
+                        <td style={{ padding: "0.5rem 0.75rem", color: "#64748b", fontSize: "0.8rem" }}>{r.created_at ? new Date(r.created_at).toLocaleString("en-IN") : "-"}</td>
+                      </tr>
+                    ))}
+                    {returnedRows.length === 0 && (
+                      <tr><td colSpan={6} style={{ textAlign: "center", padding: "2rem", color: "#94a3b8" }}>No returns in this period.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+            <div style={{ overflow: "auto", maxHeight: 520 }}>
               <table className="pharmacy-data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
@@ -431,7 +490,7 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSales.slice(0, 30).map((s) => (
+                  {visibleSales.map((s) => (
                     <tr key={s.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                       <td style={{ padding: "0.5rem 0.75rem", fontWeight: 600 }}>{s.medicine_name}</td>
                       <td style={{ padding: "0.5rem 0.75rem", textAlign: "center", fontWeight: 700 }}>{s.quantity}</td>
@@ -450,9 +509,13 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
                       </td>
                     </tr>
                   ))}
+                  {visibleSales.length === 0 && (
+                    <tr><td colSpan={7} style={{ textAlign: "center", padding: "2rem", color: "#94a3b8" }}>No records for this selection.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         </>
       )}
@@ -461,31 +524,34 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
       {reportCategory === "inventory" && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Total Physical Units</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#0f172a", marginTop: "4px" }}>
-                {inventoryValuation.totalQty.toLocaleString("en-IN")}
-              </div>
-            </div>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Stock Cost Valuation (Cost Basis)</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#00828a", marginTop: "4px" }}>
-                ₹{inventoryValuation.costVal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-            </div>
-            <div style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-              <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Potential Retail MRP Value</div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#16a34a", marginTop: "4px" }}>
-                ₹{inventoryValuation.mrpVal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-            </div>
+            {([
+              ["units", "Total Physical Units", inventoryValuation.totalQty.toLocaleString("en-IN"), "#0f172a"],
+              ["cost", "Stock Cost Valuation (Cost Basis)", `₹${inventoryValuation.costVal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "#00828a"],
+              ["mrp", "Potential Retail MRP Value", `₹${inventoryValuation.mrpVal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "#16a34a"],
+            ] as const).map(([key, label, value, color]) => {
+              const active = invCard === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setInvCard(active ? "all" : key)}
+                  aria-pressed={active}
+                  title="Show the stock behind this figure"
+                  style={{ background: "#ffffff", padding: "1.25rem", borderRadius: "10px", border: active ? `2px solid ${color}` : "1px solid #e2e8f0", textAlign: "left", cursor: "pointer", font: "inherit", boxShadow: active ? "0 2px 8px rgba(15,23,42,0.12)" : "none" }}
+                >
+                  <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>{label}</div>
+                  <div style={{ fontSize: "1.6rem", fontWeight: 800, color, marginTop: "4px" }}>{value}</div>
+                </button>
+              );
+            })}
           </div>
 
           <div style={{ background: "#ffffff", borderRadius: "10px", padding: "1.25rem", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
             <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.05rem", fontWeight: 700, color: "#0f172a" }}>
-              Valuation by Batch
+              {{ all: "Valuation by Batch", units: "In-stock Batches by Quantity", cost: "In-stock Batches by Cost Value", mrp: "In-stock Batches by MRP Value" }[invCard]}
+              <span style={{ marginLeft: 8, fontSize: "0.8rem", fontWeight: 600, color: "#64748b" }}>({stockRows.length} batch{stockRows.length === 1 ? "" : "es"})</span>
             </h3>
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflow: "auto", maxHeight: 520 }}>
               <table className="pharmacy-data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid #e2e8f0", textAlign: "left", color: "#64748b" }}>
@@ -498,16 +564,16 @@ export default function PharmacyReports({ setNotice, onNavigate }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {stock.slice(0, 30).map((b) => (
+                  {stockRows.map((b) => (
                     <tr key={b.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                       <td style={{ padding: "0.5rem", fontWeight: 600 }}>{b.medicine_name}</td>
-                      <td style={{ padding: "0.5rem", textAlign: "center", fontWeight: 700 }}>{b.qty_available}</td>
+                      <td style={{ padding: "0.5rem", textAlign: "center", fontWeight: 700, background: invCard === "units" ? "#f1f5f9" : undefined }}>{b.qty_available}</td>
                       <td style={{ padding: "0.5rem", textAlign: "right" }}>₹{b.unit_price}</td>
-                      <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700, color: "#00828a" }}>
+                      <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700, color: "#00828a", background: invCard === "cost" ? "#f0fdfa" : undefined }}>
                         ₹{(b.qty_available * (b.unit_price || 0)).toFixed(2)}
                       </td>
                       <td style={{ padding: "0.5rem", textAlign: "right" }}>₹{b.mrp || b.unit_price}</td>
-                      <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700, color: "#16a34a" }}>
+                      <td style={{ padding: "0.5rem", textAlign: "right", fontWeight: 700, color: "#16a34a", background: invCard === "mrp" ? "#f0fdf4" : undefined }}>
                         ₹{(b.qty_available * (b.mrp || b.unit_price || 0)).toFixed(2)}
                       </td>
                     </tr>
