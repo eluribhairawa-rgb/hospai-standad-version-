@@ -327,6 +327,8 @@ export default function ReportsDayClosePage({ setNotice, onNavigate }: Props) {
       const matchSearch =
         !receiptSearch ||
         r.receipt_no.toLowerCase().includes(receiptSearch.toLowerCase()) ||
+        (r.patient_name && r.patient_name.toLowerCase().includes(receiptSearch.toLowerCase())) ||
+        (r.patient_id && r.patient_id.toLowerCase().includes(receiptSearch.toLowerCase())) ||
         (r.payment_mode && r.payment_mode.toLowerCase().includes(receiptSearch.toLowerCase()));
       const matchMode =
         receiptModeFilter === "ALL" ||
@@ -768,6 +770,7 @@ export default function ReportsDayClosePage({ setNotice, onNavigate }: Props) {
                       <thead>
                         <tr>
                           <th>Receipt no</th>
+                          <th>Patient</th>
                           <th>Time</th>
                           <th>Payment method</th>
                           <th style={{ textAlign: "right" }}>Amount</th>
@@ -777,7 +780,7 @@ export default function ReportsDayClosePage({ setNotice, onNavigate }: Props) {
                       <tbody>
                         {filteredReceipts.length === 0 ? (
                           <tr>
-                            <td colSpan={5} style={{ textAlign: "center", padding: "2rem", color: "#94a3b8" }}>
+                            <td colSpan={6} style={{ textAlign: "center", padding: "2rem", color: "#94a3b8" }}>
                               No receipts matching filter.
                             </td>
                           </tr>
@@ -789,6 +792,10 @@ export default function ReportsDayClosePage({ setNotice, onNavigate }: Props) {
                               <tr key={idx}>
                                 <td style={{ fontFamily: "monospace", fontWeight: 700, color: "#0f172a" }}>
                                   {r.receipt_no}
+                                </td>
+                                <td>
+                                  <div style={{ fontWeight: 600, color: "#0f172a" }}>{r.patient_name || "—"}</div>
+                                  <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{r.patient_id || ""}</div>
                                 </td>
                                 <td style={{ color: "#64748b", fontSize: "0.85rem" }}>{r.time}</td>
                                 <td>

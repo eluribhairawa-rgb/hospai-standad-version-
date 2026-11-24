@@ -273,27 +273,46 @@ export default function BrandingPage({ setNotice }: Props) {
           <input ref={logoInput} type="file" accept={ACCEPT} hidden onChange={(e) => { void upload("logo", e.target.files?.[0]); e.target.value = ""; }} />
           {cfg.logo && <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => removeAsset("logo")} style={{ marginTop: 8 }}>Remove logo</Button>}
 
-          <div style={{ marginTop: 14 }}>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Position</div>
-            <div role="group" aria-label="Logo alignment" style={{ display: "flex", gap: 6 }}>
-              {(["left", "center", "right"] as Alignment[]).map((a) => (
-                <Button key={a} variant={alignment === a ? "primary" : "secondary"} size="sm" aria-pressed={alignment === a} onClick={() => setAlignment(a)}>
-                  Top-{a[0].toUpperCase() + a.slice(1)}
-                </Button>
-              ))}
+          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Position</div>
+              <div role="group" aria-label="Logo alignment" style={{ display: "flex", gap: 6 }}>
+                {(["left", "center", "right"] as Alignment[]).map((a) => (
+                  <Button key={a} variant={alignment === a ? "primary" : "secondary"} size="sm" aria-pressed={alignment === a} onClick={() => setAlignment(a)}>
+                    Top-{a[0].toUpperCase() + a.slice(1)}
+                  </Button>
+                ))}
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
-              <label style={{ flex: 1, fontSize: 12 }}>X offset (mm)
-                <Input type="number" min={-30} max={30} step={0.5} value={offsetX} onChange={(e) => setOffsetX(e.target.value)} />
-              </label>
-              <label style={{ flex: 1, fontSize: 12 }}>Y offset (mm)
-                <Input type="number" min={-30} max={30} step={0.5} value={offsetY} onChange={(e) => setOffsetY(e.target.value)} />
+
+            <div>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Position fine-tuning</div>
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <label htmlFor="branding-offset-x" className="muted" style={{ fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
+                    X offset (mm)
+                  </label>
+                  <div style={{ width: 90 }}>
+                    <Input id="branding-offset-x" type="number" min={-30} max={30} step={0.5} value={offsetX} onChange={(e) => setOffsetX(e.target.value)} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <label htmlFor="branding-offset-y" className="muted" style={{ fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>
+                    Y offset (mm)
+                  </label>
+                  <div style={{ width: 90 }}>
+                    <Input id="branding-offset-y" type="number" min={-30} max={30} step={0.5} value={offsetY} onChange={(e) => setOffsetY(e.target.value)} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 12.5, color: "#334155", cursor: "pointer", userSelect: "none" }}>
+                <input type="checkbox" checked={autoFit} onChange={(e) => setAutoFit(e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                <span>Auto-fit scaling (resize into the header box, aspect ratio preserved)</span>
               </label>
             </div>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, fontSize: 13 }}>
-              <input type="checkbox" checked={autoFit} onChange={(e) => setAutoFit(e.target.checked)} />
-              Auto-fit scaling (resize into the header box, aspect ratio preserved)
-            </label>
           </div>
         </section>
 
@@ -312,7 +331,7 @@ export default function BrandingPage({ setNotice }: Props) {
           </div>
           <input ref={footerInput} type="file" accept={ACCEPT} hidden onChange={(e) => { void upload("footer", e.target.files?.[0]); e.target.value = ""; }} />
           {cfg.footer && <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => removeAsset("footer")} style={{ marginTop: 8 }}>Remove footer image</Button>}
-          <label htmlFor="branding-footer-text" className="muted" style={{ fontSize: 12, display: "block", marginTop: 12 }}>Footer / disclaimer text</label>
+          <label htmlFor="branding-footer-text" className="muted" style={{ fontSize: 12, fontWeight: 600, display: "block", marginTop: 14, marginBottom: 6 }}>Footer / disclaimer text</label>
           <Textarea id="branding-footer-text" rows={3} maxLength={500} value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="Leave blank for “Thank you for choosing …”" />
         </section>
 

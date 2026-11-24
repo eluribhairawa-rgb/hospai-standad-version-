@@ -2012,11 +2012,10 @@ def get_billing_worklist(db: Session, tab: str = "pending_payments", department:
         cursor.execute(
             """
             SELECT fr.id, fr.receipt_no, fr.receipt_type, fr.total_amount, fr.created_at, fr.patient_id,
-                   TRIM(p.name || ' ' || COALESCE(p.last_name, '')) as patient_name,
-                   rpl.payment_mode
+                   TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) as patient_name,
+                   (SELECT rpl.payment_mode FROM receipt_payment_lines rpl WHERE rpl.receipt_id = fr.id LIMIT 1) as payment_mode
             FROM financial_receipts fr
             LEFT JOIN patients p ON p.patient_id = fr.patient_id
-            LEFT JOIN receipt_payment_lines rpl ON rpl.receipt_id = fr.id
             ORDER BY fr.created_at DESC LIMIT 25
             """
         )
@@ -2274,11 +2273,13 @@ def get_reports_day_close_data(db: Session, target_date: str = None, cashier: st
         # Receipt Register
         cursor.execute(
             """
-            SELECT fr.id, fr.receipt_no, fr.created_at, fr.total_amount, rpl.payment_mode
+            SELECT fr.id, fr.receipt_no, fr.created_at, fr.total_amount, fr.patient_id,
+                   TRIM(COALESCE(p.name, '') || ' ' || COALESCE(p.last_name, '')) as patient_name,
+                   (SELECT rpl.payment_mode FROM receipt_payment_lines rpl WHERE rpl.receipt_id = fr.id LIMIT 1) as payment_mode
             FROM financial_receipts fr
-            LEFT JOIN receipt_payment_lines rpl ON rpl.receipt_id = fr.id
+            LEFT JOIN patients p ON p.patient_id = fr.patient_id
             WHERE DATE(timezone('Asia/Kolkata', CAST(fr.created_at AS timestamptz))) = DATE(?)
-            ORDER BY fr.created_at DESC LIMIT 30
+            ORDER BY fr.created_at DESC LIMIT 50
             """,
             (target_date,)
         )
@@ -2287,6 +2288,8 @@ def get_reports_day_close_data(db: Session, target_date: str = None, cashier: st
             time_str = datetime.fromisoformat(str(r["created_at"]).replace("Z", "")).strftime("%I:%M %p") if r["created_at"] else "-"
             receipt_register.append({
                 "receipt_no": r["receipt_no"],
+                "patient_id": r["patient_id"],
+                "patient_name": r["patient_name"] or r["patient_id"],
                 "time": time_str,
                 "payment_mode": (r["payment_mode"] or "Cash").upper(),
                 "amount": float(to_decimal(r["total_amount"])),

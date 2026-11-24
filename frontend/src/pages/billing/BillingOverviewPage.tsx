@@ -694,6 +694,7 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                     <thead>
                       <tr>
                         <th>Receipt no.</th>
+                        <th>Patient</th>
                         <th>Time</th>
                         <th>Mode</th>
                         <th>Amount</th>
@@ -704,6 +705,10 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                       {worklist.recent_receipts.slice(0, 10).map((rcp) => (
                         <tr key={rcp.id}>
                           <td style={{ fontWeight: 600 }}>{rcp.receipt_no}</td>
+                          <td>
+                            <div style={{ fontWeight: 600, color: "#0f172a" }}>{rcp.patient_name || "—"}</div>
+                            <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{rcp.patient_id || ""}</div>
+                          </td>
                           <td style={{ color: "#64748b" }}>{rcp.time}</td>
                           <td>{rcp.mode}</td>
                           <td style={{ fontWeight: 700 }}>₹{fmt(rcp.amount)}</td>
@@ -762,6 +767,7 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                   <thead>
                     <tr>
                       <th>Receipt no.</th>
+                      <th>Patient</th>
                       <th>Time</th>
                       <th>Mode</th>
                       <th>Amount</th>
@@ -772,6 +778,10 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                     {worklist.recent_receipts.slice(0, 3).map((rcp) => (
                       <tr key={rcp.id}>
                         <td style={{ fontWeight: 600 }}>{rcp.receipt_no}</td>
+                        <td>
+                          <div style={{ fontWeight: 600, color: "#0f172a" }}>{rcp.patient_name || "—"}</div>
+                          <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{rcp.patient_id || ""}</div>
+                        </td>
                         <td style={{ color: "#64748b" }}>{rcp.time}</td>
                         <td>{rcp.mode}</td>
                         <td style={{ fontWeight: 700 }}>₹{fmt(rcp.amount)}</td>
@@ -855,106 +865,6 @@ export default function BillingOverviewPage({ setNotice, onNavigate }: Props) {
                     </button>
                   </div>
                 ))
-              )}
-            </div>
-          </div>
-
-          {/* Card: Cashier Session */}
-          <div className="billing-card">
-            <div className="billing-card-header">
-              <h2 className="billing-card-title">Cashier session</h2>
-              {sessionLoading ? (
-                <span className="billing-badge-closed">Checking...</span>
-              ) : session?.status === "open" ? (
-                <span className="billing-badge-open">
-                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
-                  Open
-                </span>
-              ) : (
-                <span className="billing-badge-closed">Closed</span>
-              )}
-            </div>
-
-            <div className="billing-card-body">
-              {sessionLoading ? (
-                <div className="billing-skeleton" style={{ height: "80px" }} />
-              ) : sessionError ? (
-                <div>
-                  <p style={{ color: "#dc2626", fontSize: "0.85rem", margin: "0 0 6px" }}>{sessionError}</p>
-                  <button type="button" className="billing-retry-btn" onClick={loadSession}>
-                    Retry
-                  </button>
-                </div>
-              ) : session?.status === "open" ? (
-                <>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
-                    <span style={{ color: "#64748b" }}>Opened at</span>
-                    <span style={{ fontWeight: 600, color: "#0f172a" }}>
-                      {session.opened_at ? new Date(session.opened_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "09:00 AM"}
-                    </span>
-                  </div>
-
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", fontSize: "0.875rem" }}>
-                    <span style={{ color: "#64748b" }}>Cashier</span>
-                    <span style={{ fontWeight: 600, color: "#0f172a" }}>
-                      {session.cashier_name || session.cashier_username || "Ramesh Kumar"}
-                    </span>
-                  </div>
-
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px", fontSize: "0.875rem" }}>
-                    <span style={{ color: "#64748b" }}>Till / Counter</span>
-                    <span style={{ fontWeight: 600, color: "#0f172a" }}>
-                      {session.counter_name || "Main Billing Counter"}
-                    </span>
-                  </div>
-
-                  {/* Actions Row */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                    <button
-                      type="button"
-                      className="billing-btn-outline"
-                      onClick={() => onNavigate("billing-reports-day-close")}
-                      style={{ fontSize: "0.8125rem", padding: "7px 10px" }}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="20" x2="18" y2="10" />
-                        <line x1="12" y1="20" x2="12" y2="4" />
-                        <line x1="6" y1="20" x2="6" y2="14" />
-                      </svg>
-                      View collections
-                    </button>
-
-                    <button
-                      type="button"
-                      className="billing-btn-outline"
-                      onClick={() => {
-                        setCountedCash(String(session.expected_cash || ""));
-                        setCloseSessionModal(true);
-                      }}
-                      style={{ fontSize: "0.8125rem", padding: "7px 10px" }}
-                    >
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-                        <line x1="12" y1="2" x2="12" y2="12" />
-                      </svg>
-                      Close session
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
-                  <p style={{ color: "#64748b", fontSize: "0.875rem", margin: "0 0 12px" }}>
-                    No active cashier shift for your terminal.
-                  </p>
-                  <button
-                    type="button"
-                    className="billing-btn-teal"
-                    onClick={() => setOpenSessionModal(true)}
-                    style={{ width: "100%" }}
-                  >
-                    + Open cashier shift
-                  </button>
-                </div>
               )}
             </div>
           </div>
