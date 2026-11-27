@@ -480,7 +480,6 @@ function formatMinutes(ms: number): string {
 }
 
 function App() {
-  const isAdminRoutePath = typeof window !== "undefined" && window.location.pathname === "/admin";
   const isPlatformAdminRoute = typeof window !== "undefined" && window.location.pathname === "/platform-admin";
   const [user, setUser] = useState<User | null>(null);
   const userRef = useRef<User | null>(null);
@@ -527,7 +526,7 @@ function App() {
     if (segment && VALID_PAGE_IDS.has(segment)) return segment;
     return "dashboard";
   };
-  const [page, setPage] = useState(isAdminRoutePath ? "admin" : getPageFromUrl());
+  const [page, setPage] = useState(getPageFromUrl());
   const [pageKeys, setPageKeys] = useState<Record<string, number>>({});
   const [patientsPageKey, setPatientsPageKey] = useState(0);
 
@@ -700,11 +699,11 @@ function App() {
   };
 
   // Without a valid session the app must show /login, not whatever page was
-  // last requested — and once authenticated it must leave /login. "/admin"
-  // and "/platform-admin" have their own separate auth flows, so they're
-  // exempt from this main-session gate.
+  // last requested — and once authenticated it must leave /login.
+  // "/platform-admin" has its own separate auth flow, so it is exempt from
+  // this main-session gate.
   const goToLogin = () => {
-    if (typeof window === "undefined" || isAdminRoutePath || isPlatformAdminRoute) return;
+    if (typeof window === "undefined" || isPlatformAdminRoute) return;
     if (window.location.pathname !== "/login") {
       window.history.replaceState({}, "", "/login");
     }
@@ -724,26 +723,31 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handlePopState = () => setPage(getPageFromUrl());
+    const handlePopState = () => {
+      if (!userRef.current) {
+        goToLogin();
+        return;
+      }
+      setPage(getPageFromUrl());
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   // Each page lives at its own clean path ("/dashboard", "/pharmacy-purchases-pr", ...),
-  // with "/login", "/admin" and "/platform-admin" as separate dedicated
-  // views. The bare root "/" is not a real page on its own -- normalize it
-  // (and any other unrecognized path: an old bookmark, a typo, a stale
-  // shared link) to "/dashboard" instead of leaving a dead or ambiguous URL.
+  // with "/login" and "/platform-admin" as separate dedicated views. Once
+  // authenticated, normalize the bare root "/" (and any unrecognized path) to
+  // "/dashboard" instead of leaving a dead or ambiguous URL.
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || !authChecked || !user) return;
     const { pathname } = window.location;
-    if (pathname === "/login" || pathname === "/admin" || pathname === "/platform-admin") return;
+    if (pathname === "/login" || pathname === "/platform-admin") return;
     const segment = decodeURIComponent(pathname.replace(/^\/+|\/+$/g, ""));
     const normalized = normalizeRouteAlias(segment);
     if (!VALID_PAGE_IDS.has(segment) && !VALID_PAGE_IDS.has(normalized)) {
       window.history.replaceState({}, "", "/dashboard");
     }
-  }, []);
+  }, [authChecked, user]);
 
   // Global document branding feeds every print/PDF path; falls back to HospAI defaults if none/unavailable.
   const brandingUserKey = user ? `${user.username || ""}` : "";
@@ -760,9 +764,7 @@ function App() {
         if (data.user) {
           setUser(data.user);
           leaveLoginPath();
-          if (!isAdminRoutePath) {
-            setPage(getPageFromUrl());
-          }
+          setPage(getPageFromUrl());
         } else {
           goToLogin();
         }
@@ -959,7 +961,7 @@ function App() {
       setNotice({ type: "warning", message: activeNav.deniedHint || "You do not have permission to access this module." });
       return;
     }
-    if (!isAdminRoutePath && page === "admin" && !hasPermission("admin.users.create")) {
+    if (page === "admin" && !hasPermission("admin.users.create")) {
       const fallbackPage = getDefaultPage(user);
       setPage(fallbackPage);
       if (typeof window !== "undefined") {
@@ -1309,25 +1311,6 @@ function App() {
     }
     setPatientDetailRefreshToken((prev) => prev + 1);
   };
-
-  if (isAdminRoutePath) {
-    return (
-      <div className="app-shell app-shell-single">
-        <main className="admin-route-main">
-          <Container size="full" className="admin-route-container">
-            <header className="topbar admin-route-topbar">
-              <div>
-                <h2>Admin</h2>
-                <p className="muted">Separate admin route authentication.</p>
-              </div>
-            </header>
-            <AdminPage setNotice={setNotice} />
-          </Container>
-        </main>
-        {notice && <Toast notice={notice} onClose={() => setNotice(null)} />}
-      </div>
-    );
-  }
 
   if (!authChecked) {
     if (isPlatformAdminRoute) {
